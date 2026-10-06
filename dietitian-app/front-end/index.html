@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f5ef">
+    <title>Nutrition Practice | Dietitian Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css?v=10">
+    <script src="/static/app.js?v=19" defer></script>
+  </head>
+  <body>
+    <main id="authScreen" class="auth-screen">
+      <section class="auth-story" aria-label="Nutrition practice">
+        <div class="story-image" role="img" aria-label="Fresh seasonal ingredients arranged for a nourishing meal"></div>
+        <div class="story-shade"></div>
+        <div class="story-copy">
+          <span class="eyebrow">GOOD CARE, MADE PERSONAL</span>
+          <h1>Make room<br>for better habits.</h1>
+          <p>A calmer place to care for patients, build thoughtful plans, and keep progress in view.</p>
+        </div>
+        <div class="story-foot"><span>01</span><span class="story-rule"></span><span>Care that keeps up with real life</span></div>
+      </section>
+
+      <section class="auth-main" aria-label="Account access">
+        <div class="auth-wrap">
+          <div class="auth-intro">
+            <span class="eyebrow eyebrow-green">YOUR PRACTICE, IN GOOD HANDS</span>
+            <h2 id="authHeading">Welcome back.</h2>
+            <p id="authSubheading">Sign in to continue to your nutrition workspace.</p>
+          </div>
+
+          <div class="auth-tabs" role="tablist" aria-label="Account access">
+            <button class="auth-tab is-active" id="loginTab" type="button" role="tab" aria-selected="true">Sign in</button>
+            <button class="auth-tab" id="signupTab" type="button" role="tab" aria-selected="false">Create account</button>
+            <button class="auth-tab" id="adminSetupTab" type="button" role="tab" aria-selected="false" hidden>Admin setup</button>
+          </div>
+
+          <div id="authMessage" class="form-message" role="status" aria-live="polite" hidden></div>
+
+          <form id="loginForm" class="auth-form">
+            <label class="field-label" for="loginEmail">Email address</label>
+            <input id="loginEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+            <div class="field-heading"><label class="field-label" for="loginPassword">Password</label></div>
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required>
+            <button class="button button-primary auth-submit" type="submit"><span>Sign in</span><span class="button-arrow" aria-hidden="true">&#8594;</span></button>
+          </form>
+
+          <form id="signupForm" class="auth-form" hidden>
+            <fieldset class="role-picker">
+              <legend class="field-label">I am joining as a</legend>
+              <label class="role-option is-selected"><input type="radio" name="role" value="dietitian" checked><span>Dietitian</span></label>
+              <label class="role-option"><input type="radio" name="role" value="client"><span>Patient</span></label>
+            </fieldset>
+            <label class="field-label" for="signupFirstName">First name</label>
+            <input id="signupFirstName" name="first_name" autocomplete="given-name" placeholder="First name" required>
+            <label class="field-label" for="signupLastName">Last name</label>
+            <input id="signupLastName" name="last_name" autocomplete="family-name" placeholder="Last name" required>
+            <label class="field-label" for="signupEmail">Email address</label>
+            <input id="signupEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+            <div id="dietitianFields">
+              <label class="field-label" for="licenseNumber">License number</label>
+              <input id="licenseNumber" name="license_number" placeholder="e.g. RD-2048" required>
+            </div>
+            <div id="clientFields" hidden>
+              <label class="field-label" for="dateOfBirth">Date of birth</label>
+              <input id="dateOfBirth" name="date_of_birth" type="date" autocomplete="bday">
+            </div>
+            <label class="field-label" for="signupPassword">Create password</label>
+            <input id="signupPassword" name="password" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" required>
+            <label class="field-label" for="signupConfirmPassword">Confirm password</label>
+            <input id="signupConfirmPassword" name="confirm_password" type="password" autocomplete="new-password" placeholder="Re-enter your password" required>
+            <button class="button button-primary auth-submit" type="submit"><span>Create account</span><span class="button-arrow" aria-hidden="true">&#8594;</span></button>
+          </form>
+
+          <form id="adminSetupForm" class="auth-form" hidden>
+            <p class="admin-setup-notice">Create the first administrator for this installation. Setup is available only from this computer.</p>
+            <label class="field-label" for="adminSetupFirstName">First name</label>
+            <input id="adminSetupFirstName" name="first_name" autocomplete="given-name" placeholder="First name" required>
+            <label class="field-label" for="adminSetupLastName">Last name</label>
+            <input id="adminSetupLastName" name="last_name" autocomplete="family-name" placeholder="Last name" required>
+            <label class="field-label" for="adminSetupEmail">Email address</label>
+            <input id="adminSetupEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+            <label class="field-label" for="adminSetupPassword">Create password</label>
+            <input id="adminSetupPassword" name="password" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" required>
+            <label class="field-label" for="adminSetupConfirmPassword">Confirm password</label>
+            <input id="adminSetupConfirmPassword" name="confirm_password" type="password" autocomplete="new-password" placeholder="Re-enter your password" required>
+            <button class="button button-primary auth-submit" type="submit"><span>Create administrator</span><span class="button-arrow" aria-hidden="true">&#8594;</span></button>
+          </form>
+
+          <p class="auth-note"><span class="note-dot"></span> A thoughtful workspace for everyday nutrition care.</p>
+        </div>
+        <footer class="auth-footer"><span>&copy; 2026 Nutrition Practice</span><a href="/docs">API documentation</a></footer>
+      </section>
+    </main>
+
+    <main id="workspace" class="workspace" hidden>
+      <aside class="workspace-sidebar">
+        <div class="sidebar-label">WORKSPACE</div>
+        <nav class="side-nav" aria-label="Main navigation">
+          <button class="nav-item is-current" data-view="overview" type="button"><span class="nav-glyph">&#9633;</span>Dashboard</button>
+          <button class="nav-item" data-view="admin-dietitians" data-admin-only type="button"><span class="nav-glyph">&#9787;</span>Dietitians</button>
+          <button class="nav-item" data-view="admin-branches" data-admin-only type="button"><span class="nav-glyph">&#9636;</span>Branches</button>
+          <button class="nav-item" data-view="admin-businesses" data-admin-only type="button"><span class="nav-glyph">&#9633;</span>Businesses</button>
+          <button class="nav-item" data-view="admin-clients" data-admin-only type="button"><span class="nav-glyph">&#9787;</span>Patients</button>
+          <button class="nav-item" data-view="admin-approvals" data-admin-only type="button"><span class="nav-glyph">&#9678;</span>Approvals<span id="adminApprovalCount" class="nav-count">0</span></button>
+          <button class="nav-item" data-view="admin-reports" data-admin-only type="button"><span class="nav-glyph">&#9636;</span>Reports</button>
+          <button class="nav-item" data-view="admin-audit-logs" data-admin-only type="button"><span class="nav-glyph">&#9776;</span>Audit Logs</button>
+          <button class="nav-item" data-view="admin-settings" data-admin-only type="button"><span class="nav-glyph">&#9881;</span>Settings</button>
+          <button class="nav-item" data-view="my-profile" data-standard-only type="button"><span class="nav-glyph">&#9787;</span>My Profile</button>
+          <div class="nav-section-label" data-client-only>HEALTH INFORMATION</div>
+          <button class="nav-item nav-subitem" data-view="health-conditions" data-client-only data-standard-only type="button">Medical Conditions</button>
+          <button class="nav-item nav-subitem" data-view="health-allergies" data-client-only data-standard-only type="button">Allergies</button>
+          <button class="nav-item nav-subitem" data-view="health-pregnancy" data-client-only data-standard-only type="button">Pregnancy</button>
+          <button class="nav-item nav-subitem" data-view="health-lactation" data-client-only data-standard-only type="button">Lactation</button>
+          <button class="nav-item" data-view="client-progress" data-client-only data-standard-only type="button"><span class="nav-glyph">&#9636;</span>My Progress</button>
+          <button class="nav-item" data-view="client-goals" data-client-only data-standard-only type="button"><span class="nav-glyph">&#9673;</span>My Goals</button>
+          <button class="nav-item" data-view="client-meal-plan" data-client-only data-standard-only type="button"><span class="nav-glyph">&#9776;</span>My Meal Plan</button>
+          <button class="nav-item" data-view="client-appointments" data-client-only data-standard-only type="button"><span class="nav-glyph">&#9635;</span>Appointments</button>
+          <button class="nav-item" data-view="client-recommendations" data-client-only data-standard-only type="button"><span class="nav-glyph">&#10022;</span>AI Recommendations</button>
+          <button class="nav-item" data-view="ai-workspace" data-standard-only type="button"><span class="nav-glyph">&#10022;</span>AI Coach</button>
+          <button class="nav-item" data-view="appointment-requests" data-dietitian-only data-standard-only type="button"><span class="nav-glyph">&#9635;</span>Appointment Requests</button>
+          <button class="nav-item" data-view="reviews" data-dietitian-only data-standard-only type="button"><span class="nav-glyph">&#9678;</span>Review queue<span id="reviewCount" class="nav-count">0</span></button>
+          <button class="nav-item" data-view="verification-documents" data-dietitian-only data-standard-only type="button"><span class="nav-glyph">&#9636;</span>Verification documents</button>
+          <button class="nav-item" data-view="clients" data-dietitian-only data-standard-only type="button"><span class="nav-glyph">&#9787;</span>My Patients</button>
+          <button class="nav-item" data-view="foods" data-dietitian-only data-standard-only type="button"><span class="nav-glyph">&#10047;</span>Food library</button>
+          <button class="nav-item" data-view="recipes" data-dietitian-only data-standard-only type="button"><span class="nav-glyph">&#10047;</span>Recipes</button>
+          <button class="nav-item" data-view="meal-plans" data-dietitian-only data-standard-only type="button"><span class="nav-glyph">&#9776;</span>Meal plans</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="connection-status"><span class="status-dot"></span><span>Workspace connected</span></div>
+          <button id="signOutButton" class="signout-button" type="button"><span class="nav-glyph">&#8592;</span>Sign out</button>
+          <a class="sidebar-docs" href="/docs">API documentation <span aria-hidden="true">&#8599;</span></a>
+        </div>
+      </aside>
+      <section class="workspace-main">
+        <header class="workspace-header">
+          <div class="header-context"><span class="eyebrow eyebrow-green">NUTRITION PRACTICE</span><span id="headerDate" class="header-date"></span></div>
+          <div class="profile-chip"><span id="profileInitials" class="profile-avatar">FN</span><span id="profileName">Your account</span><span class="profile-chevron">&#8964;</span></div>
+          <button id="mobileSignOutButton" class="mobile-signout" type="button">Sign out</button>
+        </header>
+        <div id="workspaceContent" class="workspace-content" aria-live="polite"></div>
+      </section>
+    </main>
+  </body>
+</html>

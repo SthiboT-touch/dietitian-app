@@ -1,0 +1,62 @@
+services:
+  # Database Service using existing Dockerfile
+  db:
+    build:
+      context: .
+      dockerfile: back-end/Dockerfile.db
+    container_name: dietitian-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: dietitian_db
+      POSTGRES_USER: black
+      POSTGRES_PASSWORD: "12345"
+    networks:
+      - dietitian-net
+    restart: always
+
+  # FastAPI Service using Dockerfile.api
+  api:
+    build:
+      context: .
+      dockerfile: back-end/Dockerfile.api
+    container_name: dietitian-api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://black:12345@db:5432/dietitian_db}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+    depends_on:
+      db:
+        condition: service_started
+      ollama:
+        condition: service_healthy
+    networks:
+      - dietitian-net
+    restart: always
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: dietitian-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - dietitian-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+# Custom user-defined network allowing containers to resolve each other by name
+networks:
+  dietitian-net:
+    driver: bridge
+
+volumes:
+  ollama_data:
