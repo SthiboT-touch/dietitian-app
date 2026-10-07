@@ -5,7 +5,7 @@ from typing import Optional
 from datetime import datetime
 import database
 import config
-from state import appointments_db, goals_db
+from state import appointments_db, goals_db, users_db
 from schemas import AppointmentCreate, AppointmentDecision, GoalCreate
 
 
@@ -103,6 +103,11 @@ def decide_appointment(appointment_id: str, data: AppointmentDecision):
                 (new_status, appointment_id),
             )
             updated = cursor.fetchone()
+            if new_status == "CONFIRMED" and updated["dietitian_id"]:
+                cursor.execute(
+                    "UPDATE client SET dietitian_id = %s WHERE client_id = %s",
+                    (updated["dietitian_id"], updated["client_id"]),
+                )
         return {"message": "Appointment status updated", "appointment": {
             **dict(updated), "appointment_date": updated["appointment_date"].isoformat(),
         }}
@@ -119,6 +124,10 @@ def decide_appointment(appointment_id: str, data: AppointmentDecision):
     elif current_status != "PENDING":
         raise HTTPException(status_code=409, detail="Only pending appointment requests can be reviewed")
     appointment["status"] = new_status
+    if new_status == "CONFIRMED":
+        client = users_db.get(appointment["client_id"])
+        if client:
+            client["dietitian_id"] = appointment["dietitian_id"]
     return {"message": "Appointment status updated", "appointment": appointment}
 
 @router.post("/api/v1/goals", tags=["4. Appointments & Goals"])

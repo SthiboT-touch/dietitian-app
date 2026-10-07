@@ -47,6 +47,8 @@ The generated-plan endpoint is `POST /api/v1/ai/generate-plan` with a JSON body 
 
 The API sends the goal and any recorded allergies and medical conditions to Ollama. Recommendations remain `PENDING_REVIEW` until approved by a dietitian. These suggestions are not a substitute for clinical judgment.
 
+The chat and plan-generation services are built with LangChain prompt/model/output-parser chains using `ChatOllama`. The routes and response shapes stay the same; `langchain-core` and `langchain-ollama` are installed from `back-end/requirements.txt`.
+
 Appointment requests are created as `PENDING`; dietitian decisions change them to `CONFIRMED` or `REJECTED`, and patients can cancel future pending or confirmed appointments. Patients may create an account before joining a dietitian. For an existing PostgreSQL database, apply the status migration once with `python back-end/migrations/apply_001_appointment_approval_states.py`.
 
 For running the API outside Compose, set `OLLAMA_BASE_URL` (default `http://localhost:11434`) and `OLLAMA_MODEL` (default `llama3.2`) to match an Ollama instance with the selected model downloaded.

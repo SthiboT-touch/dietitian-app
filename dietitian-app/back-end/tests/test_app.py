@@ -1,11 +1,13 @@
 import json
 from datetime import datetime, timedelta
 from io import BytesIO
-from urllib.error import URLError
 from unittest.mock import patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
+from langchain_core.runnables import RunnableLambda
 
 import app
 import config
@@ -188,6 +190,48 @@ def test_patient_without_assigned_dietitian_can_book_with_directory_dietitian():
     assert appointment.json()["appointment"]["status"] == "PENDING"
 
 
+def test_approved_appointment_links_patient_to_dietitian_for_dashboard():
+    dietitian = client.post(
+        "/api/v1/auth/register/dietitian",
+        json={
+            "first_name": "Avery",
+            "last_name": "Chen",
+            "email": "avery@example.com",
+            "license_number": "RD-2048",
+            "password": "nutrition-safe-pass",
+        },
+    ).json()["user"]
+    patient = client.post(
+        "/api/v1/auth/register/client",
+        json={
+            "first_name": "Jordan",
+            "last_name": "Lee",
+            "email": "jordan@example.com",
+            "date_of_birth": "1990-05-14",
+            "password": "nutrition-safe-pass",
+        },
+    ).json()["user"]
+    appointment = client.post(
+        "/api/v1/appointments",
+        json={
+            "client_id": patient["id"],
+            "dietitian_id": dietitian["id"],
+            "appointment_date": (datetime.now() + timedelta(days=5)).replace(microsecond=0).isoformat(),
+        },
+    ).json()["appointment"]
+
+    response = client.patch(
+        f"/api/v1/appointments/{appointment['appointment_id']}",
+        json={"action": "APPROVED"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["appointment"]["status"] == "CONFIRMED"
+    my_patients = client.get(f"/api/v1/clients?dietitian_id={dietitian['id']}")
+    assert my_patients.status_code == 200
+    assert any(item["id"] == patient["id"] for item in my_patients.json())
+
+
 def test_client_signup_joins_registered_dietitian():
     dietitian_response = client.post(
         "/api/v1/auth/register/dietitian",
@@ -359,10 +403,12 @@ def test_pending_dietitian_is_not_in_client_directory():
 
 
 def test_ai_chat_supports_food_and_exercise_questions():
-    model_response = BytesIO(json.dumps({
-        "message": {"content": "Try a meal with protein and carbohydrates after your workout."},
-    }).encode("utf-8"))
-    with patch("routers.ai.urlopen", return_value=model_response):
+    with patch(
+        "routers.ai._create_chat_model",
+        return_value=RunnableLambda(
+            lambda _: AIMessage(content="Try a meal with protein and carbohydrates after your workout.")
+        ),
+    ):
         response = client.post(
             "/api/v1/ai/chat",
             json={
@@ -385,43 +431,53 @@ def test_ai_chat_sends_plain_turns_and_recent_conversation_to_ollama():
         {"role": "user", "content": "I avoid dairy."},
         {"role": "assistant", "content": "I will keep that in mind."},
     ]
-    model_response = BytesIO(json.dumps({"message": {"content": "Try eggs, beans, or tofu for protein."}}).encode("utf-8"))
+    prompt_messages = []
 
-    with patch("routers.ai.urlopen", return_value=model_response) as mock_urlopen:
+    def capture_prompt(prompt_value):
+        prompt_messages.extend(
+            {
+                "role": {"ai": "assistant", "human": "user"}.get(message.type, message.type),
+                "content": message.content,
+            }
+            for message in prompt_value.to_messages()
+        )
+        return AIMessage(content="Try eggs, beans, or tofu for protein.")
+
+    with patch(
+        "routers.ai._create_chat_model",
+        return_value=RunnableLambda(capture_prompt),
+    ):
         response = client.post(
             "/api/v1/ai/chat",
             json={"user_id": "client-history", "role": "client", "message": "What can I eat after training?"},
         )
 
-    request_body = json.loads(mock_urlopen.call_args.args[0].data.decode("utf-8"))
     assert response.status_code == 200
     assert response.json()["reply"] == "Try eggs, beans, or tofu for protein."
-    assert request_body["messages"][-3:] == [
+    assert prompt_messages[-3:] == [
         {"role": "user", "content": "I avoid dairy."},
         {"role": "assistant", "content": "I will keep that in mind."},
         {"role": "user", "content": "What can I eat after training?"},
     ]
-    assert "client-history" not in json.dumps(request_body)
-    assert mock_urlopen.call_args.kwargs["timeout"] == config.OLLAMA_REQUEST_TIMEOUT_SECONDS
+    assert "client-history" not in json.dumps(prompt_messages)
 
 
 def test_ai_chat_returns_clear_fallback_when_ollama_is_unavailable():
-    def fake_urlopen(request, timeout=None):
-        raise URLError("ollama is offline")
+    def fail_model(_):
+        raise httpx.ConnectError("Ollama is offline")
 
-    with patch("routers.ai.urlopen", side_effect=fake_urlopen):
+    with patch("routers.ai._create_chat_model", return_value=RunnableLambda(fail_model)):
         reply = ai.generate_llama_chat_reply("What should I eat after a workout?", "client")
 
     assert "can't reach the ai model" in reply.lower()
 
 
 def ollama_response(plan):
-    body = {"message": {"content": json.dumps({"plan": plan})}}
-    return BytesIO(json.dumps(body).encode("utf-8"))
+    return RunnableLambda(lambda _: AIMessage(content=json.dumps({"plan": plan})))
 
 
 def test_generate_plan_returns_pending_recommendation():
-    with patch("routers.ai.urlopen", return_value=ollama_response(["Breakfast: oatmeal"])):
+    with patch("routers.ai._create_chat_model", return_value=ollama_response(["Breakfast: oatmeal"])):
         response = client.post(
             "/api/v1/ai/generate-plan",
             json={"client_id": "client-1", "dietary_goal": "More fiber"},
@@ -438,21 +494,30 @@ def test_generate_plan_forwards_allergies_and_conditions():
         "allergies": [{"allergen": "peanuts", "severity": "severe"}],
         "conditions": [{"condition_name": "diabetes"}],
     }
-    with patch("routers.ai.urlopen", return_value=ollama_response(["Balanced meals"])) as mock_urlopen:
+    prompt_messages = []
+
+    def capture_prompt(prompt_value):
+        prompt_messages.extend(prompt_value.to_messages())
+        return AIMessage(content=json.dumps({"plan": ["Balanced meals"]}))
+
+    with patch("routers.ai._create_chat_model", return_value=RunnableLambda(capture_prompt)) as mock_model:
         response = client.post(
             "/api/v1/ai/generate-plan",
             json={"client_id": "client-2", "dietary_goal": "Balanced meals"},
         )
 
-    request_body = json.loads(mock_urlopen.call_args.args[0].data.decode("utf-8"))
-    context = json.loads(request_body["messages"][1]["content"])
+    context = json.loads(prompt_messages[1].content)
     assert response.status_code == 200
     assert context["allergies"] == state.clients_db["client-2"]["allergies"]
     assert context["medical_conditions"] == state.clients_db["client-2"]["conditions"]
+    mock_model.assert_called_once_with(output_format="json")
 
 
 def test_generate_plan_returns_503_when_ollama_is_unreachable():
-    with patch("routers.ai.urlopen", side_effect=URLError("Ollama unavailable")):
+    def fail_model(_):
+        raise httpx.ConnectError("Ollama unavailable")
+
+    with patch("routers.ai._create_chat_model", return_value=RunnableLambda(fail_model)):
         response = client.post(
             "/api/v1/ai/generate-plan",
             json={"client_id": "client-3", "dietary_goal": "More vegetables"},
@@ -462,8 +527,10 @@ def test_generate_plan_returns_503_when_ollama_is_unreachable():
 
 
 def test_generate_plan_returns_503_for_malformed_model_response():
-    malformed_response = BytesIO(json.dumps({"message": {"content": "not json"}}).encode("utf-8"))
-    with patch("routers.ai.urlopen", return_value=malformed_response):
+    with patch(
+        "routers.ai._create_chat_model",
+        return_value=RunnableLambda(lambda _: AIMessage(content="not json")),
+    ):
         response = client.post(
             "/api/v1/ai/generate-plan",
             json={"client_id": "client-4", "dietary_goal": "More vegetables"},

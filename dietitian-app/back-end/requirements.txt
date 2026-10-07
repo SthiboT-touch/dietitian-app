@@ -4,3 +4,5 @@ psycopg2-binary==2.9.13
 pydantic==2.13.5
 python-dotenv==1.1.1
 python-multipart==0.0.32
+langchain-core>=0.3.72,<2.0.0
+langchain-ollama>=0.3.10,<2.0.0

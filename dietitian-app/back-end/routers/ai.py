@@ -4,8 +4,12 @@ import os
 import uuid
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+import httpx
+from langchain_core.exceptions import OutputParserException
+from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_ollama import ChatOllama
+from ollama import RequestError, ResponseError
 import database
 import config
 from state import clients_db, ai_recommendations_db, ai_conversations_db
@@ -18,6 +22,18 @@ router = APIRouter()
 
 # --- AI ENGINE & HUMAN-IN-THE-LOOP WORKFLOW ---
 
+def _create_chat_model(output_format: Optional[str] = None) -> ChatOllama:
+    model_options = {
+        "model": os.getenv("OLLAMA_MODEL", "llama3.2"),
+        "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/"),
+        "keep_alive": "30m",
+        "client_kwargs": {"timeout": config.OLLAMA_REQUEST_TIMEOUT_SECONDS},
+    }
+    if output_format is not None:
+        model_options["format"] = output_format
+    return ChatOllama(**model_options)
+
+
 def generate_llama_plan(dietary_goal: str, client_profile: Optional[dict] = None) -> List[str]:
     profile = client_profile or {}
     context = {
@@ -25,53 +41,37 @@ def generate_llama_plan(dietary_goal: str, client_profile: Optional[dict] = None
         "allergies": profile.get("allergies", []),
         "medical_conditions": profile.get("conditions", []),
     }
-    request_body = json.dumps({
-        "model": os.getenv("OLLAMA_MODEL", "llama3.2"),
-        "stream": False,
-        "keep_alive": "30m",
-        "format": {
-            "type": "object",
-            "properties": {
-                "plan": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "minItems": 3,
-                    "maxItems": 5,
-                }
-            },
-            "required": ["plan"],
-        },
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Draft a short, general nutrition plan for review by a licensed dietitian. "
-                    "Respect all listed allergies. Do not diagnose, prescribe treatment, "
-                    "or make claims that the plan treats a medical condition. "
-                    "Reply with exactly 3 to 5 short plain-text suggestions, one sentence each "
-                    "(e.g. 'Breakfast: oatmeal with berries'). Do not nest days, meals, or "
-                    "objects inside the list -- each list item must be a single short string."
-                ),
-            },
-            {"role": "user", "content": json.dumps(context)},
-        ],
-    }).encode("utf-8")
-    request = Request(
-        f"{os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')}/api/chat",
-        data=request_body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
     try:
-        with urlopen(request, timeout=config.OLLAMA_REQUEST_TIMEOUT_SECONDS) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        generated = json.loads(result["message"]["content"])
+        prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                "Draft a short, general nutrition plan for review by a licensed dietitian. "
+                "Respect all listed allergies. Do not diagnose, prescribe treatment, "
+                "or make claims that the plan treats a medical condition. "
+                "Reply with a JSON object containing a 'plan' array of 3 to 5 short "
+                "plain-text suggestions, one sentence each (e.g. 'Breakfast: oatmeal "
+                "with berries'). Do not nest days, meals, or objects inside the list; "
+                "each list item must be a single short string.",
+            ),
+            ("human", "{context}"),
+        ])
+        chain = prompt | _create_chat_model(output_format="json") | JsonOutputParser()
+        generated = chain.invoke({"context": json.dumps(context)})
+        if not isinstance(generated, dict):
+            raise ValueError("The model returned an invalid plan")
         plan = generated.get("plan")
         if not isinstance(plan, list) or not plan or not all(isinstance(item, str) for item in plan):
             raise ValueError("The model returned an invalid plan")
         return plan
-    except (HTTPError, URLError, TimeoutError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (
+        httpx.HTTPError,
+        RequestError,
+        ResponseError,
+        OutputParserException,
+        TimeoutError,
+        TypeError,
+        ValueError,
+    ) as exc:
         raise HTTPException(
             status_code=503,
             detail="Llama service unavailable or returned an invalid response. Check Ollama and the configured model.",
@@ -79,7 +79,7 @@ def generate_llama_plan(dietary_goal: str, client_profile: Optional[dict] = None
 
 
 def generate_llama_chat_reply(message: str, role: str, conversation: Optional[List[dict]] = None) -> str:
-    prompt = (
+    system_prompt = (
         "You are an AI nutrition and exercise assistant for a dietitian and patient platform. "
         "Provide practical, general guidance focused on food, hydration, meal timing, workout recovery, "
         "exercise habits, and healthy routines. Keep it brief, supportive, and actionable. "
@@ -87,29 +87,19 @@ def generate_llama_chat_reply(message: str, role: str, conversation: Optional[Li
         "Never diagnose a medical condition or prescribe treatment. If the user has medical concerns, "
         "encourage them to consult a licensed dietitian or healthcare professional."
     )
-    messages = [{"role": "system", "content": prompt}]
+    messages = [("system", system_prompt)]
     for turn in (conversation or [])[-8:]:
         if turn.get("role") in {"user", "assistant"} and isinstance(turn.get("content"), str):
-            messages.append({"role": turn["role"], "content": turn["content"]})
-    messages.append({"role": "user", "content": message})
-    request_body = json.dumps({
-        "model": os.getenv("OLLAMA_MODEL", "llama3.2"),
-        "stream": False,
-        "messages": messages,
-    }).encode("utf-8")
-    request = Request(
-        f"{os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')}/api/chat",
-        data=request_body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+            messages.append((turn["role"], turn["content"]))
+    messages.append(("human", "{message}"))
+
     try:
-        with urlopen(request, timeout=config.OLLAMA_REQUEST_TIMEOUT_SECONDS) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        content = result.get("message", {}).get("content", "")
+        prompt = ChatPromptTemplate.from_messages(messages)
+        chain = prompt | _create_chat_model() | StrOutputParser()
+        content = chain.invoke({"message": message})
         if isinstance(content, str) and content.strip():
             return content.strip()
-    except (HTTPError, URLError, TimeoutError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+    except (httpx.HTTPError, RequestError, ResponseError, TimeoutError, TypeError, ValueError):
         return (
             "I can't reach the AI model right now, so I don't want to guess at an answer. "
             "Please try again shortly, or ask your dietitian for guidance on a personal medical concern."
