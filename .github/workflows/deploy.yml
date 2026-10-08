@@ -19,8 +19,9 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
           script: |
-            cd ~/dietitian-app_project/dietitian-app
+            cd ~/dietitian-app_2
             git pull origin main
             docker rm -f $(docker ps -aq) || true
             docker-compose up -d --build
