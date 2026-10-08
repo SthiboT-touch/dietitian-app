@@ -26,4 +26,17 @@ jobs:
             cd ~/dietitian-app_2
             git pull origin main
             docker compose down
+            docker compose up -d --build db
+            for attempt in $(seq 1 30); do
+              if docker compose exec -T db pg_isready -U black -d dietitian_db; then
+                break
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                echo "Database did not become ready" >&2
+                exit 1
+              fi
+              sleep 2
+            done
+            docker compose build api
+            docker compose run --rm --no-deps api python migrations/apply_002_client_health_schema.py
             docker compose up -d --build
