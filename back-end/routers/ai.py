@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import uuid
+from functools import lru_cache
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional
 import httpx
@@ -35,6 +36,9 @@ def _create_chat_model(output_format: Optional[str] = None) -> ChatOllama:
         "keep_alive": "30m",
         "client_kwargs": {"timeout": config.OLLAMA_REQUEST_TIMEOUT_SECONDS},
     }
+    if output_format is None:
+        model_options["num_ctx"] = 4096
+        model_options["num_predict"] = 256
     if output_format is not None:
         model_options["format"] = output_format
     return ChatOllama(**model_options)
@@ -122,6 +126,7 @@ def search_food_catalog(query: str) -> str:
     return json.dumps(foods or {"message": "No matching foods found."})
 
 
+@lru_cache(maxsize=2)
 def _create_chat_agent(role: str):
     audience_context = (
         "The user is a client; keep guidance accessible and encourage them to discuss personal concerns with their dietitian."

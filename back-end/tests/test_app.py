@@ -431,6 +431,32 @@ def test_ai_chat_supports_food_and_exercise_questions():
     assert payload["messages"][-1]["role"] == "assistant"
 
 
+def test_chat_model_uses_bounded_context_and_response_length():
+    with patch("routers.ai.ChatOllama") as model_factory:
+        ai._create_chat_model()
+
+    options = model_factory.call_args.kwargs
+    assert options["num_ctx"] == 4096
+    assert options["num_predict"] == 256
+
+
+def test_chat_agent_is_reused_between_requests():
+    ai._create_chat_agent.cache_clear()
+    try:
+        with (
+            patch("routers.ai.create_agent", return_value=object()) as create_agent,
+            patch("routers.ai._create_chat_model") as create_model,
+        ):
+            first_agent = ai._create_chat_agent("client")
+            second_agent = ai._create_chat_agent("client")
+
+        assert first_agent is second_agent
+        create_agent.assert_called_once()
+        create_model.assert_called_once_with()
+    finally:
+        ai._create_chat_agent.cache_clear()
+
+
 @pytest.mark.parametrize("message", ["hey", "hey,how are you", "Hello!", "Good morning"])
 def test_ai_chat_answers_greetings_without_reusing_old_nutrition_context(message):
     state.ai_conversations_db["client-greeting"] = [
