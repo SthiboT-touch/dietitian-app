@@ -41,6 +41,10 @@ def _create_chat_model(output_format: Optional[str] = None) -> ChatOllama:
 
 
 def generate_llama_plan(dietary_goal: str, client_profile: Optional[dict] = None) -> List[str]:
+    dietary_goal = (dietary_goal or "").strip()
+    if not dietary_goal:
+        raise HTTPException(status_code=422, detail="dietary_goal is required")
+
     profile = client_profile or {}
     context = {
         "dietary_goal": dietary_goal,
