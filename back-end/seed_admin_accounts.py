@@ -20,7 +20,7 @@ DEFAULT_ADMIN_EMAILS = [
 
 
 def main():
-        if not config.DATABASE_ENABLED:
+    if not config.DATABASE_ENABLED:
         raise SystemExit("Configure DATABASE_URL before creating persistent administrator accounts.")
 
     created = []
