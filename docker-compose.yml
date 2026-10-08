@@ -14,7 +14,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: always
 
-api:
+  api:
     container_name: dietitian-api
     build:
       context: .
