@@ -58,7 +58,9 @@ def fetch_client_profile(cursor, client_id: str) -> dict:
     pregnancy = cursor.fetchone()
     if pregnancy:
         pregnancy_data = json.loads(pregnancy["notes"] or "{}")
-        pregnancy_data["due_date"] = pregnancy["due_date"].isoformat()
+        pregnancy_data["due_date"] = (
+            pregnancy["due_date"].isoformat() if pregnancy["due_date"] else None
+        )
         profile["pregnancy"] = pregnancy_data
     cursor.execute(
         "SELECT notes FROM lactation_profile WHERE client_id = %s AND end_date IS NULL "
