@@ -1,5 +1,3 @@
-
-
 services:
   db:
     container_name: dietitian-db
@@ -19,12 +17,12 @@ services:
   api:
     container_name: dietitian-api
     build:
-      context: ./back-end
-      dockerfile: Dockerfile.api
+      context: .
+      dockerfile: back-end/Dockerfile.api
     ports:
       - "8002:8000"
     environment:
-      DATABASE_URL: postgresql://black:blackpassword@db:5432/dietitian_db
+      DATABASE_URL: postgresql://black:blackpassword@dietitian-db:5432/dietitian_db
     depends_on:
       - db
     restart: always
