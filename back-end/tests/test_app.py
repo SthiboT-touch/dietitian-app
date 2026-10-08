@@ -775,6 +775,53 @@ def test_pending_recommendations_only_returns_pending_items():
     assert [item["recommendation_id"] for item in response.json()] == ["rec-pending"]
 
 
+def test_client_health_profile_loads_conditions_allergies_and_pregnancy():
+    state.clients_db["client-health"] = {
+        "allergies": [{"allergen": "Peanuts", "severity": "severe"}],
+        "conditions": [{"condition_name": "Asthma"}],
+        "pregnancy": {"trimester": 2, "due_date": "2027-03-01"},
+        "metrics": [],
+        "progress": [],
+    }
+
+    response = client.get("/api/v1/clients/client-health/profile")
+
+    assert response.status_code == 200
+    assert response.json()["allergies"] == state.clients_db["client-health"]["allergies"]
+    assert response.json()["conditions"] == state.clients_db["client-health"]["conditions"]
+    assert response.json()["pregnancy"] == state.clients_db["client-health"]["pregnancy"]
+
+
+def test_health_history_entries_save_for_a_client():
+    state.clients_db["client-health"] = {
+        "allergies": [],
+        "conditions": [],
+        "metrics": [],
+        "progress": [],
+    }
+
+    allergy = client.post(
+        "/api/v1/clients/client-health/allergies",
+        json={"allergen": "Peanuts", "severity": "severe"},
+    )
+    condition = client.post(
+        "/api/v1/clients/client-health/medical-conditions",
+        json={"condition_name": "Asthma"},
+    )
+    pregnancy = client.post(
+        "/api/v1/clients/client-health/pregnancy",
+        json={"trimester": 2, "due_date": "2027-03-01"},
+    )
+
+    assert allergy.status_code == 200
+    assert condition.status_code == 200
+    assert pregnancy.status_code == 200
+    profile = client.get("/api/v1/clients/client-health/profile").json()
+    assert profile["allergies"] == [{"allergen": "Peanuts", "severity": "severe"}]
+    assert profile["conditions"] == [{"condition_name": "Asthma", "icd_code": None}]
+    assert profile["pregnancy"] == {"trimester": 2, "due_date": "2027-03-01"}
+
+
 def test_review_recommendation_updates_status_and_notes():
     state.ai_recommendations_db["rec-review"] = {
         "recommendation_id": "rec-review",

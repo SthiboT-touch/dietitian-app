@@ -65,6 +65,8 @@ The API sends the goal and any recorded allergies and medical conditions to Olla
 
 Plan generation uses a LangChain prompt/model/output-parser chain with `ChatOllama`; chat uses a LangChain agent with read-only food-catalog search and includes up to eight recent turns as short-term context. Chat history is held in process memory and is cleared when the API restarts. Generated plans remain pending until reviewed by a dietitian. The routes and response shapes stay the same; LangChain dependencies are installed from `back-end/requirements.txt`.
 
+For an existing PostgreSQL database, apply the client health schema repair once with `python back-end/migrations/apply_002_client_health_schema.py`. It creates any missing client health tables and adds the missing lactation end date column without replacing existing records.
+
 Appointment requests are created as `PENDING`; dietitian decisions change them to `CONFIRMED` or `REJECTED`, and patients can cancel future pending or confirmed appointments. Patients may create an account before joining a dietitian. For an existing PostgreSQL database, apply the status migration once with `python back-end/migrations/apply_001_appointment_approval_states.py`.
 
 For running the API outside Compose, set `OLLAMA_BASE_URL` (default `http://localhost:11434`) and `OLLAMA_MODEL` (default `llama3.2`) to match an Ollama instance with the selected model downloaded.

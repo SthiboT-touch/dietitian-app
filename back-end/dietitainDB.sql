@@ -239,8 +239,8 @@ CREATE TABLE lactation_profile (
 
     start_date    DATE NOT NULL,
 
-        status          VARCHAR(20) NOT NULL DEFAULT 'PENDING'
-            CHECK (status IN ('PENDING','CONFIRMED','REJECTED','SCHEDULED','COMPLETED','CANCELLED','NO_SHOW')),
+    end_date      DATE,
+
     exclusive     BOOLEAN NOT NULL DEFAULT TRUE,
 
     notes         TEXT,
@@ -821,4 +821,3 @@ INSERT INTO metric_type (name, unit) VALUES
 
     ('TRIGLYCERIDES', 'mg/dL'); 
 	
-
