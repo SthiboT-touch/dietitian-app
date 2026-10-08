@@ -36,6 +36,22 @@ The model download is several gigabytes and is stored in the `ollama_data` volum
 
 The API container connects to Ollama at `http://ollama:11434` over the Compose network and waits for the Ollama service to become healthy. If the AI still cannot reply, confirm the model is installed with `docker compose exec ollama ollama list`, then pull it if needed with `docker compose exec ollama ollama pull llama3.2`. Rebuild and restart the API after changing its configuration with `docker compose up --build -d api`.
 
+LangSmith tracing is optional. To enable it for the LangGraph chat agent (and other LangChain runs) in Docker, add these settings to the root `.env` file:
+
+```dotenv
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your-langsmith-api-key
+LANGSMITH_PROJECT=dietitian-app
+```
+
+Then start the app with the optional Compose override; the main `docker-compose.yml` is unchanged:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.langsmith.yml up --build -d
+```
+
+The override defaults tracing to enabled and the project name to `dietitian-app`; without an API key, runs are not uploaded. For local runs outside Docker, the root `.env` settings are loaded automatically. Traces may include chat messages, model responses, and health details sent to LangSmith. Use synthetic data only; do not send real patient or other sensitive data.
+
 The generated-plan endpoint is `POST /api/v1/ai/generate-plan` with a JSON body such as:
 
 ```json
