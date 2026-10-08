@@ -4,20 +4,20 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements directly from current context (back-end)
-COPY requirements.txt .
+# Copy requirements from back-end directory
+COPY back-end/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all backend files into working directory
-COPY . .
+# Copy backend application files
+COPY back-end/ /app/
 
-# Default fallback port if PORT isn't set by host
+# Copy frontend static files for FastAPI StaticFiles mount
+COPY front-end/ /front-end/
+
 ENV PORT=8000
 ENV OLLAMA_BASE_URL=http://ollama:11434
 ENV OLLAMA_MODEL=llama3.2
 
-# Optional documentation entry
 EXPOSE 8000
 
-# Use $PORT directly without 'sh -c' wrapping so signals route cleanly
 CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}"]
