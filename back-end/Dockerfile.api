@@ -4,12 +4,12 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
 
-COPY back-end/requirements.txt .
+# Copy requirements directly from current context (back-end)
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY back-end/ ./back-end/
-COPY front-end/ ./front-end/
-WORKDIR /app/back-end
+# Copy all backend files into working directory
+COPY . .
 
 # Default fallback port if PORT isn't set by host
 ENV PORT=8000
