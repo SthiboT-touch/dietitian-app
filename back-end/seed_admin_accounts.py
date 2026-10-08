@@ -7,8 +7,9 @@ import uuid
 BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BACKEND_DIR))
 
-import app
+import config
 import database
+import security
 
 
 DEFAULT_ADMIN_EMAILS = [
@@ -19,7 +20,7 @@ DEFAULT_ADMIN_EMAILS = [
 
 
 def main():
-    if not app.DATABASE_ENABLED:
+        if not config.DATABASE_ENABLED:
         raise SystemExit("Configure DATABASE_URL before creating persistent administrator accounts.")
 
     created = []
@@ -33,7 +34,7 @@ def main():
             cursor.execute(
                 "INSERT INTO admin (admin_id, first_name, last_name, email, password) "
                 "VALUES (%s, %s, %s, %s, %s)",
-                (str(uuid.uuid4()), first_name, last_name, email, app.hash_password(password)),
+                (str(uuid.uuid4()), first_name, last_name, email, security.hash_password(password)),
             )
             created.append((email, password))
             existing_emails.add(email.casefold())
