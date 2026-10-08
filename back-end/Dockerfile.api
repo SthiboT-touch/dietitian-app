@@ -1,0 +1,23 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+
+COPY back-end/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY back-end/ ./back-end/
+COPY front-end/ ./front-end/
+WORKDIR /app/back-end
+
+# Default fallback port if PORT isn't set by host
+ENV PORT=8000
+ENV OLLAMA_BASE_URL=http://ollama:11434
+ENV OLLAMA_MODEL=llama3.2
+
+# Optional documentation entry
+EXPOSE 8000
+
+# Use $PORT directly without 'sh -c' wrapping so signals route cleanly
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}"]

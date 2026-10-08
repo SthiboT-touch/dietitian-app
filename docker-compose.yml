@@ -1,0 +1,55 @@
+
+
+services:
+  db:
+    container_name: dietitian-db
+    build:
+      context: ./back-end
+      dockerfile: Dockerfile.db
+    environment:
+      POSTGRES_USER: black
+      POSTGRES_PASSWORD: blackpassword
+      POSTGRES_DB: dietitian_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  api:
+    container_name: dietitian-api
+    build:
+      context: ./back-end
+      dockerfile: Dockerfile.api
+    ports:
+      - "8002:8000"
+    environment:
+      DATABASE_URL: postgresql://black:blackpassword@db:5432/dietitian_db
+    depends_on:
+      - db
+    restart: always
+
+  ollama:
+    container_name: dietitian-ollama
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: always
+
+  frontend:
+    container_name: dietitian-frontend
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./front-end:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    restart: always
+
+volumes:
+  postgres_data:
+  ollama_data:
