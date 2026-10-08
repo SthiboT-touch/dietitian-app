@@ -6,10 +6,8 @@ services:
       dockerfile: Dockerfile.db
     environment:
       POSTGRES_USER: black
-      POSTGRES_PASSWORD: blackpassword
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: dietitian_db
-    ports:
-      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: always
@@ -19,19 +17,18 @@ services:
     build:
       context: .
       dockerfile: back-end/Dockerfile.api
-    ports:
-      - "8002:8000"
     environment:
-      DATABASE_URL: postgresql://black:blackpassword@dietitian-db:5432/dietitian_db
+      DATABASE_URL: postgresql://black:${DB_PASSWORD}@db:5432/dietitian_db
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3.2
     depends_on:
       - db
+      - ollama
     restart: always
 
   ollama:
     container_name: dietitian-ollama
     image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     restart: always
