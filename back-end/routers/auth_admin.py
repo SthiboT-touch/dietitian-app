@@ -182,7 +182,7 @@ def login(data: LoginRequest):
             if not user:
                 cursor.execute(
                     "SELECT client_id AS id, 'client' AS type, name AS full_name, email, "
-                    "dietitian_id, password AS password_hash "
+                    "dietitian_id, date_of_birth, password AS password_hash "
                     "FROM client WHERE LOWER(email) = LOWER(%s)",
                     (data.email,),
                 )
