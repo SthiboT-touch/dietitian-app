@@ -412,6 +412,75 @@ def test_dietitian_directory_lists_registered_dietitians():
     assert [item["full_name"] for item in response.json()] == ["Casey Brooks", "Morgan Avery"]
 
 
+def test_approved_dietitian_can_add_practice_branch_as_current_base():
+    dietitian = client.post(
+        "/api/v1/auth/register/dietitian",
+        json={
+            "first_name": "Riley",
+            "last_name": "Parker",
+            "email": "riley@example.com",
+            "license_number": "RD-BRANCH",
+            "password": "nutrition-safe-pass",
+        },
+    ).json()["user"]
+    state.users_db[dietitian["id"]]["status"] = "APPROVED"
+    state.dietitian_sessions_db["branch-dietitian-token"] = dietitian["id"]
+    state.admin_sessions_db["branch-admin-token"] = "admin-branch-test"
+    dietitian_headers = {"Authorization": "Bearer branch-dietitian-token"}
+    admin_headers = {"Authorization": "Bearer branch-admin-token"}
+
+    branches = client.get("/api/v1/dietitians/me/branches", headers=dietitian_headers)
+    assert branches.status_code == 200
+    initial_branch_id = branches.json()["current_branch_id"]
+    assert len(branches.json()["branches"]) == 1
+
+    created = client.post(
+        "/api/v1/dietitians/me/branches",
+        headers=dietitian_headers,
+        json={"name": "Riverside Clinic", "address": "42 River Road"},
+    )
+    assert created.status_code == 201
+    new_branch = created.json()["branch"]
+    assert new_branch["business_id"] == dietitian["business_id"]
+    assert state.users_db[dietitian["id"]]["branch_id"] == new_branch["branch_id"]
+    assert state.branches_db[initial_branch_id]["business_id"] == new_branch["business_id"]
+
+    directory_entry = next(
+        item for item in client.get("/api/v1/dietitians").json()
+        if item["id"] == dietitian["id"]
+    )
+    assert directory_entry["branch_name"] == "Riverside Clinic"
+    assert directory_entry["branch_address"] == "42 River Road"
+
+    admin_entry = next(
+        item for item in client.get("/api/v1/admin/dietitians", headers=admin_headers).json()
+        if item["dietitian_id"] == dietitian["id"]
+    )
+    assert admin_entry["branch_address"] == "42 River Road"
+
+
+def test_unapproved_dietitian_cannot_add_practice_branch():
+    dietitian = client.post(
+        "/api/v1/auth/register/dietitian",
+        json={
+            "first_name": "Pending",
+            "last_name": "Practitioner",
+            "email": "pending-branch@example.com",
+            "license_number": "RD-PENDING-BRANCH",
+            "password": "nutrition-safe-pass",
+        },
+    ).json()["user"]
+    state.dietitian_sessions_db["pending-branch-token"] = dietitian["id"]
+
+    response = client.post(
+        "/api/v1/dietitians/me/branches",
+        headers={"Authorization": "Bearer pending-branch-token"},
+        json={"name": "New Branch", "address": "42 River Road"},
+    )
+
+    assert response.status_code == 403
+
+
 def test_dietitian_rejection_requires_reason_and_allows_resubmission():
     dietitian = client.post(
         "/api/v1/auth/register/dietitian",

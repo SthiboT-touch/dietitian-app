@@ -42,6 +42,12 @@ class BranchCreate(BaseModel):
     address: str
     business_id: Optional[str] = None
 
+
+class DietitianBranchCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=150)
+    address: str = Field(..., min_length=1, max_length=255)
+
+
 # Section 2 Schemas
 class PregnancyLog(BaseModel):
     trimester: int = Field(..., ge=1, le=3)
