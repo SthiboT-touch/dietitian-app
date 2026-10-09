@@ -40,4 +40,5 @@ jobs:
             done
             docker compose build api
             docker compose run --rm --no-deps api python migrations/apply_002_client_health_schema.py
+            docker compose run --rm --no-deps api python migrations/apply_003_dietitian_document_branch.py
             docker compose up -d --build

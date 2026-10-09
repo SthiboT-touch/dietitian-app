@@ -137,6 +137,7 @@ CREATE TABLE dietitian (
 CREATE TABLE dietitian_document (
     document_id    VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
     dietitian_id   VARCHAR(36) NOT NULL REFERENCES dietitian(dietitian_id) ON DELETE CASCADE,
+    branch_id      VARCHAR(36) NOT NULL REFERENCES branch(branch_id) ON DELETE RESTRICT,
     file_name      VARCHAR(255) NOT NULL,
     content_type   VARCHAR(100) NOT NULL,
     file_data      BYTEA NOT NULL,
@@ -144,6 +145,7 @@ CREATE TABLE dietitian_document (
 );
 
 CREATE INDEX idx_dietitian_document_dietitian ON dietitian_document(dietitian_id);
+CREATE INDEX idx_dietitian_document_branch ON dietitian_document(branch_id);
 
 CREATE TABLE life_stage (
 

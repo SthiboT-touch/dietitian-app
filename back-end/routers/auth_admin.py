@@ -458,16 +458,29 @@ def list_my_dietitian_documents(dietitian_id: str = Depends(require_dietitian)):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT document_id, file_name, content_type, uploaded_at FROM dietitian_document "
-                "WHERE dietitian_id = %s ORDER BY uploaded_at DESC",
+                "SELECT dd.document_id, dd.branch_id, b.business_id, b.name AS branch_name, "
+                "b.address AS branch_address, bus.name AS practice_name, "
+                "dd.file_name, dd.content_type, dd.uploaded_at "
+                "FROM dietitian_document dd JOIN branch b ON b.branch_id = dd.branch_id "
+                "JOIN business bus ON bus.business_id = b.business_id "
+                "WHERE dd.dietitian_id = %s ORDER BY dd.uploaded_at DESC",
                 (dietitian_id,),
             )
             return [dict(row) for row in cursor.fetchall()]
     return sorted(
         [
-            {key: value for key, value in document.items() if key != "file_data"}
+            {
+                **{key: value for key, value in document.items() if key != "file_data"},
+                **{
+                    "business_id": branches_db[document["branch_id"]]["business_id"],
+                    "branch_name": branches_db[document["branch_id"]]["name"],
+                    "branch_address": branches_db[document["branch_id"]]["address"],
+                    "practice_name": branches_db[document["branch_id"]]["business_name"],
+                },
+            }
             for document in dietitian_documents_db.values()
             if document["dietitian_id"] == dietitian_id
+            and document.get("branch_id") in branches_db
         ],
         key=lambda document: document["uploaded_at"],
         reverse=True,
@@ -482,8 +495,9 @@ async def submit_dietitian_document(
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT b.name, b.address FROM dietitian d "
-                "JOIN branch b ON b.branch_id = d.branch_id "
+                "SELECT b.branch_id, b.business_id, b.name, b.address, bus.name AS practice_name "
+                "FROM dietitian d JOIN branch b ON b.branch_id = d.branch_id "
+                "JOIN business bus ON bus.business_id = b.business_id "
                 "WHERE d.dietitian_id = %s",
                 (dietitian_id,),
             )
@@ -524,9 +538,10 @@ async def submit_dietitian_document(
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO dietitian_document (document_id, dietitian_id, file_name, content_type, file_data) "
-                "VALUES (%s, %s, %s, %s, %s) RETURNING uploaded_at",
-                (document_id, dietitian_id, file_name, content_type, contents),
+                "INSERT INTO dietitian_document "
+                "(document_id, dietitian_id, branch_id, file_name, content_type, file_data) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING uploaded_at",
+                (document_id, dietitian_id, branch["branch_id"], file_name, content_type, contents),
             )
             uploaded_at = cursor.fetchone()["uploaded_at"]
     else:
@@ -534,6 +549,7 @@ async def submit_dietitian_document(
         dietitian_documents_db[document_id] = {
             "document_id": document_id,
             "dietitian_id": dietitian_id,
+            "branch_id": branch["branch_id"],
             "file_name": file_name,
             "content_type": content_type,
             "file_data": contents,
@@ -544,6 +560,13 @@ async def submit_dietitian_document(
         "file_name": file_name,
         "content_type": content_type,
         "uploaded_at": uploaded_at,
+        "branch": {
+            "branch_id": branch["branch_id"],
+            "business_id": branch["business_id"],
+            "name": branch["name"],
+            "address": branch["address"],
+            "practice_name": branch["practice_name"] if config.DATABASE_ENABLED else branch["business_name"],
+        },
     }
 
 
@@ -573,7 +596,8 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
         with database.cursor() as cursor:
             cursor.execute(
                 "SELECT d.dietitian_id AS dietitian_id, d.first_name, d.last_name, d.email, "
-                "d.registration_number AS license_number, d.status, b.name AS branch_name, "
+                "d.registration_number AS license_number, d.status, b.branch_id, b.business_id, "
+                "b.name AS branch_name, "
                 "b.address AS branch_address, "
                 "bus.name AS practice_name FROM dietitian d "
                 "JOIN branch b ON b.branch_id = d.branch_id "
@@ -584,8 +608,12 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
             pending = []
             for row in dietitians:
                 cursor.execute(
-                    "SELECT document_id, file_name, content_type, uploaded_at FROM dietitian_document "
-                    "WHERE dietitian_id = %s ORDER BY uploaded_at DESC",
+                    "SELECT dd.document_id, dd.branch_id, b.business_id, b.name AS branch_name, "
+                    "b.address AS branch_address, bus.name AS practice_name, "
+                    "dd.file_name, dd.content_type, dd.uploaded_at "
+                    "FROM dietitian_document dd JOIN branch b ON b.branch_id = dd.branch_id "
+                    "JOIN business bus ON bus.business_id = b.business_id "
+                    "WHERE dd.dietitian_id = %s ORDER BY dd.uploaded_at DESC",
                     (row["dietitian_id"],),
                 )
                 pending.append({
@@ -601,13 +629,24 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
             "email": user["email"],
             "license_number": user["license_number"],
             "status": user["status"],
+            "branch_id": branches_db.get(user.get("branch_id"), {}).get("branch_id"),
+            "business_id": branches_db.get(user.get("branch_id"), {}).get("business_id"),
             "branch_name": branches_db.get(user.get("branch_id"), {}).get("name"),
             "branch_address": branches_db.get(user.get("branch_id"), {}).get("address"),
             "practice_name": branches_db.get(user.get("branch_id"), {}).get("business_name"),
             "documents": [
-                {key: value for key, value in document.items() if key != "file_data"}
+                {
+                    **{key: value for key, value in document.items() if key != "file_data"},
+                    **{
+                        "business_id": branches_db[document["branch_id"]]["business_id"],
+                        "branch_name": branches_db[document["branch_id"]]["name"],
+                        "branch_address": branches_db[document["branch_id"]]["address"],
+                        "practice_name": branches_db[document["branch_id"]]["business_name"],
+                    },
+                }
                 for document in dietitian_documents_db.values()
                 if document["dietitian_id"] == user["id"]
+                and document.get("branch_id") in branches_db
             ],
         }
         for user in users_db.values()
