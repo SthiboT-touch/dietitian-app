@@ -16,6 +16,45 @@ async function request(url, options = {}) {
   if (!(options.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+
+  async function renderDietitianBranches() {
+    const assignment = await request("/api/v1/dietitians/me/branches");
+    const isApproved = assignment.status === "APPROVED";
+    workspaceContent.innerHTML = `
+      ${pageHeading("PRACTICE LOCATIONS", "My branches.", "Add practice locations. Each new branch becomes your current base and is visible to administrators and patients.")}
+      <div data-message class="workspace-message" hidden></div>
+      ${isApproved ? `
+        <section class="content-panel">
+          <div class="section-heading form-section-heading"><h2>Add a branch</h2><span>NEW LOCATION</span></div>
+          <form id="dietitianBranchForm" class="form-grid">
+            <div class="form-field"><label for="dietitianBranchName">Branch name</label><input class="text-input" id="dietitianBranchName" name="name" maxlength="150" required></div>
+            <div class="form-field full-width"><label for="dietitianBranchAddress">Location / address</label><input class="text-input" id="dietitianBranchAddress" name="address" maxlength="255" autocomplete="street-address" required></div>
+            <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add and set as my base</button></div>
+          </form>
+        </section>` : '<p class="notice">Branch creation is available after an administrator approves your registration.</p>'}
+      <div class="section-heading"><h2>Practice locations</h2><span>${assignment.branches.length} BRANCHES</span></div>
+      ${renderAdminTable(["Branch", "Address", "Base"], assignment.branches.map((branch) => [branch.name, branch.address, branch.branch_id === assignment.current_branch_id ? "Current base" : ""]), "No branches are registered for this practice.")}`;
+    const form = document.querySelector("#dietitianBranchForm");
+    if (form) {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = form.querySelector("button[type=submit]");
+        button.disabled = true;
+        const values = Object.fromEntries(new FormData(form));
+        try {
+          await request("/api/v1/dietitians/me/branches", {
+            method: "POST",
+            body: JSON.stringify(values),
+          });
+          await renderDietitianBranches();
+          showWorkspaceMessage("Branch added and set as your current base.");
+        } catch (error) {
+          button.disabled = false;
+          showWorkspaceMessage(error.message, true);
+        }
+      });
+    }
+  }
   const token = sessionStorage.getItem(adminTokenKey) || sessionStorage.getItem(dietitianTokenKey);
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
@@ -464,7 +503,7 @@ function renderDietitianRows(dietitians) {
   return `<div class="dietitian-directory">${dietitians.map((dietitian) => `
     <article class="dietitian-row">
       <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(dietitian.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase())}</div>
-      <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}</p></div>
+      <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` · ${escapeHtml(dietitian.branch_address)}` : ""}</p></div>
       <span class="dietitian-status status-${escapeHtml(dietitian.status.toLowerCase())}">${escapeHtml(dietitian.status.replaceAll("_", " "))}</span>
     </article>`).join("")}</div>`;
 }
@@ -492,7 +531,7 @@ async function renderClientDashboard(firstName) {
     ${dietitians.length ? `<div class="dietitian-directory patient-dietitian-directory">${dietitians.map((dietitian) => `
       <article class="dietitian-row">
         <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(dietitian.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase())}</div>
-        <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}</p></div>
+        <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` · ${escapeHtml(dietitian.branch_address)}` : ""}</p></div>
         <button class="button button-small button-approve" data-book-dietitian="${escapeHtml(dietitian.id)}" type="button">Book appointment</button>
       </article>`).join("")}</div>` : '<p class="empty-state">No approved Dietitians are listed right now.</p>'}`;
   bindGoButtons();
@@ -774,7 +813,7 @@ async function renderClientAppointments(clientId, selectedTab = "upcoming", sele
     </div>
     ${activeTab === "book" ? `<section class="content-panel"><h2 class="compact-heading">Request an appointment</h2>${dietitians.length ? `
       <form id="appointmentForm" class="form-grid appointment-booking-form">
-        <div class="form-field"><label for="appointmentDietitian">Dietitian</label><select class="text-input" id="appointmentDietitian" name="dietitian_id" required><option value="">Choose a Dietitian</option>${dietitians.map((dietitian) => `<option value="${escapeHtml(dietitian.id)}" ${dietitian.id === preferredDietitianId ? "selected" : ""}>${escapeHtml(dietitian.full_name)}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}</option>`).join("")}</select></div>
+        <div class="form-field"><label for="appointmentDietitian">Dietitian</label><select class="text-input" id="appointmentDietitian" name="dietitian_id" required><option value="">Choose a Dietitian</option>${dietitians.map((dietitian) => `<option value="${escapeHtml(dietitian.id)}" ${dietitian.id === preferredDietitianId ? "selected" : ""}>${escapeHtml(dietitian.full_name)}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` · ${escapeHtml(dietitian.branch_address)}` : ""}</option>`).join("")}</select></div>
         <div class="form-field"><label for="appointmentDate">Preferred date and time</label><input class="text-input" id="appointmentDate" name="appointment_date" type="datetime-local" min="${minDate}" required></div>
         <div class="form-field form-actions"><button class="button button-primary" type="submit">Send request <span class="button-arrow" aria-hidden="true">&#8594;</span></button></div>
       </form>
@@ -947,6 +986,8 @@ async function loadView(view, initialAIPanel = "coach") {
       await renderClientRecommendations(clientId);
     } else if (view === "verification-documents") {
       await renderDietitianDocuments();
+    } else if (view === "dietitian-branches") {
+      await renderDietitianBranches();
     } else if (view === "reviews") {
       await renderReviews();
     } else if (view === "clients") {
@@ -1352,7 +1393,7 @@ async function renderAdminDietitians() {
   const dietitians = await request("/api/v1/admin/dietitians");
   workspaceContent.innerHTML = `
     ${pageHeading("ADMINISTRATION", "Dietitians.", "Review registered practitioners and their organization assignments.")}
-    ${renderAdminTable(["Name", "Email", "License", "Business", "Branch", "Status"], dietitians.map((item) => [item.full_name, item.email, item.license_number, item.business_name, item.branch_name, item.status]), "No dietitians are registered yet.")}`;
+    ${renderAdminTable(["Name", "Email", "License", "Business", "Branch", "Location", "Status"], dietitians.map((item) => [item.full_name, item.email, item.license_number, item.business_name, item.branch_name, item.branch_address, item.status]), "No dietitians are registered yet.")}`;
 }
 
 async function renderAdminBusinesses() {
@@ -1443,7 +1484,7 @@ async function renderAdminApprovals() {
       <article class="admin-approval-row" data-dietitian-id="${escapeHtml(dietitian.dietitian_id)}">
         <div class="admin-approval-main">
           <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(dietitian.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase())}</div>
-          <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.email)} · License ${escapeHtml(dietitian.license_number)}</p><p>${escapeHtml(dietitian.practice_name || "Nutrition practice")}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}</p></div>
+          <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.email)} · License ${escapeHtml(dietitian.license_number)}</p><p>${escapeHtml(dietitian.practice_name || "Nutrition practice")}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` · ${escapeHtml(dietitian.branch_address)}` : ""}</p></div>
           <span class="dietitian-status status-pending">PENDING</span>
         </div>
         <div class="admin-document-list">${dietitian.documents.length ? dietitian.documents.map((document) => `

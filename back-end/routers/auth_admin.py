@@ -7,7 +7,7 @@ from datetime import date
 import database
 import config
 from state import users_db, admins_db, businesses_db, branches_db, admin_sessions_db, dietitian_sessions_db, dietitian_documents_db, approval_log_db, appointments_db, meal_plans_db
-from schemas import DietitianRegister, ClientRegister, LoginRequest, AdminSetup, AdminApproval, BranchCreate
+from schemas import DietitianRegister, ClientRegister, LoginRequest, AdminSetup, AdminApproval, BranchCreate, DietitianBranchCreate
 from security import hash_password, verify_password, public_user, request_is_loopback, require_admin, require_dietitian
 from helpers import email_is_registered, build_full_name
 
@@ -222,7 +222,7 @@ def get_dietitians():
             cursor.execute(
                 "SELECT d.dietitian_id AS id, TRIM(d.first_name || ' ' || d.last_name) AS full_name, "
                 "d.registration_number AS license_number, d.specialisation, d.status, "
-                "b.name AS branch_name, bus.name AS practice_name "
+                "b.name AS branch_name, b.address AS branch_address, bus.name AS practice_name "
                 "FROM dietitian d JOIN branch b ON b.branch_id = d.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
                 "WHERE d.status = 'APPROVED' "
@@ -236,13 +236,135 @@ def get_dietitians():
             "license_number": user["license_number"],
             "specialisation": user.get("specialisation"),
             "status": user.get("status", "APPROVED"),
-            "branch_name": None,
-            "practice_name": None,
+            "branch_name": branches_db.get(user.get("branch_id"), {}).get("name"),
+            "branch_address": branches_db.get(user.get("branch_id"), {}).get("address"),
+            "practice_name": branches_db.get(user.get("branch_id"), {}).get("business_name"),
         }
         for user in users_db.values()
         if user.get("type") == "dietitian" and user.get("status") == "APPROVED"
     ]
     return sorted(dietitians, key=lambda user: user["full_name"].casefold())
+
+
+@router.get("/api/v1/dietitians/me/branches", tags=["1. Auth & Admin"])
+def list_my_dietitian_branches(dietitian_id: str = Depends(require_dietitian)):
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT d.status, d.branch_id AS current_branch_id, b.business_id "
+                "FROM dietitian d JOIN branch b ON b.branch_id = d.branch_id "
+                "WHERE d.dietitian_id = %s",
+                (dietitian_id,),
+            )
+            assignment = cursor.fetchone()
+            if not assignment:
+                raise HTTPException(status_code=404, detail="Dietitian record not found")
+            cursor.execute(
+                "SELECT branch_id, name, address FROM branch "
+                "WHERE business_id = %s ORDER BY LOWER(name)",
+                (assignment["business_id"],),
+            )
+            return {
+                "status": assignment["status"],
+                "current_branch_id": assignment["current_branch_id"],
+                "branches": [dict(row) for row in cursor.fetchall()],
+            }
+
+    user = users_db.get(dietitian_id)
+    if not user or user.get("type") != "dietitian":
+        raise HTTPException(status_code=404, detail="Dietitian record not found")
+    branches = [
+        {"branch_id": branch["branch_id"], "name": branch["name"], "address": branch.get("address")}
+        for branch in branches_db.values()
+        if branch.get("business_id") == user.get("business_id")
+    ]
+    return {
+        "status": user.get("status", "PENDING"),
+        "current_branch_id": user.get("branch_id"),
+        "branches": sorted(branches, key=lambda branch: branch["name"].casefold()),
+    }
+
+
+@router.post(
+    "/api/v1/dietitians/me/branches",
+    status_code=status.HTTP_201_CREATED,
+    tags=["1. Auth & Admin"],
+)
+def create_my_dietitian_branch(
+    data: DietitianBranchCreate,
+    dietitian_id: str = Depends(require_dietitian),
+):
+    name = data.name.strip()
+    address = data.address.strip()
+    if not name or not address:
+        raise HTTPException(status_code=422, detail="Branch name and address are required")
+
+    branch_id = str(uuid.uuid4())
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT d.status, b.business_id FROM dietitian d "
+                "JOIN branch b ON b.branch_id = d.branch_id WHERE d.dietitian_id = %s",
+                (dietitian_id,),
+            )
+            dietitian = cursor.fetchone()
+            if not dietitian:
+                raise HTTPException(status_code=404, detail="Dietitian record not found")
+            if dietitian["status"] != "APPROVED":
+                raise HTTPException(status_code=403, detail="Only approved dietitians can add branches")
+            cursor.execute(
+                "SELECT 1 FROM branch WHERE business_id = %s AND LOWER(name) = LOWER(%s) LIMIT 1",
+                (dietitian["business_id"], name),
+            )
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="A branch with this name already exists in your practice")
+            cursor.execute(
+                "INSERT INTO branch (branch_id, business_id, name, address) VALUES (%s, %s, %s, %s)",
+                (branch_id, dietitian["business_id"], name, address),
+            )
+            cursor.execute(
+                "UPDATE dietitian SET branch_id = %s WHERE dietitian_id = %s",
+                (branch_id, dietitian_id),
+            )
+        return {
+            "message": "Branch created and set as your current base",
+            "branch": {
+                "branch_id": branch_id,
+                "business_id": dietitian["business_id"],
+                "name": name,
+                "address": address,
+            },
+        }
+
+    user = users_db.get(dietitian_id)
+    if not user or user.get("type") != "dietitian":
+        raise HTTPException(status_code=404, detail="Dietitian record not found")
+    if user.get("status") != "APPROVED":
+        raise HTTPException(status_code=403, detail="Only approved dietitians can add branches")
+    business_id = user.get("business_id")
+    if not business_id or business_id not in businesses_db:
+        raise HTTPException(status_code=409, detail="Your practice is not configured for branches")
+    if any(
+        branch.get("business_id") == business_id and branch["name"].casefold() == name.casefold()
+        for branch in branches_db.values()
+    ):
+        raise HTTPException(status_code=409, detail="A branch with this name already exists in your practice")
+    business = businesses_db[business_id]
+    branch = {
+        "branch_id": branch_id,
+        "business_id": business_id,
+        "business_name": business["name"],
+        "name": name,
+        "address": address,
+        "dietitian_count": 1,
+    }
+    branches_db[branch_id] = branch
+    business["branch_count"] += 1
+    previous_branch = branches_db.get(user.get("branch_id"))
+    if previous_branch:
+        previous_branch["dietitian_count"] = max(0, previous_branch.get("dietitian_count", 1) - 1)
+    user["branch_id"] = branch_id
+    return {"message": "Branch created and set as your current base", "branch": branch}
 
 
 @router.get("/api/v1/dietitians/me/approval", tags=["1. Auth & Admin"])
@@ -581,6 +703,7 @@ def list_admin_dietitians(admin_id: str = Depends(require_admin)):
             cursor.execute(
                 "SELECT d.dietitian_id, TRIM(d.first_name || ' ' || d.last_name) AS full_name, "
                 "d.email, d.registration_number AS license_number, d.status, b.name AS branch_name, "
+                "b.address AS branch_address, "
                 "bus.name AS business_name FROM dietitian d "
                 "JOIN branch b ON b.branch_id = d.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
@@ -599,6 +722,7 @@ def list_admin_dietitians(admin_id: str = Depends(require_admin)):
             "license_number": user.get("license_number", ""),
             "status": user.get("status", "PENDING"),
             "branch_name": branch.get("name", "Main Practice"),
+            "branch_address": branch.get("address"),
             "business_name": branch.get("business_name", f"{user['full_name']} Practice"),
         })
     return sorted(rows, key=lambda item: item["full_name"].casefold())
