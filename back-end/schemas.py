@@ -88,6 +88,15 @@ class GoalCreate(BaseModel):
     target_value: float
 
 # Section 5 Schemas
+class FoodItemCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=150)
+    calories: int = Field(..., ge=0)
+    protein_g: float = Field(default=0, ge=0)
+    carbs_g: float = Field(default=0, ge=0)
+    fat_g: float = Field(default=0, ge=0)
+    glycemic_index: Optional[int] = Field(default=None, ge=0, le=100)
+
+
 class FoodItem(BaseModel):
     food_id: str
     name: str

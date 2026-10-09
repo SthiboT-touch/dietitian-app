@@ -412,6 +412,65 @@ def test_dietitian_directory_lists_registered_dietitians():
     assert [item["full_name"] for item in response.json()] == ["Casey Brooks", "Morgan Avery"]
 
 
+def test_dietitian_rejection_requires_reason_and_allows_resubmission():
+    dietitian = client.post(
+        "/api/v1/auth/register/dietitian",
+        json={
+            "first_name": "Taylor",
+            "last_name": "Morgan",
+            "email": "taylor@example.com",
+            "license_number": "RD-REJECTED",
+            "password": "dietitian-safe-password",
+        },
+    ).json()["user"]
+    state.admin_sessions_db["admin-token"] = "admin-1"
+    state.dietitian_sessions_db["dietitian-token"] = dietitian["id"]
+    admin_headers = {"Authorization": "Bearer admin-token"}
+    dietitian_headers = {"Authorization": "Bearer dietitian-token"}
+
+    missing_reason = client.post(
+        "/api/v1/admin/approvals",
+        headers=admin_headers,
+        json={"dietitian_id": dietitian["id"], "status": "REJECTED", "notes": "  "},
+    )
+    assert missing_reason.status_code == 422
+
+    rejection = client.post(
+        "/api/v1/admin/approvals",
+        headers=admin_headers,
+        json={
+            "dietitian_id": dietitian["id"],
+            "status": "REJECTED",
+            "notes": "Please upload a current license.",
+        },
+    )
+    assert rejection.status_code == 200
+    approval = client.get("/api/v1/dietitians/me/approval", headers=dietitian_headers)
+    assert approval.status_code == 200
+    assert approval.json() == {
+        "status": "REJECTED",
+        "rejection_reason": "Please upload a current license.",
+    }
+
+    resubmission = client.post(
+        "/api/v1/dietitians/me/approval/resubmit",
+        headers=dietitian_headers,
+    )
+    assert resubmission.status_code == 200
+    assert resubmission.json()["status"] == "PENDING"
+    assert client.get(
+        "/api/v1/dietitians/me/approval",
+        headers=dietitian_headers,
+    ).json()["rejection_reason"] == "Please upload a current license."
+    assert any(
+        item["dietitian_id"] == dietitian["id"]
+        for item in client.get(
+            "/api/v1/admin/approvals/pending",
+            headers=admin_headers,
+        ).json()
+    )
+
+
 def test_pending_dietitian_is_not_in_client_directory():
     client.post(
         "/api/v1/auth/register/dietitian",
@@ -653,6 +712,28 @@ def test_foods_endpoint_returns_food_items():
 
     assert response.status_code == 200
     assert any(food["name"] == "Oatmeal" for food in response.json())
+
+
+def test_only_admin_can_add_food_to_library():
+    payload = {
+        "name": "Roasted chickpeas",
+        "calories": 164,
+        "protein_g": 8.9,
+        "carbs_g": 27.4,
+        "fat_g": 2.6,
+        "glycemic_index": 28,
+    }
+    assert client.post("/api/v1/foods", json=payload).status_code == 401
+
+    state.admin_sessions_db["food-admin-token"] = "admin-food-test"
+    headers = {"Authorization": "Bearer food-admin-token"}
+    response = client.post("/api/v1/foods", headers=headers, json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["name"] == payload["name"]
+    assert any(food["food_id"] == response.json()["food_id"] for food in client.get("/api/v1/foods").json())
+    duplicate = client.post("/api/v1/foods", headers=headers, json=payload)
+    assert duplicate.status_code == 409
 
 
 def test_recipe_create_and_list():

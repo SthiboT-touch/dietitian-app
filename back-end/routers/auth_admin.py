@@ -244,6 +244,69 @@ def get_dietitians():
     ]
     return sorted(dietitians, key=lambda user: user["full_name"].casefold())
 
+
+@router.get("/api/v1/dietitians/me/approval", tags=["1. Auth & Admin"])
+def get_my_dietitian_approval(dietitian_id: str = Depends(require_dietitian)):
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT d.status, ("
+                "SELECT al.comments FROM approval_log al "
+                "WHERE al.entity_type = 'DIETITIAN' AND al.entity_id = d.dietitian_id "
+                "AND al.action = 'REJECTED' ORDER BY al.action_date DESC LIMIT 1"
+                ") AS rejection_reason FROM dietitian d WHERE d.dietitian_id = %s",
+                (dietitian_id,),
+            )
+            approval = cursor.fetchone()
+        if not approval:
+            raise HTTPException(status_code=404, detail="Dietitian not found")
+        return dict(approval)
+
+    user = users_db.get(dietitian_id)
+    if not user or user.get("type") != "dietitian":
+        raise HTTPException(status_code=404, detail="Dietitian not found")
+    latest_rejection = next(
+        (
+            entry for entry in reversed(approval_log_db)
+            if entry.get("entity_type") == "DIETITIAN"
+            and entry.get("entity_id") == dietitian_id
+            and entry.get("action") == "REJECTED"
+        ),
+        None,
+    )
+    return {
+        "status": user.get("status", "PENDING"),
+        "rejection_reason": latest_rejection.get("comments") if latest_rejection else None,
+    }
+
+
+@router.post("/api/v1/dietitians/me/approval/resubmit", tags=["1. Auth & Admin"])
+def resubmit_dietitian_approval(dietitian_id: str = Depends(require_dietitian)):
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "UPDATE dietitian SET status = 'PENDING' "
+                "WHERE dietitian_id = %s AND status = 'REJECTED' "
+                "RETURNING dietitian_id",
+                (dietitian_id,),
+            )
+            if cursor.fetchone():
+                return {"message": "Registration resubmitted for admin review", "status": "PENDING"}
+            cursor.execute("SELECT status FROM dietitian WHERE dietitian_id = %s", (dietitian_id,))
+            dietitian = cursor.fetchone()
+            if not dietitian:
+                raise HTTPException(status_code=404, detail="Dietitian not found")
+            raise HTTPException(status_code=409, detail="Only rejected registrations can be resubmitted")
+
+    user = users_db.get(dietitian_id)
+    if not user or user.get("type") != "dietitian":
+        raise HTTPException(status_code=404, detail="Dietitian not found")
+    if user.get("status") != "REJECTED":
+        raise HTTPException(status_code=409, detail="Only rejected registrations can be resubmitted")
+    user["status"] = "PENDING"
+    return {"message": "Registration resubmitted for admin review", "status": "PENDING"}
+
+
 @router.get("/api/v1/dietitians/me/documents", tags=["1. Auth & Admin"])
 def list_my_dietitian_documents(dietitian_id: str = Depends(require_dietitian)):
     if config.DATABASE_ENABLED:
@@ -379,6 +442,9 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
 
 @router.post("/api/v1/admin/approvals", tags=["1. Auth & Admin"])
 def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)):
+    notes = data.notes.strip() if data.notes else ""
+    if data.status == "REJECTED" and not notes:
+        raise HTTPException(status_code=422, detail="A reason is required when rejecting a dietitian")
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             if data.status == "APPROVED":
@@ -397,7 +463,7 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
             cursor.execute(
                 "INSERT INTO approval_log (admin_id, entity_type, entity_id, action, comments) "
                 "VALUES (%s, 'DIETITIAN', %s, %s, %s)",
-                (admin_id, data.dietitian_id, data.status, data.notes),
+                (admin_id, data.dietitian_id, data.status, notes or None),
             )
         return {"message": f"Dietitian status updated to {data.status}"}
     if data.dietitian_id not in users_db:
@@ -412,7 +478,7 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
         "entity_type": "DIETITIAN",
         "entity_id": data.dietitian_id,
         "action": data.status,
-        "comments": data.notes,
+        "comments": notes or None,
     })
     return {"message": f"Dietitian status updated to {data.status}"}
 
