@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from unittest.mock import patch
 
@@ -13,6 +13,7 @@ import app
 import config
 import state
 from routers import ai
+from security import hash_password
 
 
 client = TestClient(app.app)
@@ -80,6 +81,33 @@ def test_signup_and_login_use_saved_credentials():
 
     assert login_response.status_code == 200
     assert login_response.json()["user"]["id"] == registered_user["id"]
+
+
+def test_database_client_login_includes_date_of_birth(monkeypatch):
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+    database_row = {
+        "id": "client-1",
+        "type": "client",
+        "full_name": "Jordan Lee",
+        "email": "jordan@example.com",
+        "dietitian_id": "dietitian-1",
+        "date_of_birth": date(1990, 5, 14),
+        "password_hash": hash_password("client-safe-pass"),
+    }
+
+    with patch("routers.auth_admin.database.cursor") as cursor_context:
+        cursor = cursor_context.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [None, database_row]
+
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"email": "jordan@example.com", "password": "client-safe-pass"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["date_of_birth"] == "1990-05-14"
+    client_query = cursor.execute.call_args_list[1].args[0]
+    assert "date_of_birth" in client_query
 
 
 def test_login_rejects_invalid_credentials():
