@@ -1,12 +1,13 @@
 """5. Foods, recipes and meal plans."""
 import json
 import uuid
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 import database
 import config
 from state import users_db, meal_plans_db, recipes_db, foods_db
-from schemas import FoodItem, RecipeCreate, MealPlanRequest, MealPlanResponse
+from schemas import FoodItem, FoodItemCreate, RecipeCreate, MealPlanRequest, MealPlanResponse
+from security import require_admin
 
 
 router = APIRouter()
@@ -33,6 +34,56 @@ def get_foods():
                 for row in cursor.fetchall()
             ]
     return foods_db
+
+
+@router.post(
+    "/api/v1/foods",
+    response_model=FoodItem,
+    status_code=status.HTTP_201_CREATED,
+    tags=["5. Foods & Meal Planning"],
+)
+def create_food(data: FoodItemCreate, admin_id: str = Depends(require_admin)):
+    name = data.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Food name is required")
+    food_id = str(uuid.uuid4())
+    food = {
+        "food_id": food_id,
+        "name": name,
+        "calories": data.calories,
+        "protein_g": data.protein_g,
+        "carbs_g": data.carbs_g,
+        "fat_g": data.fat_g,
+        "glycemic_index": data.glycemic_index,
+    }
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT 1 FROM food_item WHERE LOWER(name) = LOWER(%s) LIMIT 1",
+                (name,),
+            )
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="A food with this name already exists")
+            cursor.execute(
+                "INSERT INTO food_item "
+                "(food_item_id, name, calories, protein, carbs, fat, glycemic_index) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (
+                    food_id,
+                    name,
+                    data.calories,
+                    data.protein_g,
+                    data.carbs_g,
+                    data.fat_g,
+                    data.glycemic_index,
+                ),
+            )
+    else:
+        if any(existing["name"].casefold() == name.casefold() for existing in foods_db):
+            raise HTTPException(status_code=409, detail="A food with this name already exists")
+        foods_db.append(food)
+    return food
+
 
 @router.post("/api/v1/recipes", tags=["5. Foods & Meal Planning"])
 def create_recipe(data: RecipeCreate):

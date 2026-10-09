@@ -210,11 +210,12 @@ function bindPatientContextButtons() {
 async function renderDietitianDashboard() {
   const doctorName = currentUser && currentUser.full_name ? currentUser.full_name.split(" ")[0] : "John";
   const query = `?dietitian_id=${encodeURIComponent(currentUser.id)}`;
-  const [clients, appointments, recommendations, plans] = await Promise.all([
+  const [clients, appointments, recommendations, plans, approval] = await Promise.all([
     request(`/api/v1/clients${query}`),
     request(`/api/v1/appointments${query}`),
     request("/api/v1/ai/recommendations/pending"),
     request(`/api/v1/meal-plans${query}`),
+    request("/api/v1/dietitians/me/approval"),
   ]);
   workspaceContent.innerHTML = `
     <div class="page-heading">
@@ -225,6 +226,8 @@ async function renderDietitianDashboard() {
       </div>
       <button class="button button-primary" data-go="meal-plans" type="button">Draft meal plan <span aria-hidden="true">&#8594;</span></button>
     </div>
+    ${dietitianApprovalMarkup(approval)}
+    <div data-message class="workspace-message" hidden></div>
     <div class="overview-grid">
       <section class="stat-panel">
         <div>
@@ -268,6 +271,7 @@ async function renderDietitianDashboard() {
   workspaceContent.querySelectorAll("[data-open-client]").forEach((button) => {
     button.addEventListener("click", () => renderClientManagementProfile(button.dataset.openClient));
   });
+  bindApprovalResubmission();
   bindGoButtons();
 }
 
@@ -500,9 +504,12 @@ async function renderClientDashboard(firstName) {
   });
 }
 
-function renderMyProfile() {
+async function renderMyProfile() {
   const user = currentUser;
   const isClient = user.type === "client";
+  const approval = user.type === "dietitian"
+    ? await request("/api/v1/dietitians/me/approval")
+    : null;
   const fields = isClient
     ? [
       ["Patient ID", user.id], ["Full name", user.full_name], ["Email", user.email],
@@ -510,15 +517,47 @@ function renderMyProfile() {
     ]
     : [
       ["Dietitian ID", user.id], ["Full name", user.full_name], ["Email", user.email],
-      ["License number", user.license_number], ["Account status", user.status],
+      ["License number", user.license_number], ["Account status", approval.status],
     ];
   workspaceContent.innerHTML = `
     ${pageHeading("MY PROFILE", isClient ? "My Profile." : "Dietitian Profile.", "Account information used to coordinate your nutrition care.")}
+    ${approval ? `${dietitianApprovalMarkup(approval)}<div data-message class="workspace-message" hidden></div>` : ""}
     <section class="content-panel">
       <dl class="profile-details">${fields.map(([label, value]) => `
         <div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "Not provided")}</dd></div>
       `).join("")}</dl>
     </section>`;
+  if (approval) bindApprovalResubmission();
+}
+
+function dietitianApprovalMarkup(approval) {
+  if (approval.status === "APPROVED") return "";
+  const statusText = approval.status === "REJECTED" ? "Registration rejected" : "Registration pending";
+  const reason = approval.rejection_reason
+    ? `<p><strong>Admin feedback:</strong> ${escapeHtml(approval.rejection_reason)}</p>`
+    : "";
+  const action = approval.status === "REJECTED"
+    ? '<button class="button button-small button-primary" data-approval-resubmit type="button">Resubmit to admin</button>'
+    : "";
+  return `<section class="notice approval-feedback" aria-live="polite"><strong>${statusText}</strong>${reason}${approval.status === "PENDING" ? "<p>Your registration is awaiting admin review.</p>" : "<p>Address the feedback, upload any corrected verification documents, then resubmit for review.</p>"}${action}</section>`;
+}
+
+function bindApprovalResubmission() {
+  workspaceContent.querySelector("[data-approval-resubmit]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await request("/api/v1/dietitians/me/approval/resubmit", { method: "POST" });
+      if (workspaceContent.querySelector(".profile-details")) {
+        await renderMyProfile();
+      } else {
+        await renderDietitianDashboard();
+      }
+    } catch (error) {
+      button.disabled = false;
+      showWorkspaceMessage(error.message, true);
+    }
+  });
 }
 
 async function renderClientHealth(clientId, section) {
@@ -875,7 +914,7 @@ async function loadView(view, initialAIPanel = "coach") {
       const panel = view === "ai" ? "plan" : view === "ai-chat" ? "coach" : initialAIPanel;
       await renderAIWorkspace(panel, clientId);
     } else if (view === "my-profile") {
-      renderMyProfile();
+      await renderMyProfile();
     } else if (view.startsWith("health-")) {
       await renderClientHealth(clientId, view.slice("health-".length));
     } else if (view === "client-progress") {
@@ -1120,10 +1159,47 @@ async function renderFoods() {
   const foods = await request("/api/v1/foods");
   workspaceContent.innerHTML = `
     ${pageHeading("REFERENCE", "Food library.", "A quick reference for ingredients in the practice catalog.")}
+    ${currentUser.type === "admin" ? `
+      <div data-message class="workspace-message" hidden></div>
+      <section class="content-panel">
+        <div class="section-heading form-section-heading"><h2>Add a food</h2><span>NEW FOOD</span></div>
+        <form id="foodForm" class="form-grid">
+          <div class="form-field"><label for="foodName">Food name</label><input class="text-input" id="foodName" name="name" maxlength="150" required></div>
+          <div class="form-field"><label for="foodCalories">Calories (kcal)</label><input class="text-input" id="foodCalories" name="calories" type="number" min="0" step="1" required></div>
+          <div class="form-field"><label for="foodProtein">Protein (g)</label><input class="text-input" id="foodProtein" name="protein_g" type="number" min="0" step="0.1" value="0" required></div>
+          <div class="form-field"><label for="foodCarbs">Carbohydrates (g)</label><input class="text-input" id="foodCarbs" name="carbs_g" type="number" min="0" step="0.1" value="0" required></div>
+          <div class="form-field"><label for="foodFat">Fat (g)</label><input class="text-input" id="foodFat" name="fat_g" type="number" min="0" step="0.1" value="0" required></div>
+          <div class="form-field"><label for="foodGlycemicIndex">Glycemic index (optional)</label><input class="text-input" id="foodGlycemicIndex" name="glycemic_index" type="number" min="0" max="100" step="1"></div>
+          <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add to library</button></div>
+        </form>
+      </section>` : ""}
     <div class="food-list">
       <div class="food-row food-header"><span>FOOD</span><span>CALORIES</span><span>PROTEIN</span><span>CARBS</span><span>FAT</span></div>
       ${foods.map((food) => `<div class="food-row"><span class="food-name">${escapeHtml(food.name)}</span><span>${food.calories} kcal</span><span>${food.protein_g} g</span><span>${food.carbs_g} g</span><span>${food.fat_g} g</span></div>`).join("")}
     </div>`;
+  const form = document.querySelector("#foodForm");
+  if (form) form.addEventListener("submit", createFood);
+}
+
+async function createFood(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("button[type=submit]");
+  const values = Object.fromEntries(new FormData(form));
+  values.calories = Number(values.calories);
+  values.protein_g = Number(values.protein_g);
+  values.carbs_g = Number(values.carbs_g);
+  values.fat_g = Number(values.fat_g);
+  values.glycemic_index = values.glycemic_index === "" ? null : Number(values.glycemic_index);
+  button.disabled = true;
+  try {
+    await request("/api/v1/foods", { method: "POST", body: JSON.stringify(values) });
+    await renderFoods();
+    showWorkspaceMessage("Food added to the library.");
+  } catch (error) {
+    button.disabled = false;
+    showWorkspaceMessage(error.message, true);
+  }
 }
 
 async function renderRecipes() {
@@ -1372,7 +1448,7 @@ async function renderAdminApprovals() {
         </div>
         <div class="admin-document-list">${dietitian.documents.length ? dietitian.documents.map((document) => `
           <div class="admin-document-row"><span>${escapeHtml(document.file_name)} · ${escapeHtml(document.content_type)}</span><button class="button quiet-button button-small" data-document-id="${escapeHtml(document.document_id)}" data-file-name="${escapeHtml(document.file_name)}" type="button">View document</button></div>`).join("") : '<p class="document-hint">No verification documents submitted yet.</p>'}</div>
-        <label class="form-field admin-approval-notes"><span class="field-label">Decision note <span class="stat-caption">(optional)</span></span><input class="text-input" name="notes" placeholder="Record verification details"></label>
+        <label class="form-field admin-approval-notes"><span class="field-label">Decision note <span class="stat-caption">(required for rejection; optional for approval)</span></span><input class="text-input" name="notes" placeholder="Explain the reason for rejection or approval"></label>
         <div class="review-actions"><button class="button button-small button-reject" data-admin-decision="REJECTED" type="button">Reject</button><button class="button button-small button-approve" data-admin-decision="APPROVED" type="button" ${dietitian.documents.length ? "" : "disabled"}>Approve</button></div>
       </article>`).join("") : '<p class="empty-state">No dietitian registrations are waiting for review.</p>'}</div>`;
   workspaceContent.querySelectorAll("[data-admin-decision]").forEach((button) => {
@@ -1417,6 +1493,12 @@ async function viewDietitianDocument(event) {
 async function reviewDietitianRegistration(event) {
   const button = event.currentTarget;
   const card = button.closest("[data-dietitian-id]");
+  const notes = card.querySelector("[name=notes]").value.trim();
+  if (button.dataset.adminDecision === "REJECTED" && !notes) {
+    showWorkspaceMessage("Enter a reason before rejecting this registration.", true);
+    card.querySelector("[name=notes]").focus();
+    return;
+  }
   button.disabled = true;
   try {
     await request("/api/v1/admin/approvals", {
@@ -1424,7 +1506,7 @@ async function reviewDietitianRegistration(event) {
       body: JSON.stringify({
         dietitian_id: card.dataset.dietitianId,
         status: button.dataset.adminDecision,
-        notes: card.querySelector("[name=notes]").value.trim(),
+        notes,
       }),
     });
     await renderAdminApprovals();

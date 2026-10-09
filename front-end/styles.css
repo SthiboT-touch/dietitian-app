@@ -200,6 +200,8 @@ textarea { min-height: 82px; resize: vertical; }
 .result-index { color: var(--rust); font-family: var(--serif); font-size: 16px; }
 .subsection-label { margin: 22px 0 10px; color: var(--green); font-size: 9px; font-weight: 700; letter-spacing: 1.1px; }
 .notice { margin: 15px 0 0; padding: 11px 13px; border-left: 2px solid var(--rust); background: #f8f0e9; color: #75513f; font-size: 10px; line-height: 1.55; }
+.approval-feedback { display: grid; justify-items: start; gap: 8px; }
+.approval-feedback p { margin: 0; }
 .loading-copy, .empty-state { padding: 24px 5px; color: #7d8479; font-size: 12px; }
 .review-list, .food-list { display: grid; gap: 12px; }
 .review-card { padding: 18px; border: 1px solid var(--line); border-radius: 5px; background: var(--white); }
