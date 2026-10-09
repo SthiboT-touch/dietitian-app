@@ -1143,6 +1143,24 @@ def test_admin_setup_login_and_audited_dietitian_approval():
         files={"file": ("license.pdf", b"%PDF-1.4\nverification document", "application/pdf")},
     )
     assert upload.status_code == 201
+    submitted_branch = upload.json()["branch"]
+    registered_branch = branch_response.json()["branch"]
+    assert submitted_branch["branch_id"] == registered_branch["branch_id"]
+    assert submitted_branch["business_id"] == registered_branch["business_id"]
+    assert submitted_branch["name"] == "Registration Clinic"
+    assert submitted_branch["address"] == "12 Health Street"
+    later_branch = local_client.post(
+        "/api/v1/dietitians/me/branches",
+        headers=dietitian_authorization,
+        json={"name": "Later Clinic", "address": "99 New Street"},
+    )
+    assert later_branch.status_code == 201
+    listed_document = local_client.get(
+        "/api/v1/dietitians/me/documents",
+        headers=dietitian_authorization,
+    ).json()[0]
+    assert listed_document["branch_id"] == submitted_branch["branch_id"]
+    assert listed_document["branch_name"] == "Registration Clinic"
     assert local_client.get(
         f"/api/v1/admin/dietitian-documents/{upload.json()['document_id']}"
     ).status_code == 401
@@ -1156,8 +1174,13 @@ def test_admin_setup_login_and_audited_dietitian_approval():
     assert pending.status_code == 200
     assert pending.json()[0]["dietitian_id"] == dietitian["id"]
     assert pending.json()[0]["documents"][0]["file_name"] == "license.pdf"
-    assert pending.json()[0]["branch_name"] == "Registration Clinic"
-    assert pending.json()[0]["branch_address"] == "12 Health Street"
+    submitted_document = pending.json()[0]["documents"][0]
+    assert submitted_document["branch_id"] == submitted_branch["branch_id"]
+    assert submitted_document["business_id"] == submitted_branch["business_id"]
+    assert submitted_document["branch_name"] == submitted_branch["name"]
+    assert submitted_document["branch_address"] == submitted_branch["address"]
+    assert pending.json()[0]["branch_name"] == "Later Clinic"
+    assert pending.json()[0]["branch_address"] == "99 New Street"
 
     approval = local_client.post(
         "/api/v1/admin/approvals",
@@ -1173,5 +1196,5 @@ def test_admin_setup_login_and_audited_dietitian_approval():
         item for item in local_client.get("/api/v1/dietitians").json()
         if item["id"] == dietitian["id"]
     )
-    assert approved_directory_entry["branch_name"] == "Registration Clinic"
-    assert approved_directory_entry["branch_address"] == "12 Health Street"
+    assert approved_directory_entry["branch_name"] == "Later Clinic"
+    assert approved_directory_entry["branch_address"] == "99 New Street"
