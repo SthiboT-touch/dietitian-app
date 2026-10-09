@@ -63,7 +63,7 @@ The generated-plan endpoint is `POST /api/v1/ai/generate-plan` with a JSON body 
 
 The API sends the goal and any recorded allergies and medical conditions to Ollama. Recommendations remain `PENDING_REVIEW` until approved by a dietitian. These suggestions are not a substitute for clinical judgment.
 
-Plan generation uses a LangChain prompt/model/output-parser chain with `ChatOllama`; chat uses a LangChain agent with read-only food-catalog search and includes up to eight recent turns as short-term context. Chat history is held in process memory and is cleared when the API restarts. Generated plans remain pending until reviewed by a dietitian. The routes and response shapes stay the same; LangChain dependencies are installed from `back-end/requirements.txt`.
+AI workflows use LangGraph `StateGraph`s: chat loads recent context, routes greetings directly or invokes the tool-enabled LangChain agent, and saves the turn; plan generation loads the client profile, drafts a plan with `ChatOllama`, and stores the recommendation as `PENDING_REVIEW`; and a separate review graph applies the dietitian's decision. Chat history remains in process memory and is cleared when the API restarts; recommendation and review state use PostgreSQL when configured. The routes and response shapes stay the same; LangChain and LangGraph dependencies are installed from `back-end/requirements.txt`.
 
 The Oracle Cloud deployment workflow applies the client health schema repair before starting the API. It creates any missing client health tables and adds the missing lactation end date column without replacing existing records. For other deployments, run `python back-end/migrations/apply_002_client_health_schema.py` once with `DATABASE_URL` configured.
 

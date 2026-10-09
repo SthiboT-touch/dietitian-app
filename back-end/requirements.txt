@@ -6,4 +6,5 @@ python-dotenv==1.1.1
 python-multipart==0.0.32
 langchain>=1.0.0,<2.0.0
 langchain-core>=0.3.72,<2.0.0
+langgraph>=1.0.0,<2.0.0
 langchain-ollama>=0.3.10,<2.0.0

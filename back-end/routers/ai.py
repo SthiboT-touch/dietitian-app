@@ -6,7 +6,7 @@ import re
 import uuid
 from functools import lru_cache
 from fastapi import APIRouter, HTTPException
-from typing import List, Optional
+from typing import List, Optional, TypedDict
 import httpx
 from langchain.agents import create_agent
 from langchain_core.exceptions import OutputParserException
@@ -15,6 +15,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
+from langgraph.graph import END, START, StateGraph
 from ollama import RequestError, ResponseError
 import database
 import config
@@ -28,6 +29,32 @@ logger = logging.getLogger(__name__)
 
 
 # --- AI ENGINE & HUMAN-IN-THE-LOOP WORKFLOW ---
+
+class ChatWorkflowState(TypedDict, total=False):
+    user_id: str
+    role: str
+    message: str
+    conversation: List[dict]
+    reply: str
+    persist: bool
+
+
+class PlanWorkflowState(TypedDict, total=False):
+    client_id: str
+    dietary_goal: str
+    client_profile: Optional[dict]
+    dietitian_id: Optional[str]
+    generated_plan: List[str]
+    recommendation: dict
+
+
+class ReviewWorkflowState(TypedDict, total=False):
+    recommendation_id: str
+    action: str
+    notes: Optional[str]
+    message: str
+    recommendation: dict
+
 
 def _create_chat_model(output_format: Optional[str] = None) -> ChatOllama:
     model_options = {
@@ -90,6 +117,93 @@ def generate_llama_plan(dietary_goal: str, client_profile: Optional[dict] = None
             status_code=503,
             detail="Llama service unavailable or returned an invalid response. Check Ollama and the configured model.",
         ) from exc
+
+
+def _load_chat_history(state: ChatWorkflowState) -> dict:
+    if "conversation" in state:
+        return {"conversation": state["conversation"]}
+    return {"conversation": ai_conversations_db.get(state["user_id"], [])}
+
+
+def _route_chat_reply(state: ChatWorkflowState) -> str:
+    return "greeting" if _greeting_reply(state["message"]) else "agent"
+
+
+def _reply_to_greeting(state: ChatWorkflowState) -> dict:
+    return {"reply": _greeting_reply(state["message"])}
+
+
+def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
+    messages = []
+    for turn in state.get("conversation", [])[-8:]:
+        if turn.get("role") in {"user", "assistant"} and isinstance(turn.get("content"), str):
+            messages.append(
+                HumanMessage(content=turn["content"])
+                if turn["role"] == "user"
+                else AIMessage(content=turn["content"])
+            )
+    messages.append(HumanMessage(content=state["message"]))
+
+    try:
+        result = _create_chat_agent(state["role"]).invoke({"messages": messages})
+        content = result["messages"][-1].content
+        if isinstance(content, list):
+            content = "".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and isinstance(block.get("text"), str)
+            )
+        if isinstance(content, str) and content.strip():
+            return {"reply": content.strip()}
+    except (
+        httpx.HTTPError,
+        RequestError,
+        ResponseError,
+        OutputParserException,
+        TimeoutError,
+        IndexError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ):
+        logger.exception("LangChain AI chat request failed")
+        return {
+            "reply": (
+                "I can't reach the AI model right now, so I don't want to guess at an answer. "
+                "Please try again shortly, or ask your dietitian for guidance on a personal medical concern."
+            )
+        }
+    return {"reply": "I couldn't get a usable answer from the AI model. Please try again shortly."}
+
+
+def _persist_chat_turn(state: ChatWorkflowState) -> dict:
+    conversation = [
+        *state.get("conversation", []),
+        {"role": "user", "content": state["message"]},
+        {"role": "assistant", "content": state["reply"]},
+    ]
+    if state.get("persist"):
+        ai_conversations_db[state["user_id"]] = conversation
+    return {"conversation": conversation}
+
+
+@lru_cache(maxsize=1)
+def _create_chat_workflow():
+    workflow = StateGraph(ChatWorkflowState)
+    workflow.add_node("load_history", _load_chat_history)
+    workflow.add_node("greeting_reply", _reply_to_greeting)
+    workflow.add_node("agent_reply", _reply_with_chat_agent)
+    workflow.add_node("persist_turn", _persist_chat_turn)
+    workflow.add_edge(START, "load_history")
+    workflow.add_conditional_edges(
+        "load_history",
+        _route_chat_reply,
+        {"greeting": "greeting_reply", "agent": "agent_reply"},
+    )
+    workflow.add_edge("greeting_reply", "persist_turn")
+    workflow.add_edge("agent_reply", "persist_turn")
+    workflow.add_edge("persist_turn", END)
+    return workflow.compile()
 
 
 @tool
@@ -172,60 +286,132 @@ def _greeting_reply(message: str) -> Optional[str]:
 
 
 def generate_llama_chat_reply(message: str, role: str, conversation: Optional[List[dict]] = None) -> str:
-    greeting = _greeting_reply(message)
-    if greeting:
-        return greeting
+    result = _create_chat_workflow().invoke({
+        "user_id": "",
+        "role": role,
+        "message": message,
+        "conversation": conversation or [],
+        "persist": False,
+    })
+    return result["reply"]
 
-    messages = []
-    for turn in (conversation or [])[-8:]:
-        if turn.get("role") in {"user", "assistant"} and isinstance(turn.get("content"), str):
-            messages.append(
-                HumanMessage(content=turn["content"])
-                if turn["role"] == "user"
-                else AIMessage(content=turn["content"])
-            )
-    messages.append(HumanMessage(content=message))
 
-    try:
-        result = _create_chat_agent(role).invoke({"messages": messages})
-        response = result["messages"][-1]
-        content = response.content
-        if isinstance(content, list):
-            content = "".join(
-                block.get("text", "")
-                for block in content
-                if isinstance(block, dict) and isinstance(block.get("text"), str)
-            )
-        if isinstance(content, str) and content.strip():
-            return content.strip()
-    except (
-        httpx.HTTPError,
-        RequestError,
-        ResponseError,
-        OutputParserException,
-        TimeoutError,
-        IndexError,
-        KeyError,
-        TypeError,
-        ValueError,
-    ):
-        logger.exception("LangChain AI chat request failed")
-        return (
-            "I can't reach the AI model right now, so I don't want to guess at an answer. "
-            "Please try again shortly, or ask your dietitian for guidance on a personal medical concern."
+def _load_plan_context(state: PlanWorkflowState) -> dict:
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            client_profile = fetch_client_profile(cursor, state["client_id"])
+            cursor.execute("SELECT dietitian_id FROM client WHERE client_id = %s", (state["client_id"],))
+            client_row = cursor.fetchone()
+            if not client_row:
+                raise HTTPException(status_code=404, detail="Client ID not found")
+            dietitian_id = client_row["dietitian_id"]
+    else:
+        client_profile = clients_db.get(state["client_id"])
+        dietitian_id = None
+    return {"client_profile": client_profile, "dietitian_id": dietitian_id}
+
+
+def _generate_plan_node(state: PlanWorkflowState) -> dict:
+    return {
+        "generated_plan": generate_llama_plan(
+            state["dietary_goal"],
+            state.get("client_profile"),
         )
-    return "I couldn't get a usable answer from the AI model. Please try again shortly."
+    }
+
+
+def _persist_recommendation_node(state: PlanWorkflowState) -> dict:
+    recommendation_id = f"rec_{uuid.uuid4().hex[:8]}"
+    recommendation = {
+        "recommendation_id": recommendation_id,
+        "client_id": state["client_id"],
+        "dietary_goal": state["dietary_goal"],
+        "status": "PENDING_REVIEW",
+        "generated_plan": state["generated_plan"],
+    }
+    if config.DATABASE_ENABLED:
+        recommendation_text = json.dumps({
+            "dietary_goal": state["dietary_goal"],
+            "generated_plan": state["generated_plan"],
+        })
+        with database.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO ai_recommendation "
+                "(recommendation_id, client_id, dietitian_id, recommendation_text, status) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (
+                    recommendation_id,
+                    state["client_id"],
+                    state.get("dietitian_id"),
+                    recommendation_text,
+                    "PENDING_REVIEW",
+                ),
+            )
+    else:
+        ai_recommendations_db[recommendation_id] = recommendation
+    return {"recommendation": recommendation}
+
+
+@lru_cache(maxsize=1)
+def _create_plan_workflow():
+    workflow = StateGraph(PlanWorkflowState)
+    workflow.add_node("load_client_context", _load_plan_context)
+    workflow.add_node("generate_plan", _generate_plan_node)
+    workflow.add_node("persist_recommendation", _persist_recommendation_node)
+    workflow.add_edge(START, "load_client_context")
+    workflow.add_edge("load_client_context", "generate_plan")
+    workflow.add_edge("generate_plan", "persist_recommendation")
+    workflow.add_edge("persist_recommendation", END)
+    return workflow.compile()
+
+
+def _apply_recommendation_review(state: ReviewWorkflowState) -> dict:
+    recommendation_id = state["recommendation_id"]
+    action = state["action"]
+    notes = state.get("notes")
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "UPDATE ai_recommendation SET status = %s, client_feedback = %s "
+                "WHERE recommendation_id = %s "
+                "RETURNING recommendation_id, client_id, recommendation_text, client_feedback, status",
+                (action, notes, recommendation_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Recommendation ID not found")
+        recommendation = decode_recommendation(row)
+    else:
+        if recommendation_id not in ai_recommendations_db:
+            raise HTTPException(status_code=404, detail="Recommendation ID not found")
+        recommendation = ai_recommendations_db[recommendation_id]
+        recommendation["status"] = action
+        if notes:
+            recommendation["review_notes"] = notes
+    return {
+        "message": f"Recommendation status updated to {action}",
+        "recommendation": recommendation,
+    }
+
+
+@lru_cache(maxsize=1)
+def _create_review_workflow():
+    workflow = StateGraph(ReviewWorkflowState)
+    workflow.add_node("apply_dietitian_review", _apply_recommendation_review)
+    workflow.add_edge(START, "apply_dietitian_review")
+    workflow.add_edge("apply_dietitian_review", END)
+    return workflow.compile()
 
 
 @router.post("/api/v1/ai/chat", tags=["6. AI Engine & HITL Workflow"])
 def chat_with_ai(data: AIChatRequest):
-    conversation_key = data.user_id or f"{data.role}-chat"
-    conversation = ai_conversations_db.setdefault(conversation_key, [])
-    reply = generate_llama_chat_reply(data.message, data.role, conversation)
-    user_message = {"role": "user", "content": data.message}
-    assistant_message = {"role": "assistant", "content": reply}
-    conversation.extend([user_message, assistant_message])
-    return {"reply": reply, "messages": conversation}
+    result = _create_chat_workflow().invoke({
+        "user_id": data.user_id or f"{data.role}-chat",
+        "role": data.role,
+        "message": data.message,
+        "persist": True,
+    })
+    return {"reply": result["reply"], "messages": result["conversation"]}
 
 
 @router.get("/api/v1/ai/chat", tags=["6. AI Engine & HITL Workflow"])
@@ -244,38 +430,11 @@ def get_ai_chat(user_id: str, role: str = "client"):
 
 @router.post("/api/v1/ai/generate-plan", tags=["6. AI Engine & HITL Workflow"])
 def trigger_ai_plan(data: AIGenerateRequest):
-    if config.DATABASE_ENABLED:
-        with database.cursor() as cursor:
-            client_profile = fetch_client_profile(cursor, data.client_id)
-            cursor.execute("SELECT dietitian_id FROM client WHERE client_id = %s", (data.client_id,))
-            dietitian_id = cursor.fetchone()["dietitian_id"]
-    else:
-        client_profile = clients_db.get(data.client_id)
-        dietitian_id = None
-    generated_plan = generate_llama_plan(data.dietary_goal, client_profile)
-    rec_id = f"rec_{uuid.uuid4().hex[:8]}"
-    rec_data = {
-        "recommendation_id": rec_id,
+    result = _create_plan_workflow().invoke({
         "client_id": data.client_id,
         "dietary_goal": data.dietary_goal,
-        "status": "PENDING_REVIEW",
-        "generated_plan": generated_plan
-    }
-    if config.DATABASE_ENABLED:
-        recommendation_text = json.dumps({
-            "dietary_goal": data.dietary_goal,
-            "generated_plan": generated_plan,
-        })
-        with database.cursor() as cursor:
-            cursor.execute(
-                "INSERT INTO ai_recommendation "
-                "(recommendation_id, client_id, dietitian_id, recommendation_text, status) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (rec_id, data.client_id, dietitian_id, recommendation_text, "PENDING_REVIEW"),
-            )
-    else:
-        ai_recommendations_db[rec_id] = rec_data
-    return {"message": "AI recommendation drafted", "recommendation": rec_data}
+    })
+    return {"message": "AI recommendation drafted", "recommendation": result["recommendation"]}
 
 @router.get("/api/v1/ai/recommendations/pending", tags=["6. AI Engine & HITL Workflow"])
 def get_pending_recommendations():
@@ -309,25 +468,8 @@ def get_client_recommendations(client_id: str):
 
 @router.patch("/api/v1/ai/recommendations/{recommendation_id}", tags=["6. AI Engine & HITL Workflow"])
 def review_ai_recommendation(recommendation_id: str, data: RecommendationReview):
-    if config.DATABASE_ENABLED:
-        with database.cursor() as cursor:
-            cursor.execute(
-                "UPDATE ai_recommendation SET status = %s, client_feedback = %s "
-                "WHERE recommendation_id = %s "
-                "RETURNING recommendation_id, client_id, recommendation_text, client_feedback, status",
-                (data.action, data.notes, recommendation_id),
-            )
-            row = cursor.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="Recommendation ID not found")
-        recommendation = decode_recommendation(row)
-        return {
-            "message": f"Recommendation status updated to {data.action}",
-            "recommendation": recommendation,
-        }
-    if recommendation_id not in ai_recommendations_db:
-        raise HTTPException(status_code=404, detail="Recommendation ID not found")
-    ai_recommendations_db[recommendation_id]["status"] = data.action
-    if data.notes:
-        ai_recommendations_db[recommendation_id]["review_notes"] = data.notes
-    return {"message": f"Recommendation status updated to {data.action}", "recommendation": ai_recommendations_db[recommendation_id]}
+    return _create_review_workflow().invoke({
+        "recommendation_id": recommendation_id,
+        "action": data.action,
+        "notes": data.notes,
+    })
