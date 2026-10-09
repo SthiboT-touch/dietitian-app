@@ -24,7 +24,8 @@ jobs:
           script: |
             set -e
             cd ~/dietitian-app_2
-            git pull origin main
+            git fetch origin main
+            git reset --hard FETCH_HEAD
             docker compose down
             docker compose up -d --build db
             for attempt in $(seq 1 30); do
