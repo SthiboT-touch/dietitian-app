@@ -303,31 +303,44 @@ def create_my_dietitian_branch(
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT d.status, b.business_id FROM dietitian d "
+                "SELECT d.status, d.branch_id, b.business_id, b.name AS current_branch_name, "
+                "b.address AS current_branch_address FROM dietitian d "
                 "JOIN branch b ON b.branch_id = d.branch_id WHERE d.dietitian_id = %s",
                 (dietitian_id,),
             )
             dietitian = cursor.fetchone()
             if not dietitian:
                 raise HTTPException(status_code=404, detail="Dietitian record not found")
-            if dietitian["status"] != "APPROVED":
-                raise HTTPException(status_code=403, detail="Only approved dietitians can add branches")
+            if dietitian["status"] not in {"APPROVED", "PENDING", "REJECTED"}:
+                raise HTTPException(status_code=403, detail="Your account is not allowed to add branches")
             cursor.execute(
-                "SELECT 1 FROM branch WHERE business_id = %s AND LOWER(name) = LOWER(%s) LIMIT 1",
-                (dietitian["business_id"], name),
+                "SELECT 1 FROM branch WHERE business_id = %s AND branch_id <> %s "
+                "AND LOWER(name) = LOWER(%s) LIMIT 1",
+                (dietitian["business_id"], dietitian["branch_id"], name),
             )
             if cursor.fetchone():
                 raise HTTPException(status_code=409, detail="A branch with this name already exists in your practice")
-            cursor.execute(
-                "INSERT INTO branch (branch_id, business_id, name, address) VALUES (%s, %s, %s, %s)",
-                (branch_id, dietitian["business_id"], name, address),
-            )
-            cursor.execute(
-                "UPDATE dietitian SET branch_id = %s WHERE dietitian_id = %s",
-                (branch_id, dietitian_id),
-            )
+            if not (dietitian["current_branch_name"] or "").strip() or not (
+                dietitian["current_branch_address"] or ""
+            ).strip():
+                branch_id = dietitian["branch_id"]
+                cursor.execute(
+                    "UPDATE branch SET name = %s, address = %s WHERE branch_id = %s",
+                    (name, address, branch_id),
+                )
+                message = "Branch and location saved"
+            else:
+                cursor.execute(
+                    "INSERT INTO branch (branch_id, business_id, name, address) VALUES (%s, %s, %s, %s)",
+                    (branch_id, dietitian["business_id"], name, address),
+                )
+                cursor.execute(
+                    "UPDATE dietitian SET branch_id = %s WHERE dietitian_id = %s",
+                    (branch_id, dietitian_id),
+                )
+                message = "Branch created and set as your current base"
         return {
-            "message": "Branch created and set as your current base",
+            "message": message,
             "branch": {
                 "branch_id": branch_id,
                 "business_id": dietitian["business_id"],
@@ -339,16 +352,27 @@ def create_my_dietitian_branch(
     user = users_db.get(dietitian_id)
     if not user or user.get("type") != "dietitian":
         raise HTTPException(status_code=404, detail="Dietitian record not found")
-    if user.get("status") != "APPROVED":
-        raise HTTPException(status_code=403, detail="Only approved dietitians can add branches")
+    if user.get("status") not in {"APPROVED", "PENDING", "REJECTED"}:
+        raise HTTPException(status_code=403, detail="Your account is not allowed to add branches")
     business_id = user.get("business_id")
     if not business_id or business_id not in businesses_db:
         raise HTTPException(status_code=409, detail="Your practice is not configured for branches")
+    current_branch_id = user.get("branch_id")
+    current_branch = branches_db.get(current_branch_id)
     if any(
-        branch.get("business_id") == business_id and branch["name"].casefold() == name.casefold()
+        branch_id != current_branch_id
+        and branch.get("business_id") == business_id
+        and branch["name"].casefold() == name.casefold()
         for branch in branches_db.values()
     ):
         raise HTTPException(status_code=409, detail="A branch with this name already exists in your practice")
+    if current_branch and (
+        not (current_branch.get("name") or "").strip()
+        or not (current_branch.get("address") or "").strip()
+    ):
+        current_branch["name"] = name
+        current_branch["address"] = address
+        return {"message": "Branch and location saved", "branch": current_branch}
     business = businesses_db[business_id]
     branch = {
         "branch_id": branch_id,
@@ -360,7 +384,7 @@ def create_my_dietitian_branch(
     }
     branches_db[branch_id] = branch
     business["branch_count"] += 1
-    previous_branch = branches_db.get(user.get("branch_id"))
+    previous_branch = current_branch
     if previous_branch:
         previous_branch["dietitian_count"] = max(0, previous_branch.get("dietitian_count", 1) - 1)
     user["branch_id"] = branch_id
@@ -455,6 +479,31 @@ async def submit_dietitian_document(
     file: UploadFile = File(...),
     dietitian_id: str = Depends(require_dietitian),
 ):
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT b.name, b.address FROM dietitian d "
+                "JOIN branch b ON b.branch_id = d.branch_id "
+                "WHERE d.dietitian_id = %s",
+                (dietitian_id,),
+            )
+            branch = cursor.fetchone()
+        if not branch:
+            raise HTTPException(status_code=404, detail="Dietitian branch not found")
+        if not branch["name"].strip() or not (branch["address"] or "").strip():
+            raise HTTPException(
+                status_code=409,
+                detail="Add your branch name and location before submitting verification documents",
+            )
+    else:
+        user = users_db.get(dietitian_id)
+        branch = branches_db.get(user.get("branch_id")) if user else None
+        if not branch or not branch.get("name", "").strip() or not branch.get("address", "").strip():
+            raise HTTPException(
+                status_code=409,
+                detail="Add your branch name and location before submitting verification documents",
+            )
+
     file_name = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
     if not file_name or len(file_name) > 255:
         raise HTTPException(status_code=400, detail="Choose a file with a valid name")
@@ -525,6 +574,7 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
             cursor.execute(
                 "SELECT d.dietitian_id AS dietitian_id, d.first_name, d.last_name, d.email, "
                 "d.registration_number AS license_number, d.status, b.name AS branch_name, "
+                "b.address AS branch_address, "
                 "bus.name AS practice_name FROM dietitian d "
                 "JOIN branch b ON b.branch_id = d.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
@@ -551,6 +601,9 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
             "email": user["email"],
             "license_number": user["license_number"],
             "status": user["status"],
+            "branch_name": branches_db.get(user.get("branch_id"), {}).get("name"),
+            "branch_address": branches_db.get(user.get("branch_id"), {}).get("address"),
+            "practice_name": branches_db.get(user.get("branch_id"), {}).get("business_name"),
             "documents": [
                 {key: value for key, value in document.items() if key != "file_data"}
                 for document in dietitian_documents_db.values()
@@ -571,6 +624,20 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
         with database.cursor() as cursor:
             if data.status == "APPROVED":
                 cursor.execute(
+                    "SELECT b.name, b.address FROM dietitian d "
+                    "JOIN branch b ON b.branch_id = d.branch_id "
+                    "WHERE d.dietitian_id = %s",
+                    (data.dietitian_id,),
+                )
+                branch = cursor.fetchone()
+                if not branch:
+                    raise HTTPException(status_code=404, detail="Dietitian branch not found")
+                if not branch["name"].strip() or not (branch["address"] or "").strip():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="A branch name and location are required before approval",
+                    )
+                cursor.execute(
                     "SELECT COUNT(*) AS document_count FROM dietitian_document WHERE dietitian_id = %s",
                     (data.dietitian_id,),
                 )
@@ -590,6 +657,13 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
         return {"message": f"Dietitian status updated to {data.status}"}
     if data.dietitian_id not in users_db:
         raise HTTPException(status_code=404, detail="Dietitian not found")
+    if data.status == "APPROVED":
+        branch = branches_db.get(users_db[data.dietitian_id].get("branch_id"))
+        if not branch or not branch.get("name", "").strip() or not branch.get("address", "").strip():
+            raise HTTPException(
+                status_code=409,
+                detail="A branch name and location are required before approval",
+            )
     if data.status == "APPROVED" and not any(
         document["dietitian_id"] == data.dietitian_id for document in dietitian_documents_db.values()
     ):

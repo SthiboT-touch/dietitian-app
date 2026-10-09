@@ -459,7 +459,7 @@ def test_approved_dietitian_can_add_practice_branch_as_current_base():
     assert admin_entry["branch_address"] == "42 River Road"
 
 
-def test_unapproved_dietitian_cannot_add_practice_branch():
+def test_pending_dietitian_can_add_branch_before_registration_approval():
     dietitian = client.post(
         "/api/v1/auth/register/dietitian",
         json={
@@ -478,7 +478,32 @@ def test_unapproved_dietitian_cannot_add_practice_branch():
         json={"name": "New Branch", "address": "42 River Road"},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 201
+    directory = client.get("/api/v1/dietitians").json()
+    assert all(item["id"] != dietitian["id"] for item in directory)
+
+
+def test_verification_documents_require_branch_name_and_location():
+    dietitian = client.post(
+        "/api/v1/auth/register/dietitian",
+        json={
+            "first_name": "New",
+            "last_name": "Applicant",
+            "email": "new-applicant@example.com",
+            "license_number": "RD-NEW-APPLICANT",
+            "password": "nutrition-safe-pass",
+        },
+    ).json()["user"]
+    state.dietitian_sessions_db["applicant-token"] = dietitian["id"]
+
+    response = client.post(
+        "/api/v1/dietitians/me/documents",
+        headers={"Authorization": "Bearer applicant-token"},
+        files={"file": ("license.pdf", b"%PDF-1.4\nverification document", "application/pdf")},
+    )
+
+    assert response.status_code == 409
+    assert "branch name and location" in response.json()["detail"]
 
 
 def test_dietitian_rejection_requires_reason_and_allows_resubmission():
@@ -1094,6 +1119,12 @@ def test_admin_setup_login_and_audited_dietitian_approval():
         json={"email": "pending@example.com", "password": "dietitian-safe-password"},
     )
     dietitian_authorization = {"Authorization": f"Bearer {dietitian_login.json()['access_token']}"}
+    branch_response = local_client.post(
+        "/api/v1/dietitians/me/branches",
+        headers=dietitian_authorization,
+        json={"name": "Registration Clinic", "address": "12 Health Street"},
+    )
+    assert branch_response.status_code == 201
     blocked_approval = local_client.post(
         "/api/v1/admin/approvals",
         headers=authorization,
@@ -1125,6 +1156,8 @@ def test_admin_setup_login_and_audited_dietitian_approval():
     assert pending.status_code == 200
     assert pending.json()[0]["dietitian_id"] == dietitian["id"]
     assert pending.json()[0]["documents"][0]["file_name"] == "license.pdf"
+    assert pending.json()[0]["branch_name"] == "Registration Clinic"
+    assert pending.json()[0]["branch_address"] == "12 Health Street"
 
     approval = local_client.post(
         "/api/v1/admin/approvals",
@@ -1136,3 +1169,9 @@ def test_admin_setup_login_and_audited_dietitian_approval():
     assert state.users_db[dietitian["id"]]["status"] == "APPROVED"
     assert state.approval_log_db[0]["admin_id"] == login.json()["user"]["id"]
     assert state.approval_log_db[0]["comments"] == "Credentials verified"
+    approved_directory_entry = next(
+        item for item in local_client.get("/api/v1/dietitians").json()
+        if item["id"] == dietitian["id"]
+    )
+    assert approved_directory_entry["branch_name"] == "Registration Clinic"
+    assert approved_directory_entry["branch_address"] == "12 Health Street"

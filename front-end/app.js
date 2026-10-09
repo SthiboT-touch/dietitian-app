@@ -17,44 +17,6 @@ async function request(url, options = {}) {
     headers.set("Content-Type", "application/json");
   }
 
-  async function renderDietitianBranches() {
-    const assignment = await request("/api/v1/dietitians/me/branches");
-    const isApproved = assignment.status === "APPROVED";
-    workspaceContent.innerHTML = `
-      ${pageHeading("PRACTICE LOCATIONS", "My branches.", "Add practice locations. Each new branch becomes your current base and is visible to administrators and patients.")}
-      <div data-message class="workspace-message" hidden></div>
-      ${isApproved ? `
-        <section class="content-panel">
-          <div class="section-heading form-section-heading"><h2>Add a branch</h2><span>NEW LOCATION</span></div>
-          <form id="dietitianBranchForm" class="form-grid">
-            <div class="form-field"><label for="dietitianBranchName">Branch name</label><input class="text-input" id="dietitianBranchName" name="name" maxlength="150" required></div>
-            <div class="form-field full-width"><label for="dietitianBranchAddress">Location / address</label><input class="text-input" id="dietitianBranchAddress" name="address" maxlength="255" autocomplete="street-address" required></div>
-            <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add and set as my base</button></div>
-          </form>
-        </section>` : '<p class="notice">Branch creation is available after an administrator approves your registration.</p>'}
-      <div class="section-heading"><h2>Practice locations</h2><span>${assignment.branches.length} BRANCHES</span></div>
-      ${renderAdminTable(["Branch", "Address", "Base"], assignment.branches.map((branch) => [branch.name, branch.address, branch.branch_id === assignment.current_branch_id ? "Current base" : ""]), "No branches are registered for this practice.")}`;
-    const form = document.querySelector("#dietitianBranchForm");
-    if (form) {
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const button = form.querySelector("button[type=submit]");
-        button.disabled = true;
-        const values = Object.fromEntries(new FormData(form));
-        try {
-          await request("/api/v1/dietitians/me/branches", {
-            method: "POST",
-            body: JSON.stringify(values),
-          });
-          await renderDietitianBranches();
-          showWorkspaceMessage("Branch added and set as your current base.");
-        } catch (error) {
-          button.disabled = false;
-          showWorkspaceMessage(error.message, true);
-        }
-      });
-    }
-  }
   const token = sessionStorage.getItem(adminTokenKey) || sessionStorage.getItem(dietitianTokenKey);
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
@@ -503,7 +465,7 @@ function renderDietitianRows(dietitians) {
   return `<div class="dietitian-directory">${dietitians.map((dietitian) => `
     <article class="dietitian-row">
       <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(dietitian.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase())}</div>
-      <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` · ${escapeHtml(dietitian.branch_address)}` : ""}</p></div>
+      <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
       <span class="dietitian-status status-${escapeHtml(dietitian.status.toLowerCase())}">${escapeHtml(dietitian.status.replaceAll("_", " "))}</span>
     </article>`).join("")}</div>`;
 }
@@ -531,7 +493,7 @@ async function renderClientDashboard(firstName) {
     ${dietitians.length ? `<div class="dietitian-directory patient-dietitian-directory">${dietitians.map((dietitian) => `
       <article class="dietitian-row">
         <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(dietitian.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase())}</div>
-        <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` · ${escapeHtml(dietitian.branch_address)}` : ""}</p></div>
+        <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
         <button class="button button-small button-approve" data-book-dietitian="${escapeHtml(dietitian.id)}" type="button">Book appointment</button>
       </article>`).join("")}</div>` : '<p class="empty-state">No approved Dietitians are listed right now.</p>'}`;
   bindGoButtons();
@@ -1042,21 +1004,59 @@ async function renderAIStudio(clientId = "") {
 }
 
 async function renderDietitianDocuments() {
-  const documents = await request("/api/v1/dietitians/me/documents");
+  const [documents, assignment] = await Promise.all([
+    request("/api/v1/dietitians/me/documents"),
+    request("/api/v1/dietitians/me/branches"),
+  ]);
+  const currentBranch = assignment.branches.find(
+    (branch) => branch.branch_id === assignment.current_branch_id,
+  );
+  const branchReady = Boolean(currentBranch?.name?.trim() && currentBranch?.address?.trim());
   workspaceContent.innerHTML = `
     ${pageHeading("REGISTRATION", "Verification documents.", "Submit license and identity documents for admin review.")}
     <div data-message class="workspace-message" hidden></div>
+    <section class="content-panel">
+      <div class="section-heading form-section-heading"><h2>Practice branch and location</h2><span>REQUIRED</span></div>
+      ${currentBranch && branchReady
+        ? `<p><strong>${escapeHtml(currentBranch.name)}</strong><br>${escapeHtml(currentBranch.address)}</p><p class="document-hint">This location will be visible to clients after your registration is approved. Add another branch below to update your base location.</p>`
+        : '<p class="document-hint">Add your branch name and full location before submitting verification documents. Clients will see it after an administrator approves your registration.</p>'}
+      <form id="registrationBranchForm" class="form-grid">
+        <div class="form-field"><label for="registrationBranchName">Branch name</label><input class="text-input" id="registrationBranchName" name="name" maxlength="150" required></div>
+        <div class="form-field full-width"><label for="registrationBranchAddress">Branch location / address</label><input class="text-input" id="registrationBranchAddress" name="address" maxlength="255" autocomplete="street-address" required></div>
+        <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">${branchReady ? "Add and set as current base" : "Save branch and location"}</button></div>
+      </form>
+    </section>
     <section class="content-panel document-upload-panel">
       <form id="verificationUploadForm" class="form-grid">
-        <div class="form-field full-width"><label for="verificationFile">Choose a PDF, JPEG, or PNG document</label><input class="text-input file-input" id="verificationFile" name="file" type="file" accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png" required></div>
+        <div class="form-field full-width"><label for="verificationFile">Choose a PDF, JPEG, or PNG document</label><input class="text-input file-input" id="verificationFile" name="file" type="file" accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png" ${branchReady ? "required" : "disabled required"}></div>
         <div class="form-field full-width"><p class="document-hint">Maximum file size: 10 MB. Documents are stored securely and visible only to you and administrators reviewing your registration.</p></div>
-        <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Submit for review <span aria-hidden="true">&#8594;</span></button></div>
+        <div class="form-field full-width form-actions"><button class="button button-primary" type="submit" ${branchReady ? "" : "disabled"}>Submit for review <span aria-hidden="true">&#8594;</span></button></div>
       </form>
     </section>
     <div class="section-heading"><h2>Submitted documents</h2><span>${documents.length} FILES</span></div>
     <div class="document-list">${documents.length ? documents.map((document) => `
       <article class="document-row"><span class="document-icon" aria-hidden="true">&#9636;</span><div class="document-details"><h3>${escapeHtml(document.file_name)}</h3><p>${escapeHtml(document.content_type)} · ${new Date(document.uploaded_at).toLocaleDateString()}</p></div><span class="plan-status">SUBMITTED</span></article>`).join("") : '<p class="empty-state">No documents submitted. Add a license or identity document to continue approval.</p>'}</div>`;
+  document.querySelector("#registrationBranchForm").addEventListener("submit", saveRegistrationBranch);
   document.querySelector("#verificationUploadForm").addEventListener("submit", submitVerificationDocument);
+}
+
+async function saveRegistrationBranch(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("button[type=submit]");
+  button.disabled = true;
+  const values = Object.fromEntries(new FormData(form));
+  try {
+    await request("/api/v1/dietitians/me/branches", {
+      method: "POST",
+      body: JSON.stringify(values),
+    });
+    await renderDietitianDocuments();
+    showWorkspaceMessage("Branch and location saved.");
+  } catch (error) {
+    button.disabled = false;
+    showWorkspaceMessage(error.message, true);
+  }
 }
 
 async function submitVerificationDocument(event) {
@@ -1076,6 +1076,43 @@ async function submitVerificationDocument(event) {
     showWorkspaceMessage(error.message, true);
   } finally {
     button.disabled = false;
+  }
+}
+
+async function renderDietitianBranches() {
+  const assignment = await request("/api/v1/dietitians/me/branches");
+  workspaceContent.innerHTML = `
+    ${pageHeading("PRACTICE LOCATIONS", "My branches.", "Add practice locations. Each new branch becomes your current base and is visible to administrators and clients after approval.")}
+    <div data-message class="workspace-message" hidden></div>
+    <section class="content-panel">
+      <div class="section-heading form-section-heading"><h2>Add a branch</h2><span>NEW LOCATION</span></div>
+      <form id="dietitianBranchForm" class="form-grid">
+        <div class="form-field"><label for="dietitianBranchName">Branch name</label><input class="text-input" id="dietitianBranchName" name="name" maxlength="150" required></div>
+        <div class="form-field full-width"><label for="dietitianBranchAddress">Location / address</label><input class="text-input" id="dietitianBranchAddress" name="address" maxlength="255" autocomplete="street-address" required></div>
+        <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add and set as my base</button></div>
+      </form>
+    </section>
+    <div class="section-heading"><h2>Practice locations</h2><span>${assignment.branches.length} BRANCHES</span></div>
+    ${renderAdminTable(["Branch", "Address", "Base"], assignment.branches.map((branch) => [branch.name, branch.address, branch.branch_id === assignment.current_branch_id ? "Current base" : ""]), "No branches are registered for this practice.")}`;
+  document.querySelector("#dietitianBranchForm").addEventListener("submit", savePracticeBranch);
+}
+
+async function savePracticeBranch(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("button[type=submit]");
+  button.disabled = true;
+  const values = Object.fromEntries(new FormData(form));
+  try {
+    await request("/api/v1/dietitians/me/branches", {
+      method: "POST",
+      body: JSON.stringify(values),
+    });
+    await renderDietitianBranches();
+    showWorkspaceMessage("Branch added and set as your current base.");
+  } catch (error) {
+    button.disabled = false;
+    showWorkspaceMessage(error.message, true);
   }
 }
 
