@@ -97,10 +97,7 @@ def generate_llama_plan(dietary_goal: str, client_profile: Optional[dict] = None
             ("human", "{context}"),
         ])
         chain = prompt | _create_chat_model(output_format="json") | JsonOutputParser()
-        generated = chain.invoke(
-            {"context": json.dumps(context)},
-            config={"run_name": "draft_nutrition_plan"},
-        )
+        generated = chain.invoke({"context": json.dumps(context)})
         if not isinstance(generated, dict):
             raise ValueError("The model returned an invalid plan")
         plan = generated.get("plan")
@@ -295,7 +292,7 @@ def generate_llama_chat_reply(message: str, role: str, conversation: Optional[Li
         "message": message,
         "conversation": conversation or [],
         "persist": False,
-    }, config={"run_name": "ai_chat", "tags": ["chat"], "metadata": {"role": role}})
+    })
     return result["reply"]
 
 
@@ -413,7 +410,7 @@ def chat_with_ai(data: AIChatRequest):
         "role": data.role,
         "message": data.message,
         "persist": True,
-    }, config={"run_name": "ai_chat", "tags": ["chat"], "metadata": {"role": data.role}})
+    })
     return {"reply": result["reply"], "messages": result["conversation"]}
 
 
@@ -436,7 +433,7 @@ def trigger_ai_plan(data: AIGenerateRequest):
     result = _create_plan_workflow().invoke({
         "client_id": data.client_id,
         "dietary_goal": data.dietary_goal,
-    }, config={"run_name": "ai_generate_plan", "tags": ["plan"]})
+    })
     return {"message": "AI recommendation drafted", "recommendation": result["recommendation"]}
 
 @router.get("/api/v1/ai/recommendations/pending", tags=["6. AI Engine & HITL Workflow"])
@@ -475,4 +472,4 @@ def review_ai_recommendation(recommendation_id: str, data: RecommendationReview)
         "recommendation_id": recommendation_id,
         "action": data.action,
         "notes": data.notes,
-    }, config={"run_name": "ai_review_recommendation", "tags": ["review"]})
+    })
