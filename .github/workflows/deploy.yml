@@ -15,7 +15,10 @@ jobs:
 
       - name: Deploy to Server via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
         with:
+          envs: LANGSMITH_API_KEY
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -41,4 +44,19 @@ jobs:
             docker compose build api
             docker compose run --rm --no-deps api python migrations/apply_002_client_health_schema.py
             docker compose run --rm --no-deps api python migrations/apply_003_dietitian_document_branch.py
-            docker compose up -d --build
+            docker compose run --rm --no-deps api python migrations/apply_004_complete_schema.py
+            docker compose run --rm --no-deps api python migrations/apply_001_appointment_approval_states.py
+            # An empty secret would hide a LANGSMITH_API_KEY set in the server's .env file.
+            [ -n "$LANGSMITH_API_KEY" ] || unset LANGSMITH_API_KEY
+            docker compose -f docker-compose.yml -f docker-compose.langsmith.yml up -d --build
+            for attempt in $(seq 1 30); do
+              if health=$(docker compose exec -T api python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"); then
+                echo "$health"
+                break
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                echo "API health check failed" >&2
+                exit 1
+              fi
+              sleep 2
+            done
