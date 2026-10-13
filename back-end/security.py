@@ -4,8 +4,8 @@ import hmac
 import ipaddress
 import secrets
 from fastapi import Header, HTTPException, Request as FastAPIRequest
-from typing import Optional
-from state import admin_sessions_db, dietitian_sessions_db
+from typing import NamedTuple, Optional
+from state import admin_sessions_db, dietitian_sessions_db, client_sessions_db
 
 
 def hash_password(password: str) -> str:
@@ -50,3 +50,23 @@ def require_dietitian(authorization: Optional[str] = Header(default=None)) -> st
     if scheme.lower() != "bearer" or token not in dietitian_sessions_db:
         raise HTTPException(status_code=401, detail="Dietitian sign-in required")
     return dietitian_sessions_db[token]
+
+
+class Principal(NamedTuple):
+    """The signed-in user making a request."""
+    id: str
+    role: str  # "admin", "dietitian" or "client"
+
+
+def require_session(authorization: Optional[str] = Header(default=None)) -> Principal:
+    """Accept a bearer token from any signed-in admin, dietitian or client."""
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() == "bearer" and token:
+        for role, sessions in (
+            ("admin", admin_sessions_db),
+            ("dietitian", dietitian_sessions_db),
+            ("client", client_sessions_db),
+        ):
+            if token in sessions:
+                return Principal(sessions[token], role)
+    raise HTTPException(status_code=401, detail="Sign-in required")

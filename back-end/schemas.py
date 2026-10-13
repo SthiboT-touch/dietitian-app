@@ -128,6 +128,7 @@ class MealPlanResponse(BaseModel):
     diet_type: str
     days: int
     meals: List[str]
+    grocery_list: List[str] = Field(default_factory=list)
     status: str = "GENERATED"
 
 class AIGenerateRequest(BaseModel):
@@ -143,3 +144,13 @@ class AIChatRequest(BaseModel):
 class RecommendationReview(BaseModel):
     action: Literal["APPROVED", "MODIFIED", "REJECTED"]
     notes: Optional[str] = None
+
+
+# Section 7 Schemas (tools)
+class NutritionTargetsRequest(BaseModel):
+    sex: Literal["female", "male"]
+    age: int = Field(..., ge=18, le=100)
+    weight_kg: float = Field(..., ge=30, le=300)
+    height_cm: float = Field(..., ge=120, le=230)
+    activity: Literal["sedentary", "light", "moderate", "active", "very_active"] = "sedentary"
+    goal: Literal["lose", "maintain", "gain"] = "maintain"

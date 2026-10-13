@@ -1,21 +1,41 @@
 """4. Appointments and goals."""
 import uuid
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import datetime
 import database
 import config
 from state import appointments_db, goals_db, users_db
 from schemas import AppointmentCreate, AppointmentDecision, GoalCreate
+from security import Principal, require_session
+from access import require_client_access
 
 
 router = APIRouter()
 
 
+def _require_appointment_actor(principal: Principal, action: str, client_id: str, dietitian_id: str) -> None:
+    """Patients and their dietitian may cancel; only the booked dietitian may approve or reject."""
+    if principal.role == "admin":
+        return
+    if action == "CANCELLED":
+        if (principal.role == "client" and principal.id == client_id) or (
+            principal.role == "dietitian" and principal.id == dietitian_id
+        ):
+            return
+    elif principal.role == "dietitian" and principal.id == dietitian_id:
+        return
+    raise HTTPException(status_code=403, detail="You cannot change this appointment")
+
+
 # --- 4. APPOINTMENTS & GOALS ---
 
 @router.post("/api/v1/appointments", tags=["4. Appointments & Goals"])
-def create_appointment(data: AppointmentCreate):
+def create_appointment(data: AppointmentCreate, principal: Principal = Depends(require_session)):
+    if (principal.role == "client" and data.client_id != principal.id) or (
+        principal.role == "dietitian" and data.dietitian_id != principal.id
+    ):
+        raise HTTPException(status_code=403, detail="You can only book appointments for yourself")
     try:
         appointment_date = datetime.fromisoformat(data.appointment_date.replace("Z", "+00:00"))
     except ValueError as exc:
@@ -51,7 +71,20 @@ def create_appointment(data: AppointmentCreate):
     return {"message": "Appointment scheduled", "appointment": appointment}
 
 @router.get("/api/v1/appointments", tags=["4. Appointments & Goals"])
-def get_appointments(client_id: Optional[str] = None, dietitian_id: Optional[str] = None):
+def get_appointments(
+    client_id: Optional[str] = None,
+    dietitian_id: Optional[str] = None,
+    principal: Principal = Depends(require_session),
+):
+    # Patients only ever see their own appointments, dietitians only their own bookings.
+    if principal.role == "client":
+        if client_id and client_id != principal.id:
+            raise HTTPException(status_code=403, detail="You can only view your own appointments")
+        client_id = principal.id
+    elif principal.role == "dietitian":
+        if dietitian_id and dietitian_id != principal.id:
+            raise HTTPException(status_code=403, detail="You can only view your own appointments")
+        dietitian_id = principal.id
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             filters = []
@@ -79,18 +112,23 @@ def get_appointments(client_id: Optional[str] = None, dietitian_id: Optional[str
 
 
 @router.patch("/api/v1/appointments/{appointment_id}", tags=["4. Appointments & Goals"])
-def decide_appointment(appointment_id: str, data: AppointmentDecision):
+def decide_appointment(
+    appointment_id: str,
+    data: AppointmentDecision,
+    principal: Principal = Depends(require_session),
+):
     new_status = {"APPROVED": "CONFIRMED", "REJECTED": "REJECTED", "CANCELLED": "CANCELLED"}[data.action]
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT status, date_time > CURRENT_TIMESTAMP AS is_future "
+                "SELECT status, client_id, dietitian_id, date_time > CURRENT_TIMESTAMP AS is_future "
                 "FROM appointment WHERE appointment_id = %s FOR UPDATE",
                 (appointment_id,),
             )
             appointment = cursor.fetchone()
             if not appointment:
                 raise HTTPException(status_code=404, detail="Appointment not found")
+            _require_appointment_actor(principal, data.action, appointment["client_id"], appointment["dietitian_id"])
             current_status = appointment["status"]
             if data.action == "CANCELLED":
                 if current_status not in {"PENDING", "CONFIRMED", "SCHEDULED"} or not appointment["is_future"]:
@@ -115,6 +153,7 @@ def decide_appointment(appointment_id: str, data: AppointmentDecision):
     appointment = appointments_db.get(appointment_id)
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
+    _require_appointment_actor(principal, data.action, appointment["client_id"], appointment["dietitian_id"])
     current_status = appointment["status"]
     if data.action == "CANCELLED":
         appointment_date = datetime.fromisoformat(appointment["appointment_date"].replace("Z", "+00:00"))
@@ -131,7 +170,8 @@ def decide_appointment(appointment_id: str, data: AppointmentDecision):
     return {"message": "Appointment status updated", "appointment": appointment}
 
 @router.post("/api/v1/goals", tags=["4. Appointments & Goals"])
-def set_goal(data: GoalCreate):
+def set_goal(data: GoalCreate, principal: Principal = Depends(require_session)):
+    require_client_access(principal, data.client_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -147,7 +187,8 @@ def set_goal(data: GoalCreate):
 
 
 @router.get("/api/v1/goals", tags=["4. Appointments & Goals"])
-def get_goals(client_id: str):
+def get_goals(client_id: str, principal: Principal = Depends(require_session)):
+    require_client_access(principal, client_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(

@@ -3,6 +3,7 @@
 Run with:  uvicorn app:app --app-dir back-end
 """
 import os
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
@@ -11,9 +12,17 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 import database
-from routers import ai, appointments, auth_admin, clients, meal_planning
+import tracing
+from routers import ai, appointments, auth_admin, clients, meal_planning, tools
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    tracing.flush()  # send any LangSmith traces still queued before the process stops
+
 
 app = FastAPI(
+    lifespan=lifespan,
     title="Dietitian & Nutrition Management System",
     description="Full Implementation: Sections 1 through 6 REST API Specification",
     version="1.0.0",
@@ -87,5 +96,5 @@ def _langsmith_status() -> str:
 
 
 # Same order as the original single file, so Swagger tags and route matching are unchanged.
-for _router in (auth_admin.router, clients.router, appointments.router, meal_planning.router, ai.router):
+for _router in (auth_admin.router, clients.router, appointments.router, meal_planning.router, ai.router, tools.router):
     app.include_router(_router)

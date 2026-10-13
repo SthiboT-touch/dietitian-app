@@ -6,7 +6,7 @@ from fastapi.responses import Response
 from datetime import date
 import database
 import config
-from state import users_db, admins_db, businesses_db, branches_db, admin_sessions_db, dietitian_sessions_db, dietitian_documents_db, approval_log_db, appointments_db, meal_plans_db
+from state import users_db, admins_db, businesses_db, branches_db, admin_sessions_db, dietitian_sessions_db, client_sessions_db, dietitian_documents_db, approval_log_db, appointments_db, meal_plans_db
 from schemas import DietitianRegister, ClientRegister, LoginRequest, AdminSetup, AdminApproval, BranchCreate, DietitianBranchCreate
 from security import hash_password, verify_password, public_user, request_is_loopback, require_admin, require_dietitian
 from helpers import email_is_registered, build_full_name
@@ -201,13 +201,13 @@ def login(data: LoginRequest):
             user = next((user for user in admins_db.values() if user["email"].casefold() == data.email.casefold()), None)
     if not user or not verify_password(data.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    access_token = f"mock_jwt_token_{uuid.uuid4().hex[:12]}"
+    access_token = secrets.token_urlsafe(32)
     if user["type"] == "admin":
-        access_token = secrets.token_urlsafe(32)
         admin_sessions_db[access_token] = user["id"]
     elif user["type"] == "dietitian":
-        access_token = secrets.token_urlsafe(32)
         dietitian_sessions_db[access_token] = user["id"]
+    else:
+        client_sessions_db[access_token] = user["id"]
     return {
         "access_token": access_token,
         "token_type": "bearer",
