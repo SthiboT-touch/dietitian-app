@@ -5,7 +5,7 @@ import os
 import re
 import uuid
 from functools import lru_cache
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional, TypedDict
 import httpx
 import psycopg2
@@ -20,7 +20,10 @@ from langgraph.graph import END, START, StateGraph
 from ollama import RequestError, ResponseError
 import database
 import config
-from state import clients_db, ai_recommendations_db, ai_conversations_db, foods_db
+import tracing
+from security import Principal, require_dietitian, require_session
+from access import require_client_access
+from state import clients_db, ai_recommendations_db, ai_conversations_db, foods_db, recommendation_run_ids
 from schemas import AIGenerateRequest, AIChatRequest, RecommendationReview
 from helpers import fetch_client_profile, decode_recommendation
 
@@ -30,6 +33,20 @@ logger = logging.getLogger(__name__)
 
 # Small models sometimes write a tool call as plain text instead of making it; never show that to users.
 TOOL_CALL_TEXT = re.compile(r'\s*\{\s*"name"\s*:\s*"[^"]*"\s*,\s*"(?:parameters|arguments)')
+
+# Errors that mean "the model is unreachable or answered badly". ConnectionError is what the
+# ollama client raises when the server is down, and it is not an httpx error.
+PLAN_MODEL_ERRORS = (
+    httpx.HTTPError,
+    RequestError,
+    ResponseError,
+    OutputParserException,
+    ConnectionError,
+    TimeoutError,
+    TypeError,
+    ValueError,
+)
+CHAT_MODEL_ERRORS = (*PLAN_MODEL_ERRORS, IndexError, KeyError)
 
 
 # --- AI ENGINE & HUMAN-IN-THE-LOOP WORKFLOW ---
@@ -50,6 +67,7 @@ class PlanWorkflowState(TypedDict, total=False):
     client_profile: Optional[dict]
     dietitian_id: Optional[str]
     generated_plan: List[str]
+    run_id: str
     recommendation: dict
 
 
@@ -59,6 +77,7 @@ class ReviewWorkflowState(TypedDict, total=False):
     notes: Optional[str]
     message: str
     recommendation: dict
+    trace_run_id: Optional[str]
 
 
 def _create_chat_model(output_format: Optional[str] = None) -> ChatOllama:
@@ -109,19 +128,74 @@ def generate_llama_plan(dietary_goal: str, client_profile: Optional[dict] = None
         if not isinstance(plan, list) or not plan or not all(isinstance(item, str) for item in plan):
             raise ValueError("The model returned an invalid plan")
         return plan
-    except (
-        httpx.HTTPError,
-        RequestError,
-        ResponseError,
-        OutputParserException,
-        TimeoutError,
-        TypeError,
-        ValueError,
-    ) as exc:
+    except PLAN_MODEL_ERRORS as exc:
+        logger.warning("Plan generation failed: %s", type(exc).__name__)
         raise HTTPException(
             status_code=503,
             detail="Llama service unavailable or returned an invalid response. Check Ollama and the configured model.",
         ) from exc
+
+
+def _allergen_stem(name: str) -> str:
+    """Lower-case an allergen and drop a plural 's' so 'peanuts' also catches 'peanut butter'."""
+    stem = (name or "").strip().casefold()
+    return stem[:-1] if len(stem) > 3 and stem.endswith("s") else stem
+
+
+def generate_llama_meal_plan(diet_type: str, days: int, client_profile: Optional[dict] = None) -> dict:
+    """Ask the model for one representative day of meals plus a grocery list for the whole plan."""
+    profile = client_profile or {}
+    allergies = profile.get("allergies", [])
+    context = {
+        "diet_type": (diet_type or "").strip(),
+        "days": days,
+        "allergies": allergies,
+        "medical_conditions": profile.get("conditions", []),
+    }
+    try:
+        prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                "Draft a general meal plan for review by a licensed dietitian. "
+                "Never include any listed allergen or a food that contains it. "
+                "Do not diagnose or claim the plan treats a medical condition. "
+                "Reply with a JSON object with two arrays of plain strings. "
+                "'meals' has 3 to 6 short items for one representative day, for example "
+                "'Breakfast: oatmeal with berries'. 'grocery_list' has 5 to 20 short ingredient "
+                "names to buy for the whole plan, one item per string, with no quantities and no nested objects.",
+            ),
+            ("human", "{context}"),
+        ])
+        chain = prompt | _create_chat_model(output_format="json") | JsonOutputParser()
+        generated = chain.invoke(
+            {"context": json.dumps(context)},
+            config=tracing.trace_config("generate_meal_plan", tags=("meal-plan",)),
+        )
+        if not isinstance(generated, dict):
+            raise ValueError("The model returned an invalid meal plan")
+        meals = generated.get("meals")
+        grocery = generated.get("grocery_list")
+        for items in (meals, grocery):
+            if not isinstance(items, list) or not items or not all(isinstance(item, str) and item.strip() for item in items):
+                raise ValueError("The model returned an invalid meal plan")
+    except PLAN_MODEL_ERRORS as exc:
+        logger.warning("Meal plan generation failed: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Llama service unavailable or returned an invalid response. Check Ollama and the configured model.",
+        ) from exc
+
+    # Safety net: never save a draft that mentions a recorded allergen, whatever the model says.
+    allergen_stems = [
+        _allergen_stem(item.get("allergen", "")) for item in allergies if isinstance(item, dict)
+    ]
+    text = " ".join([*meals, *grocery]).casefold()
+    if any(stem and stem in text for stem in allergen_stems):
+        raise HTTPException(
+            status_code=422,
+            detail="The AI draft mentioned an ingredient that matches this patient's recorded allergies. Please generate it again.",
+        )
+    return {"meals": [item.strip() for item in meals], "grocery_list": [item.strip() for item in grocery]}
 
 
 def _load_chat_history(state: ChatWorkflowState) -> dict:
@@ -167,17 +241,7 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
             )
         if isinstance(content, str) and content.strip() and not TOOL_CALL_TEXT.match(content):
             return {"reply": content.strip()}
-    except (
-        httpx.HTTPError,
-        RequestError,
-        ResponseError,
-        OutputParserException,
-        TimeoutError,
-        IndexError,
-        KeyError,
-        TypeError,
-        ValueError,
-    ):
+    except CHAT_MODEL_ERRORS:
         logger.exception("LangChain AI chat request failed")
         return {
             "reply": (
@@ -367,6 +431,7 @@ def _persist_recommendation_node(state: PlanWorkflowState) -> dict:
         recommendation_text = json.dumps({
             "dietary_goal": state["dietary_goal"],
             "generated_plan": state["generated_plan"],
+            "trace_run_id": state.get("run_id"),
         })
         with database.cursor() as cursor:
             cursor.execute(
@@ -383,6 +448,8 @@ def _persist_recommendation_node(state: PlanWorkflowState) -> dict:
             )
     else:
         ai_recommendations_db[recommendation_id] = recommendation
+        if state.get("run_id"):
+            recommendation_run_ids[recommendation_id] = state["run_id"]
     return {"recommendation": recommendation}
 
 
@@ -415,6 +482,10 @@ def _apply_recommendation_review(state: ReviewWorkflowState) -> dict:
             if not row:
                 raise HTTPException(status_code=404, detail="Recommendation ID not found")
         recommendation = decode_recommendation(row)
+        try:
+            trace_run_id = json.loads(row["recommendation_text"]).get("trace_run_id")
+        except (TypeError, ValueError, AttributeError):
+            trace_run_id = None
     else:
         if recommendation_id not in ai_recommendations_db:
             raise HTTPException(status_code=404, detail="Recommendation ID not found")
@@ -422,9 +493,11 @@ def _apply_recommendation_review(state: ReviewWorkflowState) -> dict:
         recommendation["status"] = action
         if notes:
             recommendation["review_notes"] = notes
+        trace_run_id = recommendation_run_ids.get(recommendation_id)
     return {
         "message": f"Recommendation status updated to {action}",
         "recommendation": recommendation,
+        "trace_run_id": trace_run_id,
     }
 
 
@@ -438,19 +511,31 @@ def _create_review_workflow():
 
 
 @router.post("/api/v1/ai/chat", tags=["6. AI Engine & HITL Workflow"])
-def chat_with_ai(data: AIChatRequest):
-    result = _create_chat_workflow().invoke({
-        "user_id": data.user_id or f"{data.role}-chat",
-        "user_name": data.user_name,
-        "role": data.role,
-        "message": data.message,
-        "persist": True,
-    })
+def chat_with_ai(data: AIChatRequest, principal: Principal = Depends(require_session)):
+    if principal.role != "admin" and (data.user_id != principal.id or data.role != principal.role):
+        raise HTTPException(status_code=403, detail="You can only use your own AI chat")
+    user_id = data.user_id or f"{data.role}-chat"
+    result = _create_chat_workflow().invoke(
+        {
+            "user_id": user_id,
+            "user_name": data.user_name,
+            "role": data.role,
+            "message": data.message,
+            "persist": True,
+        },
+        config=tracing.trace_config(
+            "ai_chat",
+            tags=("chat", data.role),
+            metadata={"thread_id": user_id, "role": data.role},  # groups a conversation in LangSmith Threads
+        ),
+    )
     return {"reply": result["reply"], "messages": result["conversation"]}
 
 
 @router.get("/api/v1/ai/chat", tags=["6. AI Engine & HITL Workflow"])
-def get_ai_chat(user_id: str, role: str = "client"):
+def get_ai_chat(user_id: str, role: str = "client", principal: Principal = Depends(require_session)):
+    if principal.role != "admin" and user_id != principal.id:
+        raise HTTPException(status_code=403, detail="You can only view your own AI chat")
     key = user_id or f"{role}-chat"
     messages = ai_conversations_db.get(key, [])
     if not messages:
@@ -464,15 +549,20 @@ def get_ai_chat(user_id: str, role: str = "client"):
 
 
 @router.post("/api/v1/ai/generate-plan", tags=["6. AI Engine & HITL Workflow"])
-def trigger_ai_plan(data: AIGenerateRequest):
-    result = _create_plan_workflow().invoke({
-        "client_id": data.client_id,
-        "dietary_goal": data.dietary_goal,
-    })
+def trigger_ai_plan(data: AIGenerateRequest, dietitian_id: str = Depends(require_dietitian)):
+    run_id = uuid.uuid4()
+    result = _create_plan_workflow().invoke(
+        {
+            "client_id": data.client_id,
+            "dietary_goal": data.dietary_goal,
+            "run_id": str(run_id),
+        },
+        config=tracing.trace_config("generate_plan", tags=("plan",), run_id=run_id),
+    )
     return {"message": "AI recommendation drafted", "recommendation": result["recommendation"]}
 
 @router.get("/api/v1/ai/recommendations/pending", tags=["6. AI Engine & HITL Workflow"])
-def get_pending_recommendations():
+def get_pending_recommendations(dietitian_id: str = Depends(require_dietitian)):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -485,7 +575,8 @@ def get_pending_recommendations():
 
 
 @router.get("/api/v1/ai/recommendations", tags=["6. AI Engine & HITL Workflow"])
-def get_client_recommendations(client_id: str):
+def get_client_recommendations(client_id: str, principal: Principal = Depends(require_session)):
+    require_client_access(principal, client_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -502,9 +593,19 @@ def get_client_recommendations(client_id: str):
     ]
 
 @router.patch("/api/v1/ai/recommendations/{recommendation_id}", tags=["6. AI Engine & HITL Workflow"])
-def review_ai_recommendation(recommendation_id: str, data: RecommendationReview):
-    return _create_review_workflow().invoke({
-        "recommendation_id": recommendation_id,
-        "action": data.action,
-        "notes": data.notes,
-    })
+def review_ai_recommendation(
+    recommendation_id: str,
+    data: RecommendationReview,
+    dietitian_id: str = Depends(require_dietitian),
+):
+    result = dict(_create_review_workflow().invoke(
+        {
+            "recommendation_id": recommendation_id,
+            "action": data.action,
+            "notes": data.notes,
+        },
+        config=tracing.trace_config("review_recommendation", tags=("review",), metadata={"action": data.action}),
+    ))
+    # Attach the dietitian's decision to the trace that drafted the plan (never raises).
+    tracing.record_review_feedback(result.pop("trace_run_id", None), data.action)
+    return result
