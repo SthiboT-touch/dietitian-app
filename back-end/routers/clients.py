@@ -1,6 +1,6 @@
 """2. Patient health history and 3. clinical labs and daily progress."""
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import date
 import database
@@ -8,6 +8,8 @@ import config
 from state import users_db, clients_db
 from schemas import PregnancyLog, LactationLog, AllergyEntry, MedicalConditionEntry, MetricLog, ProgressLog
 from helpers import fetch_client_profile
+from security import Principal, require_session
+from access import require_client_access
 
 
 router = APIRouter()
@@ -16,7 +18,17 @@ router = APIRouter()
 # --- 2. PATIENT HEALTH, LIFE STAGE & CLINICAL HISTORY ---
 
 @router.get("/api/v1/clients", tags=["2. Patient Health & History"])
-def list_clients(dietitian_id: Optional[str] = None, client_id: Optional[str] = None):
+def list_clients(
+    dietitian_id: Optional[str] = None,
+    client_id: Optional[str] = None,
+    principal: Principal = Depends(require_session),
+):
+    if client_id:
+        require_client_access(principal, client_id)
+    elif dietitian_id and principal.role != "admin" and not (
+        principal.role == "dietitian" and principal.id == dietitian_id
+    ):
+        raise HTTPException(status_code=403, detail="You can only list your own patients")
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             if client_id:
@@ -52,7 +64,8 @@ def list_clients(dietitian_id: Optional[str] = None, client_id: Optional[str] = 
 
 
 @router.get("/api/v1/clients/{client_id}/profile", tags=["2. Patient Health & History"])
-def get_client_profile(client_id: str):
+def get_client_profile(client_id: str, principal: Principal = Depends(require_session)):
+    require_client_access(principal, client_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             return fetch_client_profile(cursor, client_id)
@@ -61,7 +74,8 @@ def get_client_profile(client_id: str):
     return clients_db[client_id]
 
 @router.post("/api/v1/clients/{client_id}/pregnancy", tags=["2. Patient Health & History"])
-def log_pregnancy(client_id: str, data: PregnancyLog):
+def log_pregnancy(client_id: str, data: PregnancyLog, principal: Principal = Depends(require_session)):
+    require_client_access(principal, client_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -75,7 +89,8 @@ def log_pregnancy(client_id: str, data: PregnancyLog):
     return {"message": "Pregnancy parameters updated", "data": clients_db[client_id]["pregnancy"]}
 
 @router.post("/api/v1/clients/{client_id}/lactation", tags=["2. Patient Health & History"])
-def log_lactation(client_id: str, data: LactationLog):
+def log_lactation(client_id: str, data: LactationLog, principal: Principal = Depends(require_session)):
+    require_client_access(principal, client_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute("SELECT client_id FROM client WHERE client_id = %s", (client_id,))
@@ -98,7 +113,8 @@ def log_lactation(client_id: str, data: LactationLog):
     return {"message": "Lactation state updated", "data": clients_db[client_id]["lactation"]}
 
 @router.post("/api/v1/clients/{client_id}/allergies", tags=["2. Patient Health & History"])
-def add_allergy(client_id: str, data: AllergyEntry):
+def add_allergy(client_id: str, data: AllergyEntry, principal: Principal = Depends(require_session)):
+    require_client_access(principal, client_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -120,7 +136,8 @@ def add_allergy(client_id: str, data: AllergyEntry):
     return {"message": "Allergy mapped successfully", "allergies": clients_db[client_id]["allergies"]}
 
 @router.post("/api/v1/clients/{client_id}/medical-conditions", tags=["2. Patient Health & History"])
-def add_medical_condition(client_id: str, data: MedicalConditionEntry):
+def add_medical_condition(client_id: str, data: MedicalConditionEntry, principal: Principal = Depends(require_session)):
+    require_client_access(principal, client_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -146,7 +163,8 @@ def add_medical_condition(client_id: str, data: MedicalConditionEntry):
 # --- 3. CLINICAL LABS & DAILY PROGRESS LOGS ---
 
 @router.post("/api/v1/clients/{client_id}/metrics", tags=["3. Clinical Labs & Progress"])
-def log_metric(client_id: str, data: MetricLog):
+def log_metric(client_id: str, data: MetricLog, principal: Principal = Depends(require_session)):
+    require_client_access(principal, client_id)
     if config.DATABASE_ENABLED:
         try:
             value = float(data.value)
@@ -177,7 +195,8 @@ def log_metric(client_id: str, data: MetricLog):
     return {"message": "Metric logged successfully", "metrics": clients_db[client_id]["metrics"]}
 
 @router.get("/api/v1/clients/{client_id}/metrics", tags=["3. Clinical Labs & Progress"])
-def get_metrics(client_id: str):
+def get_metrics(client_id: str, principal: Principal = Depends(require_session)):
+    require_client_access(principal, client_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute("SELECT client_id FROM client WHERE client_id = %s", (client_id,))
@@ -195,7 +214,8 @@ def get_metrics(client_id: str):
     return clients_db[client_id].get("metrics", [])
 
 @router.post("/api/v1/clients/{client_id}/progress", tags=["3. Clinical Labs & Progress"])
-def log_progress(client_id: str, data: ProgressLog):
+def log_progress(client_id: str, data: ProgressLog, principal: Principal = Depends(require_session)):
+    require_client_access(principal, client_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -245,7 +265,8 @@ def log_progress(client_id: str, data: ProgressLog):
     return {"message": "Progress entry saved", "progress": progress}
 
 @router.get("/api/v1/clients/{client_id}/progress", tags=["3. Clinical Labs & Progress"])
-def get_progress(client_id: str):
+def get_progress(client_id: str, principal: Principal = Depends(require_session)):
+    require_client_access(principal, client_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute("SELECT client_id FROM client WHERE client_id = %s", (client_id,))

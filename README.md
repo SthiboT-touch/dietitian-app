@@ -1,6 +1,6 @@
 # Dietitian & Nutrition Management
 
-The browser app is served by the API at `http://localhost:8000` when running with Docker Compose. The interactive API documentation is at `http://localhost:8000/docs`.
+With Docker Compose the browser app is served through nginx at `http://localhost` (port 80), and the interactive API documentation is at `http://localhost/docs`. When you run the API yourself with uvicorn (see Local development), use the port you pass to uvicorn instead.
 
 ## Project layout
 
@@ -34,7 +34,7 @@ docker compose exec ollama ollama pull llama3.2
 
 The model download is several gigabytes and is stored in the `ollama_data` volume. The API uses `llama3.2` by default. To select another model, set `OLLAMA_MODEL` in a `.env` file before starting Compose, then pull that model with `docker compose exec ollama ollama pull <model>`.
 
-The API container connects to Ollama at `http://ollama:11434` over the Compose network and waits for the Ollama service to become healthy. If the AI still cannot reply, confirm the model is installed with `docker compose exec ollama ollama list`, then pull it if needed with `docker compose exec ollama ollama pull llama3.2`. Rebuild and restart the API after changing its configuration with `docker compose up --build -d api`.
+The API container connects to Ollama at `http://ollama:11434` over the Compose network. Compose waits for the database and Ollama health checks to pass before it starts the API. If the AI still cannot reply, confirm the model is installed with `docker compose exec ollama ollama list`, then pull it if needed with `docker compose exec ollama ollama pull llama3.2`. Rebuild and restart the API after changing its configuration with `docker compose up --build -d api`.
 
 LangSmith tracing is optional. To enable it for the LangGraph chat agent (and other LangChain runs) in Docker, add these settings to the root `.env` file:
 
@@ -52,7 +52,9 @@ docker compose -f docker-compose.yml -f docker-compose.langsmith.yml up --build 
 
 The override defaults tracing to enabled and the project name to `dietitian-app`; without an API key, runs are not uploaded. For local runs outside Docker, the root `.env` settings are loaded automatically. Traces may include chat messages, model responses, and health details sent to LangSmith. Use synthetic data only; do not send real patient or other sensitive data.
 
-The generated-plan endpoint is `POST /api/v1/ai/generate-plan` with a JSON body such as:
+In LangSmith, runs are named `ai_chat`, `generate_plan`, `review_recommendation`, and `generate_meal_plan`, and chat runs carry a `thread_id` so each person's conversation appears under the Threads tab. When a dietitian approves, modifies, or rejects a drafted plan, the decision is attached to the run that generated it as `dietitian_review` feedback (1.0 approved, 0.5 modified, 0.0 rejected); review notes are never sent.
+
+The generated-plan endpoint is `POST /api/v1/ai/generate-plan` (dietitian sign-in required) with a JSON body such as:
 
 ```json
 {
@@ -71,6 +73,11 @@ Appointment requests are created as `PENDING`; dietitian decisions change them t
 
 For running the API outside Compose, set `OLLAMA_BASE_URL` (default `http://localhost:11434`) and `OLLAMA_MODEL` (default `llama3.2`) to match an Ollama instance with the selected model downloaded.
 
+## Meal plans with AI, grocery lists, and the nutrition calculator
+
+- **AI meal plans:** on the **Meal plans** screen, tick "Draft the meals and a grocery list with AI" before creating a plan (API: `POST /api/v1/meal-plans/ai` with `client_id`, `diet_type`, `days`). The model gets the patient's recorded allergies and conditions and returns one representative day of meals plus a grocery list. If a draft mentions a recorded allergen, it is rejected (HTTP 422) and nothing is saved. If Ollama is unreachable or answers badly, the API returns 503. Dietitians should always review a draft before the patient relies on it. Patients see the grocery list under **My Meal Plan > Meal Details**.
+- **Nutrition calculator:** the **Nutrition calculator** screen (API: `POST /api/v1/tools/nutrition-targets`) estimates daily calories, protein, carbohydrates, fat, and water for a healthy adult from sex, age, weight, height, activity, and goal, using the Mifflin-St Jeor equation. Results never go below 1200 kcal (women) or 1500 kcal (men), and it is a general estimate, not medical advice.
+
 ## Admin approvals
 
 When the database has no administrator, the **Admin setup** tab appears on the local sign-in page. Create the first admin from this computer; the setup endpoint is loopback-only and becomes unavailable after that account is created. Dietitians can upload PDF, JPEG, or PNG verification documents up to 10 MB from the **Verification documents** screen. Admins can preview them before approving or rejecting a registration; decisions and notes are recorded in `approval_log`. Admin and dietitian document sessions are held in process memory, so sign in again after an API restart.
@@ -81,4 +88,4 @@ To provision three local admin accounts, run `python back-end/seed_admin_account
 
 When `DATABASE_URL` is configured, accounts, patient health records, verification documents, progress, appointments, food catalog entries, meal plans, recipes, and AI reviews use PostgreSQL. For local development, set `DATABASE_URL` in the ignored `.env` file. URL-encode reserved characters in usernames or passwords (for example, encode `@` as `%40`). Docker Compose passes the same variable to the API container; without it, Compose uses the local database service.
 
-Without `DATABASE_URL`, the API uses in-memory data for development and tests. Dietitian document and admin approval endpoints require process-local bearer sessions; other API areas still use prototype authentication. The app is not ready for real patient or clinical data until full authentication and access control are completed.
+Without `DATABASE_URL`, the API uses in-memory data for development and tests. Every endpoint that touches patient data requires a bearer token from `POST /api/v1/auth/login`: patient records, appointments, goals, meal plans, recipes, AI chat, and the AI plan review queue. Patients can only see and change their own records; dietitians only their linked patients, appointments, and meal plans; admins can see everything. Only the dietitian a patient booked can approve or reject an appointment, and only dietitians can create recipes, meal plans, and AI plan drafts. Sessions are held in process memory, so everyone signs in again after an API restart (the browser app does this automatically). The app is not ready for real patient or clinical data until it has persistent sessions, audit logging, and a security review.

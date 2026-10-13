@@ -8,6 +8,7 @@ const workspaceContent = document.querySelector("#workspaceContent");
 const sessionKey = "nutrition-practice-session";
 const adminTokenKey = "nutrition-practice-admin-token";
 const dietitianTokenKey = "nutrition-practice-dietitian-token";
+const clientTokenKey = "nutrition-practice-client-token";
 
 let currentUser = null;
 
@@ -17,13 +18,21 @@ async function request(url, options = {}) {
     headers.set("Content-Type", "application/json");
   }
 
-  const token = sessionStorage.getItem(adminTokenKey) || sessionStorage.getItem(dietitianTokenKey);
+  const token = sessionStorage.getItem(adminTokenKey)
+    || sessionStorage.getItem(dietitianTokenKey)
+    || sessionStorage.getItem(clientTokenKey);
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
   const response = await fetch(url, { ...options, headers });
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
+    if (response.status === 401 && token && !url.startsWith("/api/v1/auth/")) {
+      // The API forgets sessions when it restarts, so ask the person to sign in again.
+      signOut();
+      showAuthMessage("Your session has expired. Please sign in again.");
+      throw new Error("Your session has expired. Please sign in again.");
+    }
     const detail = payload && (payload.detail || payload.message);
     throw new Error(typeof detail === "string" ? detail : `Request failed with status ${response.status}`);
   }
@@ -76,10 +85,17 @@ function showWorkspace(user, initialView = "overview") {
   }
 }
 
+function storeSessionToken(userType, token) {
+  const keys = { admin: adminTokenKey, dietitian: dietitianTokenKey, client: clientTokenKey };
+  Object.values(keys).forEach((key) => sessionStorage.removeItem(key));
+  sessionStorage.setItem(keys[userType] || clientTokenKey, token);
+}
+
 function signOut() {
   sessionStorage.removeItem(sessionKey);
   sessionStorage.removeItem(adminTokenKey);
   sessionStorage.removeItem(dietitianTokenKey);
+  sessionStorage.removeItem(clientTokenKey);
   currentUser = null;
   workspace.hidden = true;
   authScreen.hidden = false;
@@ -727,6 +743,11 @@ async function renderClientGoals(clientId) {
   });
 }
 
+function groceryListHtml(items) {
+  if (!items || !items.length) return "";
+  return `<span class="subsection-label">Grocery list</span><ul class="meal-summary">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
 async function renderClientMealPlan(clientId, selectedTab = "today") {
   const plans = await request(`/api/v1/meal-plans?client_id=${encodeURIComponent(clientId)}`);
   const meals = plans[0]?.meals || [];
@@ -735,7 +756,7 @@ async function renderClientMealPlan(clientId, selectedTab = "today") {
     ? (meals.length ? `<h2 class="compact-heading">Today's meals</h2><ul class="meal-summary">${meals.map((meal) => `<li>${escapeHtml(meal)}</li>`).join("")}</ul>` : '<p class="empty-state">No meal plan is available yet.</p>')
     : selectedTab === "week"
       ? (plans.length ? `<div class="meal-plan-list">${plans.map((plan) => `<article class="meal-plan-row"><div class="meal-plan-heading"><h3>${escapeHtml(plan.diet_type)} plan</h3><span>${plan.days} days</span></div><ul class="meal-summary">${plan.meals.map((meal) => `<li>${escapeHtml(meal)}</li>`).join("")}</ul></article>`).join("")}</div>` : '<p class="empty-state">No weekly plan is available yet.</p>')
-      : (meals.length ? `<dl class="meal-details-list">${meals.map((meal, index) => `<div><dt>Meal ${index + 1}</dt><dd>${escapeHtml(meal)}</dd></div>`).join("")}</dl>` : '<p class="empty-state">Meal details will appear here when your dietitian shares a plan.</p>');
+      : (meals.length ? `<dl class="meal-details-list">${meals.map((meal, index) => `<div><dt>Meal ${index + 1}</dt><dd>${escapeHtml(meal)}</dd></div>`).join("")}</dl>${groceryListHtml(plans[0]?.grocery_list)}` : '<p class="empty-state">Meal details will appear here when your dietitian shares a plan.</p>');
   workspaceContent.innerHTML = `
     ${pageHeading("MY MEAL PLAN", "A plan for everyday life.", "Review the meal guidance shared by your dietitian.")}
     <div class="meal-view-tabs" role="tablist" aria-label="Meal plan view">${tabs.map((tab) => `<button class="meal-view-tab${tab === selectedTab ? " is-active" : ""}" role="tab" aria-selected="${tab === selectedTab}" data-meal-tab="${tab}" type="button">${tab === "week" ? "This Week" : tab === "details" ? "Meal Details" : "Today"}</button>`).join("")}</div>
@@ -743,6 +764,60 @@ async function renderClientMealPlan(clientId, selectedTab = "today") {
   workspaceContent.querySelectorAll("[data-meal-tab]").forEach((button) => {
     button.addEventListener("click", () => renderClientMealPlan(clientId, button.dataset.mealTab));
   });
+}
+
+function renderCalculator(result = null, values = {}) {
+  const v = { sex: "female", age: "", weight_kg: "", height_cm: "", activity: "sedentary", goal: "maintain", ...values };
+  const options = (choices, current) => choices
+    .map(([value, label]) => `<option value="${value}"${current === value ? " selected" : ""}>${label}</option>`)
+    .join("");
+  const resultHtml = result ? `
+    <section class="content-panel">
+      <div class="section-heading form-section-heading"><h2>Daily targets</h2><span>ESTIMATE</span></div>
+      <dl class="meal-details-list">
+        <div><dt>Calories</dt><dd>${Number(result.target_calories_kcal)} kcal (maintenance ${Number(result.maintenance_kcal)} kcal)</dd></div>
+        <div><dt>Protein</dt><dd>${Number(result.protein_g)} g</dd></div>
+        <div><dt>Carbohydrates</dt><dd>${Number(result.carbs_g)} g</dd></div>
+        <div><dt>Fat</dt><dd>${Number(result.fat_g)} g</dd></div>
+        <div><dt>Water</dt><dd>${Number(result.water_ml)} ml</dd></div>
+        <div><dt>Resting energy (BMR)</dt><dd>${Number(result.bmr_kcal)} kcal</dd></div>
+      </dl>
+      ${result.notes.map((note) => `<p class="notice">${escapeHtml(note)}</p>`).join("")}
+    </section>` : "";
+  workspaceContent.innerHTML = `
+    ${pageHeading("TOOLS", "Nutrition calculator.", "Estimate daily calories, macros, and water for a healthy adult.")}
+    <div data-message class="workspace-message" hidden></div>
+    <section class="content-panel">
+      <form id="calculatorForm" class="form-grid">
+        <div class="form-field"><label for="calcSex">Sex</label><select id="calcSex" name="sex">${options([["female", "Female"], ["male", "Male"]], v.sex)}</select></div>
+        <div class="form-field"><label for="calcAge">Age (years)</label><input class="text-input" id="calcAge" name="age" type="number" min="18" max="100" value="${escapeHtml(v.age)}" required></div>
+        <div class="form-field"><label for="calcWeight">Weight (kg)</label><input class="text-input" id="calcWeight" name="weight_kg" type="number" min="30" max="300" step="0.1" value="${escapeHtml(v.weight_kg)}" required></div>
+        <div class="form-field"><label for="calcHeight">Height (cm)</label><input class="text-input" id="calcHeight" name="height_cm" type="number" min="120" max="230" step="0.1" value="${escapeHtml(v.height_cm)}" required></div>
+        <div class="form-field"><label for="calcActivity">Activity level</label><select id="calcActivity" name="activity">${options([["sedentary", "Sedentary"], ["light", "Light (1-3 days a week)"], ["moderate", "Moderate (3-5 days a week)"], ["active", "Active (6-7 days a week)"], ["very_active", "Very active"]], v.activity)}</select></div>
+        <div class="form-field"><label for="calcGoal">Goal</label><select id="calcGoal" name="goal">${options([["lose", "Lose weight"], ["maintain", "Maintain weight"], ["gain", "Gain weight"]], v.goal)}</select></div>
+        <div class="form-field form-actions"><button class="button button-primary" type="submit">Calculate <span aria-hidden="true">&#8594;</span></button></div>
+      </form>
+    </section>
+    ${resultHtml}`;
+  document.querySelector("#calculatorForm").addEventListener("submit", submitCalculator);
+}
+
+async function submitCalculator(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  const payload = {
+    ...values,
+    age: Number(values.age),
+    weight_kg: Number(values.weight_kg),
+    height_cm: Number(values.height_cm),
+  };
+  try {
+    const result = await request("/api/v1/tools/nutrition-targets", { method: "POST", body: JSON.stringify(payload) });
+    renderCalculator(result, values);
+  } catch (error) {
+    showWorkspaceMessage(error.message, true);
+  }
 }
 
 async function renderClientAppointments(clientId, selectedTab = "upcoming", selectedDietitianId = "") {
@@ -967,6 +1042,8 @@ async function loadView(view, initialAIPanel = "coach") {
       await renderRecipes();
     } else if (view === "meal-plans") {
       await renderMealPlans();
+    } else if (view === "calculator") {
+      renderCalculator();
     } else if (view === "admin-approvals") {
       await renderAdminApprovals();
     }
@@ -1343,6 +1420,7 @@ async function renderMealPlans() {
           <div class="form-field"><label for="planClient">Patient</label><select id="planClient" name="client_id" required>${clientOptions}</select></div>
           <div class="form-field"><label for="planDietType">Plan focus</label><input class="text-input" id="planDietType" name="diet_type" placeholder="Balanced, vegetarian, low sodium..." maxlength="50" required></div>
           <div class="form-field"><label for="planDays">Duration</label><input class="text-input" id="planDays" name="days" type="number" min="1" max="30" value="7" required></div>
+          <div class="form-field full-width"><label><input type="checkbox" name="use_ai" id="planUseAi"> Draft the meals and a grocery list with AI. It uses this patient's allergies and conditions and can take a minute.</label></div>
           <div class="form-field form-actions"><button class="button button-primary" type="submit">Create meal plan <span aria-hidden="true">&#8594;</span></button></div>
         </form>` : '<p class="empty-state">No linked patient records are available for meal planning.</p>'}
     </section>
@@ -1352,6 +1430,7 @@ async function renderMealPlans() {
         <div class="meal-plan-heading"><div><span class="subsection-label">${escapeHtml(plan.diet_type)}</span><h3>${plan.days}-day plan</h3></div><span class="plan-status">${escapeHtml(plan.status)}</span></div>
         <p class="meal-plan-client">Patient ${escapeHtml(plan.client_id)}</p>
         <ul class="meal-summary">${plan.meals.map((meal) => `<li>${escapeHtml(meal)}</li>`).join("")}</ul>
+        ${groceryListHtml(plan.grocery_list)}
       </article>`).join("") : '<p class="empty-state">No meal plans yet. Create the first one above.</p>'}</div>`;
   const form = document.querySelector("#mealPlanForm");
   if (form) {
@@ -1370,11 +1449,14 @@ async function createMealPlan(event) {
   const button = form.querySelector("button[type=submit]");
   const values = Object.fromEntries(new FormData(form));
   values.days = Number(values.days);
+  const useAi = values.use_ai === "on";
+  delete values.use_ai;
   button.disabled = true;
+  if (useAi) showWorkspaceMessage("Drafting the plan with AI. This can take a minute...");
   try {
-    await request("/api/v1/meal-plans", { method: "POST", body: JSON.stringify(values) });
+    await request(useAi ? "/api/v1/meal-plans/ai" : "/api/v1/meal-plans", { method: "POST", body: JSON.stringify(values) });
     await renderMealPlans();
-    showWorkspaceMessage("Meal plan saved.");
+    showWorkspaceMessage(useAi ? "AI meal plan saved. Please review it before the patient relies on it." : "Meal plan saved.");
   } catch (error) {
     showWorkspaceMessage(error.message, true);
   } finally {
@@ -1637,19 +1719,8 @@ loginForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify(Object.fromEntries(new FormData(loginForm))),
     });
-    if (result.user.type === "admin") {
-      sessionStorage.setItem(adminTokenKey, result.access_token);
-      sessionStorage.removeItem(dietitianTokenKey);
-      showWorkspace(result.user, "overview");
-    } else if (result.user.type === "dietitian") {
-      sessionStorage.setItem(dietitianTokenKey, result.access_token);
-      sessionStorage.removeItem(adminTokenKey);
-      showWorkspace(result.user);
-    } else {
-      sessionStorage.removeItem(adminTokenKey);
-      sessionStorage.removeItem(dietitianTokenKey);
-      showWorkspace(result.user);
-    }
+    storeSessionToken(result.user.type, result.access_token);
+    showWorkspace(result.user, result.user.type === "admin" ? "overview" : undefined);
   } catch (error) {
     showAuthMessage(error.message);
   } finally {
@@ -1679,13 +1750,7 @@ signupForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify({ email: values.email, password: values.password }),
     });
-    if (result.user.type === "dietitian") {
-      sessionStorage.setItem(dietitianTokenKey, result.access_token);
-      sessionStorage.removeItem(adminTokenKey);
-    } else {
-      sessionStorage.removeItem(adminTokenKey);
-      sessionStorage.removeItem(dietitianTokenKey);
-    }
+    storeSessionToken(result.user.type, result.access_token);
     showWorkspace(result.user, "overview");
   } catch (error) {
     showAuthMessage(error.message);
@@ -1729,13 +1794,12 @@ updateSignupRole();
 updateAdminSetupTab();
 try {
   const savedUser = JSON.parse(sessionStorage.getItem(sessionKey) || "null");
-  const hasAdminToken = Boolean(sessionStorage.getItem(adminTokenKey));
-  if (savedUser && savedUser.id && savedUser.full_name) {
-    if (savedUser.type === "admin" && hasAdminToken) {
-      showWorkspace(savedUser, "overview");
-    } else if (savedUser.type !== "admin") {
-      showWorkspace(savedUser);
-    }
+  const tokenKeys = { admin: adminTokenKey, dietitian: dietitianTokenKey, client: clientTokenKey };
+  const hasToken = savedUser && Boolean(sessionStorage.getItem(tokenKeys[savedUser.type]));
+  if (savedUser && savedUser.id && savedUser.full_name && hasToken) {
+    showWorkspace(savedUser, savedUser.type === "admin" ? "overview" : undefined);
+  } else {
+    sessionStorage.removeItem(sessionKey);
   }
 } catch {
   sessionStorage.removeItem(sessionKey);
