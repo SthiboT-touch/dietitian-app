@@ -8,9 +8,10 @@ from functools import lru_cache
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional, TypedDict
 import httpx
+import psycopg2
 from langchain.agents import create_agent
 from langchain_core.exceptions import OutputParserException
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
@@ -27,11 +28,15 @@ from helpers import fetch_client_profile, decode_recommendation
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Small models sometimes write a tool call as plain text instead of making it; never show that to users.
+TOOL_CALL_TEXT = re.compile(r'\s*\{\s*"name"\s*:\s*"[^"]*"\s*,\s*"(?:parameters|arguments)')
+
 
 # --- AI ENGINE & HUMAN-IN-THE-LOOP WORKFLOW ---
 
 class ChatWorkflowState(TypedDict, total=False):
     user_id: str
+    user_name: Optional[str]
     role: str
     message: str
     conversation: List[dict]
@@ -126,15 +131,22 @@ def _load_chat_history(state: ChatWorkflowState) -> dict:
 
 
 def _route_chat_reply(state: ChatWorkflowState) -> str:
-    return "greeting" if _greeting_reply(state["message"]) else "agent"
+    if _greeting_reply(state["message"]) or _name_reply(state["message"], state.get("user_name")):
+        return "greeting"
+    return "agent"
 
 
 def _reply_to_greeting(state: ChatWorkflowState) -> dict:
-    return {"reply": _greeting_reply(state["message"])}
+    return {"reply": _greeting_reply(state["message"]) or _name_reply(state["message"], state.get("user_name"))}
 
 
 def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
-    messages = []
+    user_name = (state.get("user_name") or "").strip()
+    messages = [SystemMessage(content=(
+        f"The user's name is {user_name}. If they ask for their name, tell them it is {user_name}." if user_name
+        else "You do not know the user's name. If they ask for it, say you don't know it and invite them to share it. "
+        "Never search the food catalog for a person's name."
+    ))]
     for turn in state.get("conversation", [])[-8:]:
         if turn.get("role") in {"user", "assistant"} and isinstance(turn.get("content"), str):
             messages.append(
@@ -153,7 +165,7 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
                 for block in content
                 if isinstance(block, dict) and isinstance(block.get("text"), str)
             )
-        if isinstance(content, str) and content.strip():
+        if isinstance(content, str) and content.strip() and not TOOL_CALL_TEXT.match(content):
             return {"reply": content.strip()}
     except (
         httpx.HTTPError,
@@ -214,23 +226,27 @@ def search_food_catalog(query: str) -> str:
         return "No matching foods found."
 
     if config.DATABASE_ENABLED:
-        with database.cursor() as cursor:
-            cursor.execute(
-                "SELECT food_item_id AS food_id, name, calories, protein AS protein_g, "
-                "carbs AS carbs_g, fat AS fat_g, glycemic_index FROM food_item "
-                "WHERE LOWER(name) LIKE %s ORDER BY name LIMIT 10",
-                (f"%{normalized_query}%",),
-            )
-            foods = [
-                {
-                    **dict(row),
-                    "calories": round(row["calories"]),
-                    "protein_g": float(row["protein_g"] or 0),
-                    "carbs_g": float(row["carbs_g"] or 0),
-                    "fat_g": float(row["fat_g"] or 0),
-                }
-                for row in cursor.fetchall()
-            ]
+        try:
+            with database.cursor() as cursor:
+                cursor.execute(
+                    "SELECT food_item_id AS food_id, name, calories, protein AS protein_g, "
+                    "carbs AS carbs_g, fat AS fat_g, glycemic_index FROM food_item "
+                    "WHERE LOWER(name) LIKE %s ORDER BY name LIMIT 10",
+                    (f"%{normalized_query}%",),
+                )
+                foods = [
+                    {
+                        **dict(row),
+                        "calories": round(row["calories"]),
+                        "protein_g": float(row["protein_g"] or 0),
+                        "carbs_g": float(row["carbs_g"] or 0),
+                        "fat_g": float(row["fat_g"] or 0),
+                    }
+                    for row in cursor.fetchall()
+                ]
+        except psycopg2.Error:
+            logger.exception("Food catalog lookup failed")
+            return "The food catalog is unavailable right now. Answer from general knowledge without catalog data."
     else:
         foods = [
             food for food in foods_db
@@ -259,6 +275,7 @@ def _create_chat_agent(role: str):
         "Use the food catalog lookup only when the user asks whether a specific item is in the practice catalog "
         "or requests its listed nutrition values. For general food ideas, answer from general knowledge without "
         "the tool. If a catalog lookup finds no match, say so briefly and do not invent catalog data. "
+        "Your only tool is the food catalog lookup; never invent other tools or write tool calls as text. "
         "Never mention tool calls or internal tool errors. "
         "Treat catalog data as reference information, not personalized medical advice. "
         "Never diagnose a medical condition or prescribe treatment. If the user has medical concerns, "
@@ -269,6 +286,20 @@ def _create_chat_agent(role: str):
         tools=[search_food_catalog],
         system_prompt=system_prompt,
     )
+
+
+def _name_reply(message: str, user_name: Optional[str]) -> Optional[str]:
+    asks_name = re.fullmatch(
+        r"(?:(?:hi|hello|hey)[,!.\s]+)?(?:what(?:'s| is|s) my name|do you know my name|who am i)[.!?\s]*",
+        message.strip(),
+        flags=re.IGNORECASE,
+    )
+    if not asks_name:
+        return None
+    user_name = (user_name or "").strip()
+    if user_name:
+        return f"Your name is {user_name}. How can I help with your nutrition or wellness today?"
+    return "I don't know your name yet. Feel free to share it, and tell me what nutrition or wellness question I can help with."
 
 
 def _greeting_reply(message: str) -> Optional[str]:
@@ -285,9 +316,12 @@ def _greeting_reply(message: str) -> Optional[str]:
     return "Hi! I'm here to help with food, hydration, meal timing, or workouts. What would you like to know?"
 
 
-def generate_llama_chat_reply(message: str, role: str, conversation: Optional[List[dict]] = None) -> str:
+def generate_llama_chat_reply(
+    message: str, role: str, conversation: Optional[List[dict]] = None, user_name: Optional[str] = None
+) -> str:
     result = _create_chat_workflow().invoke({
         "user_id": "",
+        "user_name": user_name,
         "role": role,
         "message": message,
         "conversation": conversation or [],
@@ -407,6 +441,7 @@ def _create_review_workflow():
 def chat_with_ai(data: AIChatRequest):
     result = _create_chat_workflow().invoke({
         "user_id": data.user_id or f"{data.role}-chat",
+        "user_name": data.user_name,
         "role": data.role,
         "message": data.message,
         "persist": True,

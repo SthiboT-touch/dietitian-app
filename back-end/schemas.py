@@ -138,6 +138,7 @@ class AIChatRequest(BaseModel):
     user_id: str
     role: Literal["client", "dietitian"]
     message: str = Field(..., min_length=1)
+    user_name: Optional[str] = Field(default=None, max_length=150)
 
 class RecommendationReview(BaseModel):
     action: Literal["APPROVED", "MODIFIED", "REJECTED"]

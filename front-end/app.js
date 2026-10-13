@@ -368,7 +368,7 @@ async function renderAIChat() {
     try {
       await request("/api/v1/ai/chat", {
         method: "POST",
-        body: JSON.stringify({ user_id: userId, role, message }),
+        body: JSON.stringify({ user_id: userId, user_name: currentUser ? currentUser.full_name : null, role, message }),
       });
       input.value = "";
       await renderAIChat();
