@@ -753,6 +753,20 @@ def test_ai_chat_answers_name_questions_without_the_model():
     assert unnamed.startswith("I don't know your name yet.")
 
 
+def test_ai_chat_offers_catalog_tool_only_for_catalog_questions():
+    calls = []
+
+    def fake_agent(role, use_catalog=False):
+        calls.append(use_catalog)
+        return RunnableLambda(lambda state: {"messages": [*state["messages"], AIMessage(content="ok")]})
+
+    with patch("routers.ai._create_chat_agent", side_effect=fake_agent):
+        ai.generate_llama_chat_reply("Make me a lactose free meal", "client")
+        ai.generate_llama_chat_reply("Is oatmeal in the practice catalog?", "client")
+
+    assert calls == [False, True]
+
+
 def test_ai_chat_hides_tool_calls_written_as_text():
     leaked = AIMessage(content='{"name":"get_user_info","parameters":{"key":"username"}}')
 
