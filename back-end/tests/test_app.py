@@ -713,11 +713,59 @@ def test_ai_chat_returns_clear_fallback_when_ollama_is_unavailable(caplog):
     assert "LangChain AI chat request failed" in caplog.text
 
 
+def test_ai_chat_tells_agent_the_user_name():
+    seen = {}
+
+    def answer(state):
+        seen["messages"] = state["messages"]
+        return {"messages": [*state["messages"], AIMessage(content="Try yogurt with fruit, Thabo.")]}
+
+    with patch("routers.ai._create_chat_agent", return_value=RunnableLambda(answer)):
+        response = client.post(
+            "/api/v1/ai/chat",
+            json={"user_id": "client-name", "user_name": "Thabo Mulaudzi", "role": "client", "message": "Suggest a snack for me."},
+        )
+
+    assert response.json()["reply"] == "Try yogurt with fruit, Thabo."
+    assert seen["messages"][0].content.startswith("The user's name is Thabo Mulaudzi.")
+
+
+def test_ai_chat_answers_name_questions_without_the_model():
+    with patch("routers.ai._create_chat_agent", side_effect=AssertionError("model should not be called")):
+        named = ai.generate_llama_chat_reply("hey whats my name", "client", user_name="Thabo Mulaudzi")
+        unnamed = ai.generate_llama_chat_reply("What's my name?", "client")
+
+    assert named.startswith("Your name is Thabo Mulaudzi.")
+    assert unnamed.startswith("I don't know your name yet.")
+
+
+def test_ai_chat_hides_tool_calls_written_as_text():
+    leaked = AIMessage(content='{"name":"get_user_info","parameters":{"key":"username"}}')
+
+    with patch(
+        "routers.ai._create_chat_agent",
+        return_value=RunnableLambda(lambda state: {"messages": [*state["messages"], leaked]}),
+    ):
+        reply = ai.generate_llama_chat_reply("What should I eat before a run?", "client")
+
+    assert "get_user_info" not in reply
+    assert "couldn't get a usable answer" in reply
+
+
 def test_food_catalog_tool_returns_matching_foods():
     result = json.loads(ai.search_food_catalog.invoke({"query": "oat"}))
 
     assert result[0]["name"] == "Oatmeal"
     assert result[0]["calories"] == 150
+
+
+def test_food_catalog_tool_reports_database_failure(monkeypatch):
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+
+    with patch("routers.ai.database.cursor", side_effect=ai.psycopg2.OperationalError("auth failed")):
+        result = ai.search_food_catalog.invoke({"query": "oat"})
+
+    assert "catalog is unavailable" in result
 
 
 def ollama_response(plan):
@@ -792,6 +840,59 @@ def test_health_endpoint_reports_online():
 
     assert response.status_code == 200
     assert response.json()["status"] == "online"
+
+
+def test_health_reports_llm_and_langsmith_online(monkeypatch):
+    monkeypatch.setenv("OLLAMA_MODEL", "llama3.2")
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "test-key")
+
+    def fake_get(url, **_):
+        if url.endswith("/api/tags"):
+            return httpx.Response(200, json={"models": [{"name": "llama3.2:latest"}]}, request=httpx.Request("GET", url))
+        return httpx.Response(200, json=[], request=httpx.Request("GET", url))
+
+    with patch("app.httpx.get", side_effect=fake_get):
+        body = client.get("/health").json()
+
+    assert body["llm"] == "online"
+    assert body["langsmith"] == "online"
+
+
+def test_health_survives_llm_and_langsmith_outages(monkeypatch):
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "test-key")
+
+    with patch("app.httpx.get", side_effect=httpx.ConnectError("unreachable")):
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["llm"] == "offline"
+    assert response.json()["langsmith"] == "offline"
+
+
+def test_health_flags_missing_model_and_bad_langsmith_key(monkeypatch):
+    monkeypatch.setenv("OLLAMA_MODEL", "llama3.2")
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "wrong-key")
+
+    def fake_get(url, **_):
+        if url.endswith("/api/tags"):
+            return httpx.Response(200, json={"models": []}, request=httpx.Request("GET", url))
+        return httpx.Response(401, request=httpx.Request("GET", url))
+
+    with patch("app.httpx.get", side_effect=fake_get):
+        body = client.get("/health").json()
+
+    assert body["llm"] == "model_missing"
+    assert body["langsmith"] == "unauthorized"
+
+
+def test_health_reports_langsmith_disabled_when_tracing_is_off(monkeypatch):
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+
+    with patch("app.httpx.get", side_effect=httpx.ConnectError("unreachable")):
+        assert client.get("/health").json()["langsmith"] == "disabled"
 
 
 def test_root_serves_frontend():
