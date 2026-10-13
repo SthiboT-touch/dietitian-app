@@ -16,14 +16,25 @@ from routers import ai
 from security import hash_password
 
 
-client = TestClient(app.app)
+client = TestClient(app.app)  # not signed in
+# Signed in as an admin (the fixture below creates the session), for tests that are not about sign-in rules.
+staff = TestClient(app.app, headers={"Authorization": "Bearer test-admin-token"})
+
+
+def dietitian_headers(dietitian_id="dietitian-test"):
+    """Sign a dietitian in by creating a session directly, and return the bearer header."""
+    token = f"test-token-{dietitian_id}"
+    state.dietitian_sessions_db[token] = dietitian_id
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture(autouse=True)
 def clear_in_memory_data(monkeypatch):
     monkeypatch.setattr(config, "DATABASE_ENABLED", False)
+    state.client_sessions_db.clear()
     state.ai_recommendations_db.clear()
     state.ai_conversations_db.clear()
+    state.recommendation_run_ids.clear()
     state.admins_db.clear()
     state.businesses_db.clear()
     state.branches_db.clear()
@@ -36,9 +47,11 @@ def clear_in_memory_data(monkeypatch):
     state.goals_db.clear()
     state.recipes_db.clear()
     state.users_db.clear()
+    state.admin_sessions_db["test-admin-token"] = "test-admin"
     yield
     state.ai_recommendations_db.clear()
     state.ai_conversations_db.clear()
+    state.recommendation_run_ids.clear()
     state.admins_db.clear()
     state.businesses_db.clear()
     state.branches_db.clear()
@@ -51,6 +64,7 @@ def clear_in_memory_data(monkeypatch):
     state.goals_db.clear()
     state.recipes_db.clear()
     state.users_db.clear()
+    state.client_sessions_db.clear()
 
 
 def test_signup_and_login_use_saved_credentials():
@@ -203,7 +217,7 @@ def test_patient_without_assigned_dietitian_can_book_with_directory_dietitian():
     ).json()["user"]
     directory = client.get("/api/v1/dietitians")
 
-    appointment = client.post(
+    appointment = staff.post(
         "/api/v1/appointments",
         json={
             "client_id": patient["id"],
@@ -239,7 +253,7 @@ def test_approved_appointment_links_patient_to_dietitian_for_dashboard():
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
-    appointment = client.post(
+    appointment = staff.post(
         "/api/v1/appointments",
         json={
             "client_id": patient["id"],
@@ -248,14 +262,14 @@ def test_approved_appointment_links_patient_to_dietitian_for_dashboard():
         },
     ).json()["appointment"]
 
-    response = client.patch(
+    response = staff.patch(
         f"/api/v1/appointments/{appointment['appointment_id']}",
         json={"action": "APPROVED"},
     )
 
     assert response.status_code == 200
     assert response.json()["appointment"]["status"] == "CONFIRMED"
-    my_patients = client.get(f"/api/v1/clients?dietitian_id={dietitian['id']}")
+    my_patients = staff.get(f"/api/v1/clients?dietitian_id={dietitian['id']}")
     assert my_patients.status_code == 200
     assert any(item["id"] == patient["id"] for item in my_patients.json())
 
@@ -313,7 +327,7 @@ def test_client_list_is_scoped_to_dietitian():
         },
     ).json()["user"]
 
-    response = client.get("/api/v1/clients", params={"dietitian_id": dietitian["id"]})
+    response = staff.get("/api/v1/clients", params={"dietitian_id": dietitian["id"]})
 
     assert response.status_code == 200
     assert response.json() == [{
@@ -595,7 +609,7 @@ def test_ai_chat_supports_food_and_exercise_questions():
             }
         ),
     ):
-        response = client.post(
+        response = staff.post(
             "/api/v1/ai/chat",
             json={
                 "user_id": "client-42",
@@ -646,7 +660,7 @@ def test_ai_chat_answers_greetings_without_reusing_old_nutrition_context(message
     ]
 
     with patch("routers.ai._create_chat_agent") as mock_agent:
-        response = client.post(
+        response = staff.post(
             "/api/v1/ai/chat",
             json={"user_id": "client-greeting", "role": "client", "message": message},
         )
@@ -687,7 +701,7 @@ def test_ai_chat_sends_plain_turns_and_recent_conversation_to_ollama():
         "routers.ai._create_chat_agent",
         return_value=RunnableLambda(capture_agent_state),
     ):
-        response = client.post(
+        response = staff.post(
             "/api/v1/ai/chat",
             json={"user_id": "client-history", "role": "client", "message": "What can I eat after training?"},
         )
@@ -721,7 +735,7 @@ def test_ai_chat_tells_agent_the_user_name():
         return {"messages": [*state["messages"], AIMessage(content="Try yogurt with fruit, Thabo.")]}
 
     with patch("routers.ai._create_chat_agent", return_value=RunnableLambda(answer)):
-        response = client.post(
+        response = staff.post(
             "/api/v1/ai/chat",
             json={"user_id": "client-name", "user_name": "Thabo Mulaudzi", "role": "client", "message": "Suggest a snack for me."},
         )
@@ -776,6 +790,7 @@ def test_generate_plan_returns_pending_recommendation():
     with patch("routers.ai._create_chat_model", return_value=ollama_response(["Breakfast: oatmeal"])):
         response = client.post(
             "/api/v1/ai/generate-plan",
+            headers=dietitian_headers(),
             json={"client_id": "client-1", "dietary_goal": "More fiber"},
         )
 
@@ -799,6 +814,7 @@ def test_generate_plan_forwards_allergies_and_conditions():
     with patch("routers.ai._create_chat_model", return_value=RunnableLambda(capture_prompt)) as mock_model:
         response = client.post(
             "/api/v1/ai/generate-plan",
+            headers=dietitian_headers(),
             json={"client_id": "client-2", "dietary_goal": "Balanced meals"},
         )
 
@@ -816,6 +832,7 @@ def test_generate_plan_returns_503_when_ollama_is_unreachable():
     with patch("routers.ai._create_chat_model", return_value=RunnableLambda(fail_model)):
         response = client.post(
             "/api/v1/ai/generate-plan",
+            headers=dietitian_headers(),
             json={"client_id": "client-3", "dietary_goal": "More vegetables"},
         )
 
@@ -829,6 +846,7 @@ def test_generate_plan_returns_503_for_malformed_model_response():
     ):
         response = client.post(
             "/api/v1/ai/generate-plan",
+            headers=dietitian_headers(),
             json={"client_id": "client-4", "dietary_goal": "More vegetables"},
         )
 
@@ -938,8 +956,8 @@ def test_recipe_create_and_list():
         "instructions": "Cook oats, then add berries.",
     }
 
-    created = client.post("/api/v1/recipes", json=recipe)
-    listing = client.get("/api/v1/recipes")
+    created = staff.post("/api/v1/recipes", json=recipe)
+    listing = staff.get("/api/v1/recipes")
 
     assert created.status_code == 200
     saved = next(item for item in listing.json() if item["recipe_id"] == created.json()["recipe_id"])
@@ -948,12 +966,12 @@ def test_recipe_create_and_list():
 
 
 def test_meal_plan_create_and_list():
-    plan = client.post(
+    plan = staff.post(
         "/api/v1/meal-plans",
         json={"client_id": "client-plan-test", "diet_type": "Balanced", "days": 3},
     )
 
-    listing = client.get("/api/v1/meal-plans", params={"client_id": "client-plan-test"})
+    listing = staff.get("/api/v1/meal-plans", params={"client_id": "client-plan-test"})
 
     assert plan.status_code == 201
     assert len(listing.json()) == 1
@@ -962,12 +980,12 @@ def test_meal_plan_create_and_list():
 
 
 def test_goals_can_be_created_and_listed_by_client():
-    created = client.post(
+    created = staff.post(
         "/api/v1/goals",
         json={"client_id": "client-goal-test", "target_metric": "Weight", "target_value": 72.5},
     )
 
-    listing = client.get("/api/v1/goals", params={"client_id": "client-goal-test"})
+    listing = staff.get("/api/v1/goals", params={"client_id": "client-goal-test"})
 
     assert created.status_code == 200
     assert listing.status_code == 200
@@ -977,13 +995,13 @@ def test_goals_can_be_created_and_listed_by_client():
 def test_appointments_can_be_filtered_by_client():
     appointment_date = (datetime.now() + timedelta(days=8)).replace(microsecond=0).isoformat()
     for client_id in ("client-a", "client-b"):
-        response = client.post(
+        response = staff.post(
             "/api/v1/appointments",
             json={"client_id": client_id, "dietitian_id": "dietitian-1", "appointment_date": appointment_date},
         )
         assert response.status_code == 200
 
-    response = client.get("/api/v1/appointments", params={"client_id": "client-a"})
+    response = staff.get("/api/v1/appointments", params={"client_id": "client-a"})
 
     assert response.status_code == 200
     assert len(response.json()) == 1
@@ -991,7 +1009,7 @@ def test_appointments_can_be_filtered_by_client():
 
 
 def test_patient_progress_saves_and_preserves_partial_metric_updates():
-    first_entry = client.post(
+    first_entry = staff.post(
         "/api/v1/clients/patient-progress-test/progress",
         json={
             "weight_kg": 72.5,
@@ -1005,11 +1023,11 @@ def test_patient_progress_saves_and_preserves_partial_metric_updates():
     )
     assert first_entry.status_code == 200
 
-    partial_update = client.post(
+    partial_update = staff.post(
         "/api/v1/clients/patient-progress-test/progress",
         json={"weight_kg": 72.2},
     )
-    history = client.get("/api/v1/clients/patient-progress-test/progress")
+    history = staff.get("/api/v1/clients/patient-progress-test/progress")
 
     assert partial_update.status_code == 200
     assert len(history.json()) == 1
@@ -1025,7 +1043,7 @@ def test_patient_progress_saves_and_preserves_partial_metric_updates():
 
 def test_appointment_lifecycle_supports_approval_rejection_and_cancellation():
     appointment_date = (datetime.now() + timedelta(days=5)).replace(microsecond=0).isoformat()
-    created = client.post(
+    created = staff.post(
         "/api/v1/appointments",
         json={"client_id": "client-a", "dietitian_id": "dietitian-1", "appointment_date": appointment_date},
     )
@@ -1033,27 +1051,27 @@ def test_appointment_lifecycle_supports_approval_rejection_and_cancellation():
     assert created.status_code == 200
     assert appointment["status"] == "PENDING"
 
-    approved = client.patch(
+    approved = staff.patch(
         f"/api/v1/appointments/{appointment['appointment_id']}",
         json={"action": "APPROVED"},
     )
     assert approved.status_code == 200
     assert approved.json()["appointment"]["status"] == "CONFIRMED"
-    patient_appointments = client.get("/api/v1/appointments", params={"client_id": "client-a"})
+    patient_appointments = staff.get("/api/v1/appointments", params={"client_id": "client-a"})
     assert patient_appointments.json()[0]["status"] == "CONFIRMED"
 
-    cancelled = client.patch(
+    cancelled = staff.patch(
         f"/api/v1/appointments/{appointment['appointment_id']}",
         json={"action": "CANCELLED"},
     )
     assert cancelled.status_code == 200
     assert cancelled.json()["appointment"]["status"] == "CANCELLED"
 
-    rejected_request = client.post(
+    rejected_request = staff.post(
         "/api/v1/appointments",
         json={"client_id": "client-b", "dietitian_id": "dietitian-1", "appointment_date": appointment_date},
     ).json()["appointment"]
-    rejected = client.patch(
+    rejected = staff.patch(
         f"/api/v1/appointments/{rejected_request['appointment_id']}",
         json={"action": "REJECTED"},
     )
@@ -1062,7 +1080,7 @@ def test_appointment_lifecycle_supports_approval_rejection_and_cancellation():
 
 
 def test_appointment_decisions_only_apply_to_pending_requests():
-    appointment = client.post(
+    appointment = staff.post(
         "/api/v1/appointments",
         json={
             "client_id": "client-a",
@@ -1070,9 +1088,9 @@ def test_appointment_decisions_only_apply_to_pending_requests():
             "appointment_date": (datetime.now() + timedelta(days=3)).replace(microsecond=0).isoformat(),
         },
     ).json()["appointment"]
-    client.patch(f"/api/v1/appointments/{appointment['appointment_id']}", json={"action": "REJECTED"})
+    staff.patch(f"/api/v1/appointments/{appointment['appointment_id']}", json={"action": "REJECTED"})
 
-    response = client.patch(
+    response = staff.patch(
         f"/api/v1/appointments/{appointment['appointment_id']}",
         json={"action": "APPROVED"},
     )
@@ -1087,7 +1105,7 @@ def test_client_recommendations_only_lists_reviewed_items_for_client():
         "rec-other-approved": {"recommendation_id": "rec-other-approved", "client_id": "client-b", "status": "APPROVED"},
     })
 
-    response = client.get("/api/v1/ai/recommendations", params={"client_id": "client-a"})
+    response = staff.get("/api/v1/ai/recommendations", params={"client_id": "client-a"})
 
     assert response.status_code == 200
     assert [item["recommendation_id"] for item in response.json()] == ["rec-client-approved"]
@@ -1099,7 +1117,7 @@ def test_pending_recommendations_only_returns_pending_items():
         "rec-approved": {"recommendation_id": "rec-approved", "status": "APPROVED"},
     })
 
-    response = client.get("/api/v1/ai/recommendations/pending")
+    response = client.get("/api/v1/ai/recommendations/pending", headers=dietitian_headers())
 
     assert response.status_code == 200
     assert [item["recommendation_id"] for item in response.json()] == ["rec-pending"]
@@ -1114,7 +1132,7 @@ def test_client_health_profile_loads_conditions_allergies_and_pregnancy():
         "progress": [],
     }
 
-    response = client.get("/api/v1/clients/client-health/profile")
+    response = staff.get("/api/v1/clients/client-health/profile")
 
     assert response.status_code == 200
     assert response.json()["allergies"] == state.clients_db["client-health"]["allergies"]
@@ -1130,15 +1148,15 @@ def test_health_history_entries_save_for_a_client():
         "progress": [],
     }
 
-    allergy = client.post(
+    allergy = staff.post(
         "/api/v1/clients/client-health/allergies",
         json={"allergen": "Peanuts", "severity": "severe"},
     )
-    condition = client.post(
+    condition = staff.post(
         "/api/v1/clients/client-health/medical-conditions",
         json={"condition_name": "Asthma"},
     )
-    pregnancy = client.post(
+    pregnancy = staff.post(
         "/api/v1/clients/client-health/pregnancy",
         json={"trimester": 2, "due_date": "2027-03-01"},
     )
@@ -1146,7 +1164,7 @@ def test_health_history_entries_save_for_a_client():
     assert allergy.status_code == 200
     assert condition.status_code == 200
     assert pregnancy.status_code == 200
-    profile = client.get("/api/v1/clients/client-health/profile").json()
+    profile = staff.get("/api/v1/clients/client-health/profile").json()
     assert profile["allergies"] == [{"allergen": "Peanuts", "severity": "severe"}]
     assert profile["conditions"] == [{"condition_name": "Asthma", "icd_code": None}]
     assert profile["pregnancy"] == {"trimester": 2, "due_date": "2027-03-01"}
@@ -1160,6 +1178,7 @@ def test_review_recommendation_updates_status_and_notes():
 
     response = client.patch(
         "/api/v1/ai/recommendations/rec-review",
+        headers=dietitian_headers(),
         json={"action": "APPROVED", "notes": "Reviewed by dietitian"},
     )
 
@@ -1299,3 +1318,411 @@ def test_admin_setup_login_and_audited_dietitian_approval():
     )
     assert approved_directory_entry["branch_name"] == "Later Clinic"
     assert approved_directory_entry["branch_address"] == "99 New Street"
+
+
+# --- LangSmith, authentication and Ollama-down handling ---
+
+def test_ai_review_routes_reject_an_unknown_token():
+    response = client.get(
+        "/api/v1/ai/recommendations/pending", headers={"Authorization": "Bearer not-a-real-token"}
+    )
+
+    assert response.status_code == 401
+
+
+def test_generate_plan_returns_503_when_ollama_raises_connection_error():
+    def fail_model(_):
+        raise ConnectionError("Failed to connect to Ollama")
+
+    with patch("routers.ai._create_chat_model", return_value=RunnableLambda(fail_model)):
+        response = client.post(
+            "/api/v1/ai/generate-plan",
+            headers=dietitian_headers(),
+            json={"client_id": "client-5", "dietary_goal": "More vegetables"},
+        )
+
+    assert response.status_code == 503
+
+
+def test_ai_chat_falls_back_when_ollama_raises_connection_error():
+    def fail_model(_):
+        raise ConnectionError("Failed to connect to Ollama")
+
+    with patch("routers.ai._create_chat_agent", return_value=RunnableLambda(fail_model)):
+        reply = ai.generate_llama_chat_reply("What should I eat after a workout?", "client")
+
+    assert "can't reach the ai model" in reply.lower()
+
+
+def test_review_sends_the_decision_to_langsmith_for_the_generating_run():
+    with patch("routers.ai._create_chat_model", return_value=ollama_response(["Breakfast: oatmeal"])):
+        created = client.post(
+            "/api/v1/ai/generate-plan",
+            headers=dietitian_headers(),
+            json={"client_id": "client-6", "dietary_goal": "More fiber"},
+        ).json()["recommendation"]
+    run_id = state.recommendation_run_ids[created["recommendation_id"]]
+
+    with patch("routers.ai.tracing.record_review_feedback") as record_feedback:
+        response = client.patch(
+            f"/api/v1/ai/recommendations/{created['recommendation_id']}",
+            headers=dietitian_headers(),
+            json={"action": "REJECTED", "notes": "Contains too much sugar"},
+        )
+
+    assert response.status_code == 200
+    record_feedback.assert_called_once_with(run_id, "REJECTED")
+    assert "trace_run_id" not in response.json()
+    assert "trace_run_id" not in created
+
+
+def test_trace_config_names_and_tags_runs_without_extra_metadata():
+    import tracing
+
+    config_value = tracing.trace_config("ai_chat", tags=("chat",), metadata={"thread_id": "client-1"})
+
+    assert config_value["run_name"] == "ai_chat"
+    assert config_value["tags"] == ["dietitian-app", "chat"]
+    assert config_value["metadata"]["thread_id"] == "client-1"
+
+
+# --- Patient sign-in, access rules, AI meal plans and the calculator ---
+
+def sign_up_and_login(kind, email, dietitian_id=None, license_number="RD-1000"):
+    """Register a dietitian or patient through the API, sign in, and return (user, bearer headers)."""
+    if kind == "dietitian":
+        user = client.post(
+            "/api/v1/auth/register/dietitian",
+            json={
+                "first_name": "Avery", "last_name": "Chen", "email": email,
+                "license_number": license_number, "password": "nutrition-safe-pass",
+            },
+        ).json()["user"]
+    else:
+        body = {
+            "first_name": "Jordan", "last_name": "Lee", "email": email,
+            "date_of_birth": "1990-05-14", "password": "nutrition-safe-pass",
+        }
+        if dietitian_id:
+            body["dietitian_id"] = dietitian_id
+        user = client.post("/api/v1/auth/register/client", json=body).json()["user"]
+    login = client.post("/api/v1/auth/login", json={"email": email, "password": "nutrition-safe-pass"}).json()
+    return user, {"Authorization": f"Bearer {login['access_token']}"}
+
+
+def future_time(days=5):
+    return (datetime.now() + timedelta(days=days)).replace(microsecond=0).isoformat()
+
+
+def test_patient_routes_require_sign_in():
+    get_urls = [
+        "/api/v1/clients/c1/profile",
+        "/api/v1/clients/c1/progress",
+        "/api/v1/clients?client_id=c1",
+        "/api/v1/appointments",
+        "/api/v1/goals?client_id=c1",
+        "/api/v1/meal-plans?client_id=c1",
+        "/api/v1/meal-plans/plan_1",
+        "/api/v1/recipes",
+        "/api/v1/ai/chat?user_id=c1",
+        "/api/v1/ai/recommendations?client_id=c1",
+    ]
+    for url in get_urls:
+        assert client.get(url).status_code == 401, url
+
+    post_requests = [
+        ("/api/v1/clients/c1/allergies", {"allergen": "Peanuts", "severity": "severe"}),
+        ("/api/v1/appointments", {"client_id": "c1", "dietitian_id": "d1", "appointment_date": future_time()}),
+        ("/api/v1/goals", {"client_id": "c1", "target_metric": "Weight", "target_value": 70}),
+        ("/api/v1/recipes", {"title": "Soup", "ingredients": ["water"], "instructions": "Boil"}),
+        ("/api/v1/meal-plans", {"client_id": "c1", "diet_type": "Balanced", "days": 3}),
+        ("/api/v1/meal-plans/ai", {"client_id": "c1", "diet_type": "Balanced", "days": 3}),
+        ("/api/v1/ai/chat", {"user_id": "c1", "role": "client", "message": "hello"}),
+        ("/api/v1/tools/nutrition-targets", {"sex": "male", "age": 30, "weight_kg": 80, "height_cm": 180}),
+    ]
+    for url, body in post_requests:
+        assert client.post(url, json=body).status_code == 401, url
+
+
+def test_patient_login_returns_a_real_session_token_for_their_own_records_only():
+    patient, headers = sign_up_and_login("client", "jordan@example.com")
+    other, _ = sign_up_and_login("client", "sam@example.com")
+
+    assert not headers["Authorization"].startswith("Bearer mock_jwt")
+    assert client.get(f"/api/v1/clients/{patient['id']}/profile", headers=headers).status_code == 200
+    assert client.get(f"/api/v1/clients/{other['id']}/profile", headers=headers).status_code == 403
+    assert client.get("/api/v1/clients", params={"client_id": other["id"]}, headers=headers).status_code == 403
+    assert client.post(
+        f"/api/v1/clients/{other['id']}/allergies",
+        headers=headers,
+        json={"allergen": "Peanuts", "severity": "severe"},
+    ).status_code == 403
+    assert client.get("/api/v1/goals", params={"client_id": other["id"]}, headers=headers).status_code == 403
+
+
+def test_ai_chat_belongs_to_the_signed_in_user():
+    patient, headers = sign_up_and_login("client", "jordan@example.com")
+    other, _ = sign_up_and_login("client", "sam@example.com")
+
+    own = client.post(
+        "/api/v1/ai/chat", headers=headers,
+        json={"user_id": patient["id"], "role": "client", "message": "hello"},
+    )
+    stolen_post = client.post(
+        "/api/v1/ai/chat", headers=headers,
+        json={"user_id": other["id"], "role": "client", "message": "hello"},
+    )
+    wrong_role = client.post(
+        "/api/v1/ai/chat", headers=headers,
+        json={"user_id": patient["id"], "role": "dietitian", "message": "hello"},
+    )
+
+    assert own.status_code == 200
+    assert client.get("/api/v1/ai/chat", params={"user_id": patient["id"]}, headers=headers).status_code == 200
+    assert client.get("/api/v1/ai/chat", params={"user_id": other["id"]}, headers=headers).status_code == 403
+    assert stolen_post.status_code == 403
+    assert wrong_role.status_code == 403
+
+
+def test_dietitian_can_only_open_records_of_linked_patients():
+    dietitian, dietitian_headers_ = sign_up_and_login("dietitian", "avery@example.com", license_number="RD-1")
+    _, outsider_headers = sign_up_and_login("dietitian", "morgan@example.com", license_number="RD-2")
+    linked, _ = sign_up_and_login("client", "jordan@example.com", dietitian_id=dietitian["id"])
+    unlinked, _ = sign_up_and_login("client", "sam@example.com")
+
+    assert client.get(f"/api/v1/clients/{linked['id']}/profile", headers=dietitian_headers_).status_code == 200
+    assert client.get(f"/api/v1/clients/{linked['id']}/profile", headers=outsider_headers).status_code == 403
+    assert client.get(f"/api/v1/clients/{unlinked['id']}/profile", headers=dietitian_headers_).status_code == 403
+    own_list = client.get("/api/v1/clients", params={"dietitian_id": dietitian["id"]}, headers=dietitian_headers_)
+    assert [item["id"] for item in own_list.json()] == [linked["id"]]
+    assert client.get(
+        "/api/v1/clients", params={"dietitian_id": dietitian["id"]}, headers=outsider_headers
+    ).status_code == 403
+
+
+def test_appointments_are_scoped_to_the_people_involved():
+    dietitian, dietitian_headers_ = sign_up_and_login("dietitian", "avery@example.com", license_number="RD-1")
+    _, outsider_headers = sign_up_and_login("dietitian", "morgan@example.com", license_number="RD-2")
+    patient, patient_headers = sign_up_and_login("client", "jordan@example.com")
+    other, other_headers = sign_up_and_login("client", "sam@example.com")
+    booking = {"dietitian_id": dietitian["id"], "appointment_date": future_time()}
+
+    mine = client.post("/api/v1/appointments", headers=patient_headers, json={"client_id": patient["id"], **booking})
+    theirs = client.post("/api/v1/appointments", headers=other_headers, json={"client_id": other["id"], **booking})
+    booked_for_someone_else = client.post(
+        "/api/v1/appointments", headers=patient_headers, json={"client_id": other["id"], **booking}
+    )
+    appointment_id = mine.json()["appointment"]["appointment_id"]
+
+    assert mine.status_code == 200 and theirs.status_code == 200
+    assert booked_for_someone_else.status_code == 403
+    # With no filter, each patient still only sees their own appointment.
+    listed = client.get("/api/v1/appointments", headers=patient_headers).json()
+    assert [item["appointment_id"] for item in listed] == [appointment_id]
+    assert client.get(
+        "/api/v1/appointments", params={"client_id": other["id"]}, headers=patient_headers
+    ).status_code == 403
+    assert len(client.get("/api/v1/appointments", headers=dietitian_headers_).json()) == 2
+    assert client.get("/api/v1/appointments", headers=outsider_headers).json() == []
+
+    url = f"/api/v1/appointments/{appointment_id}"
+    assert client.patch(url, headers=patient_headers, json={"action": "APPROVED"}).status_code == 403
+    assert client.patch(url, headers=outsider_headers, json={"action": "APPROVED"}).status_code == 403
+    assert client.patch(url, headers=other_headers, json={"action": "CANCELLED"}).status_code == 403
+    assert client.patch(url, headers=dietitian_headers_, json={"action": "APPROVED"}).status_code == 200
+    assert client.patch(url, headers=patient_headers, json={"action": "CANCELLED"}).status_code == 200
+
+
+def test_patients_cannot_create_recipes_or_meal_plans():
+    patient, headers = sign_up_and_login("client", "jordan@example.com")
+
+    recipe = client.post(
+        "/api/v1/recipes", headers=headers, json={"title": "Soup", "ingredients": ["water"], "instructions": "Boil"}
+    )
+    plan = client.post(
+        "/api/v1/meal-plans", headers=headers, json={"client_id": patient["id"], "diet_type": "Balanced", "days": 3}
+    )
+
+    assert recipe.status_code == 403
+    assert plan.status_code == 403
+    assert client.get("/api/v1/recipes", headers=headers).status_code == 200
+
+
+def test_meal_plans_follow_patient_access_rules():
+    dietitian, dietitian_headers_ = sign_up_and_login("dietitian", "avery@example.com", license_number="RD-1")
+    _, outsider_headers = sign_up_and_login("dietitian", "morgan@example.com", license_number="RD-2")
+    patient, patient_headers = sign_up_and_login("client", "jordan@example.com", dietitian_id=dietitian["id"])
+    _, other_headers = sign_up_and_login("client", "sam@example.com")
+    body = {"client_id": patient["id"], "diet_type": "Balanced", "days": 3}
+
+    assert client.post("/api/v1/meal-plans", headers=outsider_headers, json=body).status_code == 403
+    created = client.post("/api/v1/meal-plans", headers=dietitian_headers_, json=body)
+    assert created.status_code == 201
+    plan_id = created.json()["meal_plan_id"]
+
+    assert client.get(f"/api/v1/meal-plans/{plan_id}", headers=patient_headers).status_code == 200
+    assert client.get(f"/api/v1/meal-plans/{plan_id}", headers=other_headers).status_code == 403
+    assert client.get("/api/v1/meal-plans", params={"client_id": patient["id"]}, headers=other_headers).status_code == 403
+    assert client.get(
+        "/api/v1/meal-plans", params={"dietitian_id": dietitian["id"]}, headers=patient_headers
+    ).status_code == 403
+    assert len(client.get(
+        "/api/v1/meal-plans", params={"dietitian_id": dietitian["id"]}, headers=dietitian_headers_
+    ).json()) == 1
+
+
+def ai_meal_plan_model(meals, grocery_list):
+    return RunnableLambda(lambda _: AIMessage(content=json.dumps({"meals": meals, "grocery_list": grocery_list})))
+
+
+def test_ai_meal_plan_saves_meals_and_grocery_list():
+    dietitian, dietitian_headers_ = sign_up_and_login("dietitian", "avery@example.com", license_number="RD-1")
+    patient, patient_headers = sign_up_and_login("client", "jordan@example.com", dietitian_id=dietitian["id"])
+    model = ai_meal_plan_model(["Breakfast: oatmeal with berries", "Lunch: lentil soup"], ["Oats", "Berries", "Lentils"])
+
+    with patch("routers.ai._create_chat_model", return_value=model):
+        response = client.post(
+            "/api/v1/meal-plans/ai",
+            headers=dietitian_headers_,
+            json={"client_id": patient["id"], "diet_type": "Vegetarian", "days": 5},
+        )
+
+    assert response.status_code == 201
+    plan = response.json()
+    assert plan["meals"] == ["Breakfast: oatmeal with berries", "Lunch: lentil soup"]
+    assert plan["grocery_list"] == ["Oats", "Berries", "Lentils"]
+    seen_by_patient = client.get(f"/api/v1/meal-plans/{plan['meal_plan_id']}", headers=patient_headers).json()
+    assert seen_by_patient["grocery_list"] == ["Oats", "Berries", "Lentils"]
+    listing = client.get("/api/v1/meal-plans", params={"client_id": patient["id"]}, headers=patient_headers).json()
+    assert listing[0]["grocery_list"] == ["Oats", "Berries", "Lentils"]
+
+
+def test_ai_meal_plan_sends_allergies_to_the_model():
+    dietitian, dietitian_headers_ = sign_up_and_login("dietitian", "avery@example.com", license_number="RD-1")
+    patient, _ = sign_up_and_login("client", "jordan@example.com", dietitian_id=dietitian["id"])
+    state.clients_db[patient["id"]] = {
+        "allergies": [{"allergen": "Peanuts", "severity": "severe"}],
+        "conditions": [{"condition_name": "Diabetes"}],
+    }
+    prompt_messages = []
+
+    def capture_prompt(prompt_value):
+        prompt_messages.extend(prompt_value.to_messages())
+        return AIMessage(content=json.dumps({"meals": ["Breakfast: oatmeal"], "grocery_list": ["Oats"]}))
+
+    with patch("routers.ai._create_chat_model", return_value=RunnableLambda(capture_prompt)):
+        response = client.post(
+            "/api/v1/meal-plans/ai",
+            headers=dietitian_headers_,
+            json={"client_id": patient["id"], "diet_type": "Balanced", "days": 3},
+        )
+
+    context = json.loads(prompt_messages[1].content)
+    assert response.status_code == 201
+    assert context["allergies"] == [{"allergen": "Peanuts", "severity": "severe"}]
+    assert context["medical_conditions"] == [{"condition_name": "Diabetes"}]
+    assert context["diet_type"] == "Balanced" and context["days"] == 3
+
+
+def test_ai_meal_plan_is_rejected_when_it_mentions_a_recorded_allergen():
+    dietitian, dietitian_headers_ = sign_up_and_login("dietitian", "avery@example.com", license_number="RD-1")
+    patient, patient_headers = sign_up_and_login("client", "jordan@example.com", dietitian_id=dietitian["id"])
+    state.clients_db[patient["id"]] = {"allergies": [{"allergen": "Peanuts", "severity": "severe"}], "conditions": []}
+    model = ai_meal_plan_model(["Snack: toast with peanut butter"], ["Bread", "Peanut butter"])
+
+    with patch("routers.ai._create_chat_model", return_value=model):
+        response = client.post(
+            "/api/v1/meal-plans/ai",
+            headers=dietitian_headers_,
+            json={"client_id": patient["id"], "diet_type": "Balanced", "days": 3},
+        )
+
+    assert response.status_code == 422
+    assert "allerg" in response.json()["detail"].lower()
+    assert client.get("/api/v1/meal-plans", params={"client_id": patient["id"]}, headers=patient_headers).json() == []
+
+
+def test_ai_meal_plan_returns_503_when_ollama_is_down_or_answers_badly():
+    dietitian, dietitian_headers_ = sign_up_and_login("dietitian", "avery@example.com", license_number="RD-1")
+    patient, _ = sign_up_and_login("client", "jordan@example.com", dietitian_id=dietitian["id"])
+    body = {"client_id": patient["id"], "diet_type": "Balanced", "days": 3}
+
+    def fail_model(_):
+        raise ConnectionError("Failed to connect to Ollama")
+
+    with patch("routers.ai._create_chat_model", return_value=RunnableLambda(fail_model)):
+        offline = client.post("/api/v1/meal-plans/ai", headers=dietitian_headers_, json=body)
+    with patch("routers.ai._create_chat_model", return_value=RunnableLambda(lambda _: AIMessage(content="not json"))):
+        malformed = client.post("/api/v1/meal-plans/ai", headers=dietitian_headers_, json=body)
+    with patch("routers.ai._create_chat_model", return_value=ai_meal_plan_model(["Lunch: soup"], [])):
+        missing_groceries = client.post("/api/v1/meal-plans/ai", headers=dietitian_headers_, json=body)
+
+    assert offline.status_code == 503
+    assert malformed.status_code == 503
+    assert missing_groceries.status_code == 503
+
+
+def test_ai_meal_plan_requires_a_linked_dietitian():
+    dietitian, _ = sign_up_and_login("dietitian", "avery@example.com", license_number="RD-1")
+    _, outsider_headers = sign_up_and_login("dietitian", "morgan@example.com", license_number="RD-2")
+    patient, patient_headers = sign_up_and_login("client", "jordan@example.com", dietitian_id=dietitian["id"])
+    body = {"client_id": patient["id"], "diet_type": "Balanced", "days": 3}
+
+    with patch("routers.ai._create_chat_model") as model_factory:
+        outsider = client.post("/api/v1/meal-plans/ai", headers=outsider_headers, json=body)
+        patient_attempt = client.post("/api/v1/meal-plans/ai", headers=patient_headers, json=body)
+
+    assert outsider.status_code == 403
+    assert patient_attempt.status_code == 403
+    model_factory.assert_not_called()
+
+
+def test_nutrition_targets_for_a_man_maintaining_weight():
+    response = staff.post(
+        "/api/v1/tools/nutrition-targets",
+        json={"sex": "male", "age": 30, "weight_kg": 80, "height_cm": 180, "activity": "sedentary", "goal": "maintain"},
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["bmr_kcal"] == 1780            # 10*80 + 6.25*180 - 5*30 + 5
+    assert result["maintenance_kcal"] == 2136    # 1780 * 1.2
+    assert result["target_calories_kcal"] == 2136
+    assert result["protein_g"] == 128            # 1.6 g per kg
+    assert result["fat_g"] == 59                 # 25% of calories
+    assert result["carbs_g"] == 273              # the rest
+    assert result["water_ml"] == 2800
+    assert result["calorie_floor_applied"] is False
+
+
+def test_nutrition_targets_apply_goal_and_activity():
+    response = staff.post(
+        "/api/v1/tools/nutrition-targets",
+        json={"sex": "female", "age": 25, "weight_kg": 60, "height_cm": 165, "activity": "light", "goal": "lose"},
+    )
+
+    result = response.json()
+    assert response.status_code == 200
+    assert result["bmr_kcal"] == 1345            # 10*60 + 6.25*165 - 5*25 - 161
+    assert result["maintenance_kcal"] == 1850    # 1345.25 * 1.375
+    assert result["target_calories_kcal"] == 1572  # 15% below maintenance
+
+
+def test_nutrition_targets_never_go_below_a_safe_minimum():
+    response = staff.post(
+        "/api/v1/tools/nutrition-targets",
+        json={"sex": "female", "age": 18, "weight_kg": 45, "height_cm": 150, "activity": "sedentary", "goal": "lose"},
+    )
+
+    result = response.json()
+    assert result["target_calories_kcal"] == 1200
+    assert result["calorie_floor_applied"] is True
+    assert any("1200" in note for note in result["notes"])
+
+
+def test_nutrition_targets_reject_unrealistic_input():
+    base = {"sex": "male", "age": 30, "weight_kg": 80, "height_cm": 180}
+
+    assert staff.post("/api/v1/tools/nutrition-targets", json={**base, "age": 10}).status_code == 422
+    assert staff.post("/api/v1/tools/nutrition-targets", json={**base, "weight_kg": 5}).status_code == 422
+    assert staff.post("/api/v1/tools/nutrition-targets", json={**base, "activity": "extreme"}).status_code == 422

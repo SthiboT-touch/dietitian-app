@@ -5,9 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 import database
 import config
-from state import users_db, meal_plans_db, recipes_db, foods_db
+from state import users_db, meal_plans_db, recipes_db, foods_db, clients_db
 from schemas import FoodItem, FoodItemCreate, RecipeCreate, MealPlanRequest, MealPlanResponse
-from security import require_admin
+from security import Principal, require_admin, require_session
+from access import require_client_access, require_staff
+from helpers import fetch_client_profile
+from routers.ai import generate_llama_meal_plan
 
 
 router = APIRouter()
@@ -86,7 +89,8 @@ def create_food(data: FoodItemCreate, admin_id: str = Depends(require_admin)):
 
 
 @router.post("/api/v1/recipes", tags=["5. Foods & Meal Planning"])
-def create_recipe(data: RecipeCreate):
+def create_recipe(data: RecipeCreate, principal: Principal = Depends(require_session)):
+    require_staff(principal)
     recipe_id = f"rec_{uuid.uuid4().hex[:8]}"
     if config.DATABASE_ENABLED:
         stored_instructions = json.dumps({
@@ -104,7 +108,7 @@ def create_recipe(data: RecipeCreate):
 
 
 @router.get("/api/v1/recipes", tags=["5. Foods & Meal Planning"])
-def list_recipes():
+def list_recipes(principal: Principal = Depends(require_session)):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute("SELECT recipe_id, name, instructions FROM recipe ORDER BY LOWER(name)")
@@ -130,15 +134,29 @@ def list_recipes():
         key=lambda recipe: recipe["title"].casefold(),
     )
 
-@router.post("/api/v1/meal-plans", response_model=MealPlanResponse, status_code=status.HTTP_201_CREATED, tags=["5. Foods & Meal Planning"])
-def create_meal_plan(request: MealPlanRequest):
+def _decode_day_notes(notes) -> tuple:
+    """A plan day stores a JSON list of meals, or {"meals": [...], "grocery_list": [...]} for AI plans."""
+    if not notes:
+        return [], []
+    stored = json.loads(notes)
+    if isinstance(stored, dict):
+        return list(stored.get("meals", [])), list(stored.get("grocery_list", []))
+    return list(stored), []
+
+
+def _store_meal_plan(request: MealPlanRequest, meals: List[str], grocery_list: List[str]) -> dict:
     plan_id = f"plan_{uuid.uuid4().hex[:8]}"
-    sample_meals = [
-        f"Breakfast: Oatmeal with chia seeds ({request.diet_type})",
-        "Lunch: Quinoa bowl with grilled chicken",
-        "Dinner: Salmon with steamed broccoli"
-    ]
+    plan_data = {
+        "meal_plan_id": plan_id,
+        "client_id": request.client_id,
+        "diet_type": request.diet_type,
+        "days": request.days,
+        "meals": meals,
+        "grocery_list": grocery_list,
+        "status": "GENERATED",
+    }
     if config.DATABASE_ENABLED:
+        day_notes = json.dumps({"meals": meals, "grocery_list": grocery_list} if grocery_list else meals)
         with database.cursor() as cursor:
             cursor.execute("SELECT dietitian_id FROM client WHERE client_id = %s", (request.client_id,))
             client = cursor.fetchone()
@@ -160,29 +178,51 @@ def create_meal_plan(request: MealPlanRequest):
             for day_number in range(1, request.days + 1):
                 cursor.execute(
                     "INSERT INTO meal_plan_day (meal_plan_id, day_number, notes) VALUES (%s, %s, %s)",
-                    (plan_id, day_number, json.dumps(sample_meals)),
+                    (plan_id, day_number, day_notes),
                 )
-        return {
-            "meal_plan_id": plan_id,
-            "client_id": request.client_id,
-            "diet_type": request.diet_type,
-            "days": request.days,
-            "meals": sample_meals,
-            "status": "GENERATED",
-        }
-    plan_data = {
-        "meal_plan_id": plan_id,
-        "client_id": request.client_id,
-        "diet_type": request.diet_type,
-        "days": request.days,
-        "meals": sample_meals,
-        "status": "GENERATED"
-    }
+        return plan_data
     meal_plans_db[plan_id] = plan_data
     return plan_data
 
+
+@router.post("/api/v1/meal-plans", response_model=MealPlanResponse, status_code=status.HTTP_201_CREATED, tags=["5. Foods & Meal Planning"])
+def create_meal_plan(request: MealPlanRequest, principal: Principal = Depends(require_session)):
+    require_staff(principal)
+    require_client_access(principal, request.client_id)
+    sample_meals = [
+        f"Breakfast: Oatmeal with chia seeds ({request.diet_type})",
+        "Lunch: Quinoa bowl with grilled chicken",
+        "Dinner: Salmon with steamed broccoli"
+    ]
+    return _store_meal_plan(request, sample_meals, [])
+
+
+@router.post("/api/v1/meal-plans/ai", response_model=MealPlanResponse, status_code=status.HTTP_201_CREATED, tags=["5. Foods & Meal Planning"])
+def create_ai_meal_plan(request: MealPlanRequest, principal: Principal = Depends(require_session)):
+    """Draft a plan with the AI model, using the patient's allergies and conditions, plus a grocery list."""
+    require_staff(principal)
+    require_client_access(principal, request.client_id)
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            profile = fetch_client_profile(cursor, request.client_id)
+    else:
+        profile = clients_db.get(request.client_id, {})
+    draft = generate_llama_meal_plan(request.diet_type, request.days, profile)
+    return _store_meal_plan(request, draft["meals"], draft["grocery_list"])
+
+
 @router.get("/api/v1/meal-plans", response_model=List[MealPlanResponse], tags=["5. Foods & Meal Planning"])
-def list_meal_plans(dietitian_id: Optional[str] = None, client_id: Optional[str] = None):
+def list_meal_plans(
+    dietitian_id: Optional[str] = None,
+    client_id: Optional[str] = None,
+    principal: Principal = Depends(require_session),
+):
+    if client_id:
+        require_client_access(principal, client_id)
+    elif dietitian_id and (
+        principal.role == "client" or (principal.role == "dietitian" and principal.id != dietitian_id)
+    ):
+        raise HTTPException(status_code=403, detail="You can only list your own meal plans")
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             if client_id:
@@ -210,9 +250,11 @@ def list_meal_plans(dietitian_id: Optional[str] = None, client_id: Optional[str]
                     (plan["meal_plan_id"],),
                 )
                 day = cursor.fetchone()
+                meals, grocery_list = _decode_day_notes(day["notes"] if day else None)
                 plans.append({
                     **dict(plan),
-                    "meals": json.loads(day["notes"]) if day and day["notes"] else [],
+                    "meals": meals,
+                    "grocery_list": grocery_list,
                     "status": "GENERATED",
                 })
             return plans
@@ -230,7 +272,7 @@ def list_meal_plans(dietitian_id: Optional[str] = None, client_id: Optional[str]
 
 
 @router.get("/api/v1/meal-plans/{meal_plan_id}", response_model=MealPlanResponse, tags=["5. Foods & Meal Planning"])
-def get_meal_plan(meal_plan_id: str):
+def get_meal_plan(meal_plan_id: str, principal: Principal = Depends(require_session)):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -243,16 +285,20 @@ def get_meal_plan(meal_plan_id: str):
             plan = cursor.fetchone()
             if not plan:
                 raise HTTPException(status_code=404, detail="Meal plan not found")
+            require_client_access(principal, plan["client_id"])
             cursor.execute(
                 "SELECT notes FROM meal_plan_day WHERE meal_plan_id = %s ORDER BY day_number LIMIT 1",
                 (meal_plan_id,),
             )
             day = cursor.fetchone()
+        meals, grocery_list = _decode_day_notes(day["notes"] if day else None)
         return {
             **dict(plan),
-            "meals": json.loads(day["notes"]) if day and day["notes"] else [],
+            "meals": meals,
+            "grocery_list": grocery_list,
             "status": "GENERATED",
         }
     if meal_plan_id not in meal_plans_db:
         raise HTTPException(status_code=404, detail="Meal plan not found")
+    require_client_access(principal, meal_plans_db[meal_plan_id]["client_id"])
     return meal_plans_db[meal_plan_id]
