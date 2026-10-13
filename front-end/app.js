@@ -34,6 +34,9 @@ async function request(url, options = {}) {
       throw new Error("Your session has expired. Please sign in again.");
     }
     const detail = payload && (payload.detail || payload.message);
+    if (response.status === 504) {
+      throw new Error("The server took too long to respond. The AI may be busy; please try again in a moment.");
+    }
     throw new Error(typeof detail === "string" ? detail : `Request failed with status ${response.status}`);
   }
   return payload;

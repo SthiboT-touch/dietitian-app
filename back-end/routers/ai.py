@@ -16,6 +16,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 from ollama import RequestError, ResponseError
 import database
@@ -33,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 # Small models sometimes write a tool call as plain text instead of making it; never show that to users.
 TOOL_CALL_TEXT = re.compile(r'\s*\{\s*"name"\s*:\s*"[^"]*"\s*,\s*"(?:parameters|arguments)')
+CATALOG_QUESTION = re.compile(r"\bcatalog(?:ue)?s?\b|\blisted\b|\bin stock\b", re.IGNORECASE)
+# Long prompts are slow to read on a CPU, so the agent sees only the latest exchanges.
+CHAT_HISTORY_MESSAGES = 4
 
 # Errors that mean "the model is unreachable or answered badly". ConnectionError is what the
 # ollama client raises when the server is down, and it is not an httpx error.
@@ -46,7 +50,7 @@ PLAN_MODEL_ERRORS = (
     TypeError,
     ValueError,
 )
-CHAT_MODEL_ERRORS = (*PLAN_MODEL_ERRORS, IndexError, KeyError)
+CHAT_MODEL_ERRORS = (*PLAN_MODEL_ERRORS, GraphRecursionError, IndexError, KeyError)
 
 
 # --- AI ENGINE & HUMAN-IN-THE-LOOP WORKFLOW ---
@@ -221,7 +225,7 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
         else "You do not know the user's name. If they ask for it, say you don't know it and invite them to share it. "
         "Never search the food catalog for a person's name."
     ))]
-    for turn in state.get("conversation", [])[-8:]:
+    for turn in state.get("conversation", [])[-CHAT_HISTORY_MESSAGES:]:
         if turn.get("role") in {"user", "assistant"} and isinstance(turn.get("content"), str):
             messages.append(
                 HumanMessage(content=turn["content"])
@@ -231,7 +235,9 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
     messages.append(HumanMessage(content=state["message"]))
 
     try:
-        result = _create_chat_agent(state["role"]).invoke({"messages": messages})
+        agent = _create_chat_agent(state["role"], _asks_about_catalog(state["message"]))
+        # Model -> tool -> model is enough; stop loops before they outlast the proxy timeout.
+        result = agent.invoke({"messages": messages}, config={"recursion_limit": 6})
         content = result["messages"][-1].content
         if isinstance(content, list):
             content = "".join(
@@ -320,8 +326,12 @@ def search_food_catalog(query: str) -> str:
     return json.dumps(foods or {"message": "No matching foods found."})
 
 
-@lru_cache(maxsize=2)
-def _create_chat_agent(role: str):
+def _asks_about_catalog(message: str) -> bool:
+    return bool(CATALOG_QUESTION.search(message))
+
+
+@lru_cache(maxsize=4)
+def _create_chat_agent(role: str, use_catalog: bool = False):
     audience_context = (
         "The user is a client; keep guidance accessible and encourage them to discuss personal concerns with their dietitian."
         if role == "client"
@@ -336,18 +346,23 @@ def _create_chat_agent(role: str):
         "When the latest message is only a greeting or a greeting plus a social question, respond warmly and briefly "
         "to the greeting. Do not answer with details from earlier nutrition questions unless the user asks for them again. "
         "Use earlier conversation details only when they are relevant to the latest message. "
-        "Use the food catalog lookup only when the user asks whether a specific item is in the practice catalog "
-        "or requests its listed nutrition values. For general food ideas, answer from general knowledge without "
-        "the tool. If a catalog lookup finds no match, say so briefly and do not invent catalog data. "
-        "Your only tool is the food catalog lookup; never invent other tools or write tool calls as text. "
-        "Never mention tool calls or internal tool errors. "
-        "Treat catalog data as reference information, not personalized medical advice. "
         "Never diagnose a medical condition or prescribe treatment. If the user has medical concerns, "
-        "encourage them to consult a licensed dietitian or healthcare professional."
+        "encourage them to consult a licensed dietitian or healthcare professional. "
     )
+    if use_catalog:
+        system_prompt += (
+            "Use the food catalog lookup to answer questions about items in the practice catalog or their listed "
+            "nutrition values. If a catalog lookup finds no match, say so briefly and do not invent catalog data. "
+            "Your only tool is the food catalog lookup; never invent other tools or write tool calls as text. "
+            "Never mention tool calls or internal tool errors. "
+            "Treat catalog data as reference information, not personalized medical advice."
+        )
+    else:
+        system_prompt += "You have no tools; answer from general knowledge and never write tool calls or JSON."
+    # Only offer the tool when it is needed: every tool round trip is another slow model call on a CPU server.
     return create_agent(
         model=_create_chat_model(),
-        tools=[search_food_catalog],
+        tools=[search_food_catalog] if use_catalog else [],
         system_prompt=system_prompt,
     )
 
