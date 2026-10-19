@@ -1,0 +1,23 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements from back-end directory
+COPY back-end/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend application files
+COPY back-end/ /app/
+
+# Copy frontend static files for FastAPI StaticFiles mount
+COPY front-end/ /front-end/
+
+ENV PORT=8000
+ENV OLLAMA_BASE_URL=http://ollama:11434
+ENV OLLAMA_MODEL=llama3.2
+
+EXPOSE 8000
+
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}"]
