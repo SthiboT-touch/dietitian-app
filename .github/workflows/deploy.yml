@@ -41,5 +41,7 @@ jobs:
             docker compose build api
             docker compose run --rm --no-deps api python migrations/apply_002_client_health_schema.py
             docker compose run --rm --no-deps api python migrations/apply_003_dietitian_document_branch.py
+            docker compose run --rm --no-deps api python migrations/apply_004_lactation_tracking.py
+            docker compose run --rm --no-deps api python migrations/apply_005_client_identity_gender.py
             docker compose run --rm --no-deps api python migrations/apply_006_client_documents_and_meals.py
             docker compose up -d --build
