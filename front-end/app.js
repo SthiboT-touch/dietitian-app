@@ -274,7 +274,7 @@ async function renderDietitianDashboard() {
       </section>
       <section class="stat-panel">
         <div>
-          <span class="stat-label">Pending Recommendations</span>
+          <span class="stat-label">Pending AI Reviews</span>
           <strong class="stat-number">${recommendations.length}</strong>
         </div>
       </section>
@@ -309,8 +309,8 @@ async function renderDietitianDashboard() {
 function renderAIWorkspaceTabs(activePanel) {
   if (currentUser.type !== "dietitian") return "";
   return `
-    <div class="ai-workspace-tabs" role="tablist" aria-label="Nutrition workspace">
-      <button class="ai-workspace-tab${activePanel === "coach" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "coach"}" data-ai-panel="coach" type="button">Nutrition Coach</button>
+    <div class="ai-workspace-tabs" role="tablist" aria-label="AI workspace">
+      <button class="ai-workspace-tab${activePanel === "coach" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "coach"}" data-ai-panel="coach" type="button">AI Coach</button>
       <button class="ai-workspace-tab${activePanel === "plan" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "plan"}" data-ai-panel="plan" type="button">Plan Studio</button>
     </div>`;
 }
@@ -318,7 +318,7 @@ function renderAIWorkspaceTabs(activePanel) {
 async function renderAIWorkspace(activePanel = "coach", clientId = "") {
   const panel = activePanel === "plan" && currentUser.type === "dietitian" ? "plan" : "coach";
   workspaceContent.innerHTML = `
-    ${pageHeading("NUTRITION WORKSPACE", "Food, plans, and care guidance.", "Chat about everyday nutrition or draft a plan for dietitian review.")}
+    ${pageHeading("AI WORKSPACE", "Food, plans, and care guidance.", "Chat about everyday nutrition or draft a plan for dietitian review.")}
     ${renderAIWorkspaceTabs(panel)}
     <div data-message class="workspace-message" hidden></div>
     <div id="aiWorkspacePanel"></div>`;
@@ -340,10 +340,10 @@ async function renderAIChat() {
   const conversation = await request(`/api/v1/ai/chat?user_id=${encodeURIComponent(userId)}&role=${encodeURIComponent(role)}`);
   const messages = conversation.messages || [];
   panel.innerHTML = `
-    <section class="assistant-topics" aria-label="Nutrition assistant topics">
-      <div class="assistant-topics-heading"><span class="eyebrow eyebrow-green">NUTRITION ASSISTANT</span><span>Choose a starting point or ask anything</span></div>
+    <section class="assistant-topics" aria-label="AI nutrition assistant topics">
+      <div class="assistant-topics-heading"><span class="eyebrow eyebrow-green">AI NUTRITION ASSISTANT</span><span>Choose a starting point or ask anything</span></div>
       <div class="assistant-topic-list">
-        <button class="assistant-topic is-primary" data-topic="ask" type="button">Ask a question</button>
+        <button class="assistant-topic is-primary" data-topic="ask" type="button">Ask AI</button>
         <button class="assistant-topic" data-topic="recipe" type="button">Recipe Ideas</button>
         <button class="assistant-topic" data-topic="food" type="button">Food Questions</button>
         <button class="assistant-topic" data-topic="meal-plan" type="button">Meal Plan Help</button>
@@ -358,7 +358,7 @@ async function renderAIChat() {
       <div class="chat-thread">
         ${messages.map((message) => `
           <div class="chat-bubble ${message.role === "assistant" ? "assistant" : "user"}">
-            <strong>${message.role === "assistant" ? "Nutrition Coach" : "You"}</strong>
+            <strong>${message.role === "assistant" ? "AI Coach" : "You"}</strong>
             <p>${escapeHtml(message.content)}</p>
           </div>
         `).join("")}
@@ -507,7 +507,7 @@ async function renderClientDashboard(firstName) {
     <section class="feature-panel client-home-feature">
       <span class="eyebrow">YOUR CARE, AT A GLANCE</span>
       <h2>Small steps make meaningful progress.</h2>
-      <p>Check your latest progress, review your meal plan, or keep your care team informed.</p>
+      <p>Check your latest progress, review your meal plan, or ask the AI Coach a nutrition question.</p>
       <button class="button button-lime" data-go="client-progress" type="button">View my progress <span aria-hidden="true">&#8594;</span></button>
     </section>
     <div class="section-heading"><h2>My workspace</h2><span>QUICK ACCESS</span></div>
@@ -517,6 +517,7 @@ async function renderClientDashboard(firstName) {
       <button class="quick-link" data-go="client-goals" type="button"><strong>My Goals</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-meal-plan" type="button"><strong>My Meal Plan</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-appointments" type="button"><strong>Appointments</strong><span aria-hidden="true">&#8599;</span></button>
+      <button class="quick-link" data-go="ai-workspace" type="button"><strong>AI Coach</strong><span aria-hidden="true">&#8599;</span></button>
     </div>
     <div class="section-heading"><h2>Find a Dietitian</h2><span>${dietitians.length} AVAILABLE</span></div>
     ${dietitians.length ? `<div class="dietitian-directory patient-dietitian-directory">${dietitians.map((dietitian) => `
@@ -1170,7 +1171,7 @@ async function renderClientRecommendations(clientId) {
   workspaceContent.innerHTML = `
     ${pageHeading("RECOMMENDATIONS", "Guidance reviewed for you.", "Recommendations appear here after your dietitian reviews them.")}
     <div class="recommendation-list">${recommendations.length ? recommendations.map((item) => `
-      <article class="review-card"><div class="review-meta"><span>${escapeHtml(item.status)}</span><span>${escapeHtml(item.recommendation_id)}</span></div><p class="stat-label">Goal: ${escapeHtml(item.dietary_goal || "Nutrition guidance")}</p><ul class="result-list">${(item.generated_plan || []).map((suggestion, index) => `<li class="result-item"><span class="result-index">0${index + 1}</span><span>${escapeHtml(suggestion)}</span></li>`).join("")}</ul>${item.review_notes ? `<p class="notice">Dietitian note: ${escapeHtml(item.review_notes)}</p>` : ""}</article>`).join("") : '<p class="empty-state">No recommendations have been shared yet. Your dietitian will review drafts before they appear here.</p>'}</div>`;
+      <article class="review-card"><div class="review-meta"><span>${escapeHtml(item.status)}</span><span>${escapeHtml(item.recommendation_id)}</span></div><p class="stat-label">Goal: ${escapeHtml(item.dietary_goal || "Nutrition guidance")}</p><ul class="result-list">${(item.generated_plan || []).map((suggestion, index) => `<li class="result-item"><span class="result-index">0${index + 1}</span><span>${escapeHtml(suggestion)}</span></li>`).join("")}</ul>${item.review_notes ? `<p class="notice">Dietitian note: ${escapeHtml(item.review_notes)}</p>` : ""}</article>`).join("") : '<p class="empty-state">No recommendations have been shared yet. Your dietitian will review AI drafts before they appear here.</p>'}</div>`;
 }
 
 async function renderDietitians() {
@@ -1210,13 +1211,13 @@ async function loadView(view, initialAIPanel = "coach") {
         ${currentUser.type === "dietitian" ? `<p class="account-id"><span>YOUR DIETITIAN ID</span><strong>${escapeHtml(currentUser.id)}</strong><span>Share this ID with patients when they create an account.</span></p>` : ""}
         <div class="overview-grid">
           <section class="feature-panel">
-            <span class="eyebrow">PLAN STUDIO</span>
+            <span class="eyebrow">AI PLAN STUDIO</span>
             <h2>Build a starting point for better habits.</h2>
             <p>Draft a nutrition plan around a patient’s goals and health context. Every draft stays with you for review.</p>
             <button class="button button-lime" data-go="ai-workspace" data-ai-panel="plan" type="button">Start a plan <span aria-hidden="true">&#8594;</span></button>
           </section>
           <section class="stat-panel">
-            <div><span class="stat-label">Waiting for your review</span><strong class="stat-number">${pending.length}</strong><span class="stat-caption">Draft recommendations</span></div>
+            <div><span class="stat-label">Waiting for your review</span><strong class="stat-number">${pending.length}</strong><span class="stat-caption">AI-generated drafts</span></div>
             <button class="stat-link" data-go="reviews" type="button">Open review queue <span aria-hidden="true">&#8594;</span></button>
           </section>
         </div>
@@ -1224,9 +1225,9 @@ async function loadView(view, initialAIPanel = "coach") {
         <div class="quick-grid">
           <button class="quick-link" data-go="clients" type="button"><strong>Patient health record</strong><span aria-hidden="true">&#8599;</span></button>
           <button class="quick-link" data-go="foods" type="button"><strong>Browse food library</strong><span aria-hidden="true">&#8599;</span></button>
-          <button class="quick-link" data-go="reviews" type="button"><strong>Review suggestions</strong><span aria-hidden="true">&#8599;</span></button>
+          <button class="quick-link" data-go="reviews" type="button"><strong>Review AI suggestions</strong><span aria-hidden="true">&#8599;</span></button>
         </div>
-        <p class="notice">Suggestions are general starting points and require review by a licensed dietitian. They are not a substitute for clinical judgment.</p>`;
+        <p class="notice">AI suggestions are general starting points and require review by a licensed dietitian. They are not a substitute for clinical judgment.</p>`;
       bindGoButtons();
     } else if (view === "ai-workspace" || view === "ai" || view === "ai-chat") {
       const panel = view === "ai" ? "plan" : view === "ai-chat" ? "coach" : initialAIPanel;
@@ -1825,7 +1826,7 @@ async function renderAdminSettings() {
     <section class="content-panel"><dl class="profile-details">
       <div><dt>API status</dt><dd>${escapeHtml(health.status)}</dd></div>
       <div><dt>Database</dt><dd>${escapeHtml(health.database)}</dd></div>
-      <div><dt>Recommendation model</dt><dd>${escapeHtml("Configured on server")}</dd></div>
+      <div><dt>AI model</dt><dd>${escapeHtml("Configured on server")}</dd></div>
       <div><dt>Administrator</dt><dd>${escapeHtml(currentUser.full_name)} · ${escapeHtml(currentUser.email)}</dd></div>
       <div><dt>Initial setup</dt><dd>${setup.available ? "Available" : "Complete"}</dd></div>
     </dl></section>`;
