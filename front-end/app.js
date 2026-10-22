@@ -258,6 +258,14 @@ async function renderDietitianDashboard() {
       <button class="button button-primary" data-go="meal-plans" type="button">Draft meal plan <span aria-hidden="true">&#8594;</span></button>
     </div>
     ${dietitianApprovalMarkup(approval)}
+    <section class="feature-panel dietitian-home-feature">
+      <div class="feature-panel-copy">
+        <span class="eyebrow">PERSON-CENTRED NUTRITION</span>
+        <h2>Care that starts with the whole person.</h2>
+        <p>Support everyday wellbeing, clinical nutrition needs, food preferences, and every stage of life with thoughtful, personalised care.</p>
+        <button class="button button-lime" data-go="ai-workspace" type="button">Explore nutrition tools <span aria-hidden="true">&#8594;</span></button>
+      </div>
+    </section>
     <div data-message class="workspace-message" hidden></div>
     <div class="overview-grid">
       <section class="stat-panel">
@@ -274,7 +282,7 @@ async function renderDietitianDashboard() {
       </section>
       <section class="stat-panel">
         <div>
-          <span class="stat-label">Pending AI Reviews</span>
+          <span class="stat-label">Pending Recommendations</span>
           <strong class="stat-number">${recommendations.length}</strong>
         </div>
       </section>
@@ -309,8 +317,8 @@ async function renderDietitianDashboard() {
 function renderAIWorkspaceTabs(activePanel) {
   if (currentUser.type !== "dietitian") return "";
   return `
-    <div class="ai-workspace-tabs" role="tablist" aria-label="AI workspace">
-      <button class="ai-workspace-tab${activePanel === "coach" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "coach"}" data-ai-panel="coach" type="button">AI Coach</button>
+    <div class="ai-workspace-tabs" role="tablist" aria-label="Nutrition workspace">
+      <button class="ai-workspace-tab${activePanel === "coach" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "coach"}" data-ai-panel="coach" type="button">Nutrition Coach</button>
       <button class="ai-workspace-tab${activePanel === "plan" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "plan"}" data-ai-panel="plan" type="button">Plan Studio</button>
     </div>`;
 }
@@ -318,7 +326,10 @@ function renderAIWorkspaceTabs(activePanel) {
 async function renderAIWorkspace(activePanel = "coach", clientId = "") {
   const panel = activePanel === "plan" && currentUser.type === "dietitian" ? "plan" : "coach";
   workspaceContent.innerHTML = `
-    ${pageHeading("AI WORKSPACE", "Food, plans, and care guidance.", "Chat about everyday nutrition or draft a plan for dietitian review.")}
+    ${pageHeading("NUTRITION WORKSPACE", "Food, plans, and care guidance.", "Support a wide range of nutrition needs, from everyday wellbeing to clinical and life-stage care.")}
+    <section class="nutrition-workspace-banner" aria-label="Personalised nutrition care">
+      <div><span class="eyebrow">A MORE PERSONAL APPROACH</span><h2>Good nutrition is about more than a number.</h2><p>Build guidance around health, culture, preferences, access to food, and the person's own goals.</p></div>
+    </section>
     ${renderAIWorkspaceTabs(panel)}
     <div data-message class="workspace-message" hidden></div>
     <div id="aiWorkspacePanel"></div>`;
@@ -340,10 +351,10 @@ async function renderAIChat() {
   const conversation = await request(`/api/v1/ai/chat?user_id=${encodeURIComponent(userId)}&role=${encodeURIComponent(role)}`);
   const messages = conversation.messages || [];
   panel.innerHTML = `
-    <section class="assistant-topics" aria-label="AI nutrition assistant topics">
-      <div class="assistant-topics-heading"><span class="eyebrow eyebrow-green">AI NUTRITION ASSISTANT</span><span>Choose a starting point or ask anything</span></div>
+    <section class="assistant-topics" aria-label="Nutrition assistant topics">
+      <div class="assistant-topics-heading"><span class="eyebrow eyebrow-green">NUTRITION ASSISTANT</span><span>Choose a starting point or ask anything</span></div>
       <div class="assistant-topic-list">
-        <button class="assistant-topic is-primary" data-topic="ask" type="button">Ask AI</button>
+        <button class="assistant-topic is-primary" data-topic="ask" type="button">Ask a question</button>
         <button class="assistant-topic" data-topic="recipe" type="button">Recipe Ideas</button>
         <button class="assistant-topic" data-topic="food" type="button">Food Questions</button>
         <button class="assistant-topic" data-topic="meal-plan" type="button">Meal Plan Help</button>
@@ -351,6 +362,9 @@ async function renderAIChat() {
         <button class="assistant-topic" data-topic="timing" type="button">Meal Timing</button>
         <button class="assistant-topic" data-topic="activity" type="button">Activity &amp; Workouts</button>
         <button class="assistant-topic" data-topic="habits" type="button">Healthy Habits</button>
+        <button class="assistant-topic" data-topic="medical" type="button">Health Conditions</button>
+        <button class="assistant-topic" data-topic="lifeStage" type="button">Life Stages</button>
+        <button class="assistant-topic" data-topic="preferences" type="button">Food Preferences &amp; Budget</button>
         <button class="assistant-topic" data-ai-recommendations type="button">${role === "client" ? "My Recommendations" : "Review Recommendations"}</button>
       </div>
     </section>
@@ -358,13 +372,13 @@ async function renderAIChat() {
       <div class="chat-thread">
         ${messages.map((message) => `
           <div class="chat-bubble ${message.role === "assistant" ? "assistant" : "user"}">
-            <strong>${message.role === "assistant" ? "AI Coach" : "You"}</strong>
+            <strong>${message.role === "assistant" ? "Nutrition Coach" : "You"}</strong>
             <p>${escapeHtml(message.content)}</p>
           </div>
         `).join("")}
       </div>
       <form id="aiChatForm" class="chat-form">
-        <textarea id="aiChatInput" name="message" placeholder="Ask about food, workouts, hydration, or healthy routines..." required></textarea>
+        <textarea id="aiChatInput" name="message" placeholder="Ask about nutrition, health conditions, food access, life stages, preferences, or daily routines..." required></textarea>
         <div class="form-actions"><button class="button button-primary" type="submit">Send <span class="button-arrow" aria-hidden="true">&#8594;</span></button></div>
       </form>
     </section>
@@ -379,6 +393,9 @@ async function renderAIChat() {
     timing: "How can I time meals and snacks around my daily schedule?",
     activity: "What food, hydration, and recovery habits can support my activity?",
     habits: "Help me build one realistic healthy habit I can practice this week.",
+    medical: "What nutrition considerations should I discuss with my dietitian for my health condition?",
+    lifeStage: "What nutrition needs can change during my current life stage?",
+    preferences: "Help me plan balanced meals that fit my cultural foods, budget, and dietary preferences.",
   };
   panel.querySelectorAll("[data-topic]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -503,11 +520,11 @@ function renderDietitianRows(dietitians) {
 async function renderClientDashboard(firstName) {
   const dietitians = await request("/api/v1/dietitians");
   workspaceContent.innerHTML = `
-    ${pageHeading("PATIENT DASHBOARD", `Welcome, ${escapeHtml(firstName)}.`, "Your health information, progress, and care plan in one place.")}
+    ${pageHeading("PATIENT DASHBOARD", `Welcome, ${escapeHtml(firstName)}.`, "Nutrition support for your health, lifestyle, culture, preferences, and stage of life.")}
     <section class="feature-panel client-home-feature">
       <span class="eyebrow">YOUR CARE, AT A GLANCE</span>
-      <h2>Small steps make meaningful progress.</h2>
-      <p>Check your latest progress, review your meal plan, or ask the AI Coach a nutrition question.</p>
+      <h2>Your nutrition needs are personal.</h2>
+      <p>Whether you want everyday nutrition guidance, support with a health condition, help through a life stage, sports-fuelling advice, or practical meal ideas, your care can be tailored to you.</p>
       <button class="button button-lime" data-go="client-progress" type="button">View my progress <span aria-hidden="true">&#8594;</span></button>
     </section>
     <div class="section-heading"><h2>My workspace</h2><span>QUICK ACCESS</span></div>
@@ -517,7 +534,7 @@ async function renderClientDashboard(firstName) {
       <button class="quick-link" data-go="client-goals" type="button"><strong>My Goals</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-meal-plan" type="button"><strong>My Meal Plan</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-appointments" type="button"><strong>Appointments</strong><span aria-hidden="true">&#8599;</span></button>
-      <button class="quick-link" data-go="ai-workspace" type="button"><strong>AI Coach</strong><span aria-hidden="true">&#8599;</span></button>
+        <button class="quick-link" data-go="ai-workspace" type="button"><strong>AI Coach</strong><span aria-hidden="true">&#8599;</span></button>
     </div>
     <div class="section-heading"><h2>Find a Dietitian</h2><span>${dietitians.length} AVAILABLE</span></div>
     ${dietitians.length ? `<div class="dietitian-directory patient-dietitian-directory">${dietitians.map((dietitian) => `
@@ -1015,16 +1032,16 @@ async function renderClientProgress(clientId) {
 async function renderClientGoals(clientId) {
   const goals = await request(`/api/v1/goals?client_id=${encodeURIComponent(clientId)}`);
   workspaceContent.innerHTML = `
-    ${pageHeading("MY GOALS", "Goals that move with you.", "Set a measurable target with your care team.")}
+    ${pageHeading("MY GOALS", "Goals that move with you.", "Choose goals that reflect what matters to you, from daily habits and energy to hydration, digestion, health needs, or weight if relevant.")}
     <div data-message class="workspace-message" hidden></div>
     <section class="content-panel"><form id="clientGoalForm" class="form-grid">
-      <div class="form-field"><label for="goalMetric">Goal metric</label><select id="goalMetric" name="target_metric"><option>Weight</option><option>Body Fat</option><option>Waist</option><option>Calories</option><option>Water</option><option>Steps</option><option>Sleep</option></select></div>
+      <div class="form-field"><label for="goalMetric">Goal metric</label><select id="goalMetric" name="target_metric"><option>Balanced meals per day</option><option>Fruit and vegetable servings</option><option>Fiber servings</option><option>Water (ml)</option><option>Meals per day</option><option>Home-cooked meals per week</option><option>Protein servings</option><option>Sleep (hours)</option><option>Steps</option><option>Symptom-free days</option><option>Weight (optional)</option><option>Body fat (optional)</option><option>Waist (optional)</option><option>Calories (dietitian-guided)</option></select></div>
       <div class="form-field"><label for="goalTarget">Target value</label><input class="text-input" id="goalTarget" name="target_value" type="number" step="any" required></div>
       <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add goal</button></div>
     </form></section>
     <div class="section-heading"><h2>My goals</h2><span>${goals.length} SAVED</span></div>
     <div class="goal-list">${goals.length ? goals.map((goal) => `
-      <article class="goal-row"><div><span class="subsection-label">${escapeHtml(goal.target_metric)}</span><h3>Target ${escapeHtml(goal.target_value)}</h3></div><div class="goal-current"><span>Current</span><strong>${goal.current_value == null ? "Not recorded" : escapeHtml(goal.current_value)}</strong></div></article>`).join("") : '<p class="empty-state">No goals saved yet. Add a target to start tracking it with your care team.</p>'}</div>`;
+      <article class="goal-row"><div><span class="subsection-label">${escapeHtml(goal.target_metric)}</span><h3>Target ${escapeHtml(goal.target_value)}</h3></div><div class="goal-current"><span>Current</span><strong>${goal.current_value == null ? "Not recorded" : escapeHtml(goal.current_value)}</strong></div></article>`).join("") : '<p class="empty-state">No goals saved yet. Choose a goal that is meaningful to you. Goals can focus on habits, nourishment, hydration, symptoms, activity, or measurements when relevant.</p>'}</div>`;
   document.querySelector("#clientGoalForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget));
@@ -1171,7 +1188,7 @@ async function renderClientRecommendations(clientId) {
   workspaceContent.innerHTML = `
     ${pageHeading("RECOMMENDATIONS", "Guidance reviewed for you.", "Recommendations appear here after your dietitian reviews them.")}
     <div class="recommendation-list">${recommendations.length ? recommendations.map((item) => `
-      <article class="review-card"><div class="review-meta"><span>${escapeHtml(item.status)}</span><span>${escapeHtml(item.recommendation_id)}</span></div><p class="stat-label">Goal: ${escapeHtml(item.dietary_goal || "Nutrition guidance")}</p><ul class="result-list">${(item.generated_plan || []).map((suggestion, index) => `<li class="result-item"><span class="result-index">0${index + 1}</span><span>${escapeHtml(suggestion)}</span></li>`).join("")}</ul>${item.review_notes ? `<p class="notice">Dietitian note: ${escapeHtml(item.review_notes)}</p>` : ""}</article>`).join("") : '<p class="empty-state">No recommendations have been shared yet. Your dietitian will review AI drafts before they appear here.</p>'}</div>`;
+      <article class="review-card"><div class="review-meta"><span>${escapeHtml(item.status)}</span><span>${escapeHtml(item.recommendation_id)}</span></div><p class="stat-label">Goal: ${escapeHtml(item.dietary_goal || "Nutrition guidance")}</p><ul class="result-list">${(item.generated_plan || []).map((suggestion, index) => `<li class="result-item"><span class="result-index">0${index + 1}</span><span>${escapeHtml(suggestion)}</span></li>`).join("")}</ul>${item.review_notes ? `<p class="notice">Dietitian note: ${escapeHtml(item.review_notes)}</p>` : ""}</article>`).join("") : '<p class="empty-state">No recommendations have been shared yet. Your dietitian will review drafts before they appear here.</p>'}</div>`;
 }
 
 async function renderDietitians() {
@@ -1183,6 +1200,10 @@ async function renderDietitians() {
 }
 
 async function loadView(view, initialAIPanel = "coach") {
+  workspaceContent.dataset.view = view;
+  workspaceContent.classList.remove("view-enter");
+  void workspaceContent.offsetWidth;
+  workspaceContent.classList.add("view-enter");
   const firstName = currentUser.full_name.split(" ")[0];
   const clientId = currentUser.type === "client" ? currentUser.id : "";
   if (currentUser.type === "client" && String(currentUser.gender || "").toLowerCase() === "male"
@@ -1211,13 +1232,13 @@ async function loadView(view, initialAIPanel = "coach") {
         ${currentUser.type === "dietitian" ? `<p class="account-id"><span>YOUR DIETITIAN ID</span><strong>${escapeHtml(currentUser.id)}</strong><span>Share this ID with patients when they create an account.</span></p>` : ""}
         <div class="overview-grid">
           <section class="feature-panel">
-            <span class="eyebrow">AI PLAN STUDIO</span>
+            <span class="eyebrow">PLAN STUDIO</span>
             <h2>Build a starting point for better habits.</h2>
             <p>Draft a nutrition plan around a patient’s goals and health context. Every draft stays with you for review.</p>
             <button class="button button-lime" data-go="ai-workspace" data-ai-panel="plan" type="button">Start a plan <span aria-hidden="true">&#8594;</span></button>
           </section>
           <section class="stat-panel">
-            <div><span class="stat-label">Waiting for your review</span><strong class="stat-number">${pending.length}</strong><span class="stat-caption">AI-generated drafts</span></div>
+            <div><span class="stat-label">Waiting for your review</span><strong class="stat-number">${pending.length}</strong><span class="stat-caption">Draft recommendations</span></div>
             <button class="stat-link" data-go="reviews" type="button">Open review queue <span aria-hidden="true">&#8594;</span></button>
           </section>
         </div>
@@ -1225,9 +1246,9 @@ async function loadView(view, initialAIPanel = "coach") {
         <div class="quick-grid">
           <button class="quick-link" data-go="clients" type="button"><strong>Patient health record</strong><span aria-hidden="true">&#8599;</span></button>
           <button class="quick-link" data-go="foods" type="button"><strong>Browse food library</strong><span aria-hidden="true">&#8599;</span></button>
-          <button class="quick-link" data-go="reviews" type="button"><strong>Review AI suggestions</strong><span aria-hidden="true">&#8599;</span></button>
+          <button class="quick-link" data-go="reviews" type="button"><strong>Review suggestions</strong><span aria-hidden="true">&#8599;</span></button>
         </div>
-        <p class="notice">AI suggestions are general starting points and require review by a licensed dietitian. They are not a substitute for clinical judgment.</p>`;
+        <p class="notice">Suggestions are general starting points and require review by a licensed dietitian. They are not a substitute for clinical judgment.</p>`;
       bindGoButtons();
     } else if (view === "ai-workspace" || view === "ai" || view === "ai-chat") {
       const panel = view === "ai" ? "plan" : view === "ai-chat" ? "coach" : initialAIPanel;
@@ -1303,19 +1324,33 @@ async function renderAIStudio(clientId = "") {
     clients = [];
   }
   const goalSuggestions = [
-    "More balanced meals",
-    "Increase fiber",
-    "Support workout recovery",
+    "Build balanced, satisfying meals",
+    "Improve everyday nutrition and wellbeing",
+    "Support diabetes care with dietitian guidance",
+    "Support heart health and lower sodium intake",
+    "Manage nutrition alongside kidney disease with clinical guidance",
+    "Support digestive comfort and regularity",
+    "Plan meals around food allergies or intolerances",
+    "Support pregnancy nutrition",
+    "Support postpartum and breastfeeding nutrition",
+    "Support infant or child growth and feeding",
+    "Meet nutrition needs as an older adult",
+    "Fuel sport, exercise, and recovery",
+    "Improve energy and meal regularity",
     "Improve hydration",
-    "Lower sodium",
-    "Improve meal consistency",
+    "Plan affordable meals using familiar cultural foods",
+    "Plan vegetarian or vegan meals with balanced nutrition",
+    "Navigate texture-modified or swallowing-related food needs with clinical guidance",
+    "Support recovery from illness or surgery with the care team",
+    "Build a more peaceful, flexible relationship with food",
+    "Weight management, if appropriate for the patient",
   ];
   document.querySelector("#aiWorkspacePanel").innerHTML = `
     <section class="content-panel">
       <form id="aiForm" class="form-grid">
         <div class="form-field"><label for="aiClientId">Search patient ID or name</label><input class="text-input" id="aiClientId" name="client_id" list="aiClientOptions" placeholder="Start typing a patient ID" value="${escapeHtml(clientId)}" required><datalist id="aiClientOptions">${clients.map((client) => `<option value="${escapeHtml(client.id)}" label="${escapeHtml(client.name)}"></option>`).join("")}</datalist></div>
-        <div class="form-field"><label for="dietaryGoal">Primary goal</label><input class="text-input" id="dietaryGoal" name="dietary_goal" list="aiGoalOptions" placeholder="Search or enter a primary goal" required><datalist id="aiGoalOptions">${goalSuggestions.map((goal) => `<option value="${escapeHtml(goal)}"></option>`).join("")}</datalist></div>
-        <div class="form-field full-width"><span class="notice">Recorded allergies and medical conditions for this patient are sent to the model as context. Review the generated suggestions before sharing.</span></div>
+        <div class="form-field"><label for="dietaryGoal">Patient priority / nutrition need</label><input class="text-input" id="dietaryGoal" name="dietary_goal" list="aiGoalOptions" placeholder="Choose or describe the patient’s nutrition needs" required><datalist id="aiGoalOptions">${goalSuggestions.map((goal) => `<option value="${escapeHtml(goal)}"></option>`).join("")}</datalist></div>
+        <div class="form-field full-width"><span class="notice">Consider the patient’s stated priority, life stage, cultural foods, preferences, access and budget, allergies, and recorded medical conditions. Drafts are suggestions only and must be clinically reviewed before sharing.</span></div>
         <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Generate draft <span aria-hidden="true">&#8594;</span></button></div>
       </form>
       <div id="planResult" aria-live="polite"></div>
@@ -1826,7 +1861,7 @@ async function renderAdminSettings() {
     <section class="content-panel"><dl class="profile-details">
       <div><dt>API status</dt><dd>${escapeHtml(health.status)}</dd></div>
       <div><dt>Database</dt><dd>${escapeHtml(health.database)}</dd></div>
-      <div><dt>AI model</dt><dd>${escapeHtml("Configured on server")}</dd></div>
+      <div><dt>Recommendation model</dt><dd>${escapeHtml("Configured on server")}</dd></div>
       <div><dt>Administrator</dt><dd>${escapeHtml(currentUser.full_name)} · ${escapeHtml(currentUser.email)}</dd></div>
       <div><dt>Initial setup</dt><dd>${setup.available ? "Available" : "Complete"}</dd></div>
     </dl></section>`;
