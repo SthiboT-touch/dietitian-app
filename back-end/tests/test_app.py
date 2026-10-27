@@ -748,6 +748,55 @@ def test_ai_chat_sends_plain_turns_and_recent_conversation_to_ollama():
     )
     assert "Local reference excerpts" in prompt_messages[-1]["content"]
 
+
+@pytest.mark.parametrize(
+    "model_reply",
+    [
+        AIMessage(
+            content='**Nutrition Coach**{"name":"get_daily_water_intake",'
+            '"parameters":{"amount":"8","unit":"cups"}}'
+        ),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "get_daily_water_intake",
+                    "args": {"amount": "8", "unit": "cups"},
+                    "id": "call-water-intake",
+                }
+            ],
+        ),
+    ],
+)
+def test_ai_chat_does_not_expose_unexecuted_tool_calls(model_reply):
+    with patch(
+        "routers.ai._create_chat_agent",
+        return_value=RunnableLambda(
+            lambda chat_state: {
+                "messages": [*chat_state["messages"], model_reply],
+            }
+        ),
+    ):
+        response = client.post(
+            "/api/v1/ai/chat",
+            json={
+                "user_id": "client-water",
+                "role": "client",
+                "message": "I drank 8 cups of water today.",
+            },
+            headers=authenticated_client_headers("client-water"),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reply"] == (
+        "I couldn't provide a clear nutrition response just now. "
+        "Please ask again in plain language."
+    )
+    assert "get_daily_water_intake" not in payload["reply"]
+    assert payload["messages"][-1]["content"] == payload["reply"]
+
+
 def test_ai_chat_returns_clear_fallback_when_ollama_is_unavailable(caplog):
     def fail_model(_):
         raise httpx.ConnectError("Ollama is offline")
