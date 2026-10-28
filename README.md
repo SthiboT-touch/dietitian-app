@@ -1,6 +1,6 @@
 # Dietitian & Nutrition Management
 
-The browser app is served by the API at `http://localhost:8000` when running with Docker Compose. The interactive API documentation is at `http://localhost:8000/docs`.
+The browser app is served by the API at `http://localhost:8000` when running with Docker Compose.
 
 ## Project layout
 
