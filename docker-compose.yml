@@ -1,0 +1,72 @@
+services:
+  db:
+    container_name: dietitian-db
+    build:
+      context: ./back-end
+      dockerfile: Dockerfile.db
+    environment:
+      POSTGRES_USER: black
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in the project-root .env file}
+      POSTGRES_DB: dietitian_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  api:
+    container_name: dietitian-api
+    build:
+      context: .
+      dockerfile: back-end/Dockerfile.api
+    environment:
+      DATABASE_URL: postgresql://black@db:5432/dietitian_db
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in the project-root .env file}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3.2
+      OLLAMA_TIMEOUT_SECONDS: "240"
+      # Optional: only the IP/CIDR of a reverse proxy you control.
+      REGISTRATION_TRUSTED_PROXY_CIDRS: ${REGISTRATION_TRUSTED_PROXY_CIDRS:-}
+    depends_on:
+      - db
+      - ollama
+    restart: always
+
+  # Optional FR-1.5 email delivery. Never enable without approved SMTP credentials.
+  welcome-worker:
+    profiles: ["notifications"]
+    build:
+      context: .
+      dockerfile: back-end/Dockerfile.api
+    command: python welcome_worker.py
+    environment:
+      DATABASE_URL: postgresql://black@db:5432/dietitian_db
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your local .env}
+      WELCOME_SMTP_HOST: ${WELCOME_SMTP_HOST:-}
+      WELCOME_SMTP_PORT: ${WELCOME_SMTP_PORT:-587}
+      WELCOME_SMTP_USER: ${WELCOME_SMTP_USER:-}
+      WELCOME_SMTP_PASSWORD: ${WELCOME_SMTP_PASSWORD:-}
+      WELCOME_FROM_EMAIL: ${WELCOME_FROM_EMAIL:-}
+    depends_on: [db]
+    restart: unless-stopped
+
+  ollama:
+    container_name: dietitian-ollama
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: always
+
+  frontend:
+    container_name: dietitian-frontend
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./front-end:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    restart: always
+
+volumes:
+  postgres_data:
+  ollama_data:

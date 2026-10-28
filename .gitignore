@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local environments and secrets
+venv/
+.venv/
+.env
+.env.*
+!.env.example
+
+# Database backups (may contain real client health data)
+*.dump

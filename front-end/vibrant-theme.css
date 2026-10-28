@@ -1,0 +1,174 @@
+/* Vibrant nutrition UI – presentation only. No application/API logic changes. */
+:root{--paper:#fff8f3;--white:#ffffff;--ink:#23304b;--muted:#64748b;--line:#f1e5e6;--green:#11866e;--green-deep:#096b65;--green-pale:#d9f8ed;--lime:#e4f78b;--rust:#f46e75;--soft-rust:#ffe4d8;--shadow-soft:0 14px 38px rgba(72,48,101,.12)}
+body{background:radial-gradient(circle at 96% 8%,#fbe5ff 0,transparent 30%),radial-gradient(circle at 5% 60%,#e0fff1 0,transparent 30%),#fff8f3}
+.auth-story{background:#117e78}.story-image{background-image:url('https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=1400&q=85'),url('/static/nutrition-consultation.jpg');background-position:center}.story-shade{background:linear-gradient(165deg,rgba(13,88,88,.56),rgba(49,32,80,.15) 43%,rgba(29,44,91,.8))}
+.auth-main{background:radial-gradient(circle at 85% 10%,#fce9f2,transparent 33%),radial-gradient(circle at 0% 100%,#e2fff1,transparent 35%),#fff}
+.auth-submit,.button-primary{background:linear-gradient(115deg,#00a98b,#2f80ed)!important;color:white!important;border:0!important;box-shadow:0 9px 24px rgba(25,142,155,.23)}
+.auth-submit:hover,.button-primary:hover{filter:brightness(1.06)}
+.workspace-sidebar{background:linear-gradient(170deg,#163f56 0%,#175e68 55%,#176d63 100%)!important;color:#f9ffff}
+.workspace-sidebar .sidebar-label,.workspace-sidebar .nav-section-label{color:#bce9e3!important}
+.workspace-sidebar .nav-item{color:#f1fbfb!important}
+.workspace-sidebar .nav-item:hover,.workspace-sidebar .nav-item.is-current{background:rgba(255,255,255,.19)!important;color:#fff!important;box-shadow:inset 4px 0 #f8d166!important}
+.workspace-main{background:transparent}.workspace-header{background:rgba(255,255,255,.88)!important;border-bottom:1px solid #f0e7ee}
+.workspace-content{--hero-photo:url('https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=1100&q=80');--hero-tint:#fff0d8}
+.workspace-content[data-view='overview']{--hero-photo:url('https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=1100&q=80');--hero-tint:#ffe3c6}
+.workspace-content[data-view*='appointment'],.workspace-content[data-view='reviews']{--hero-photo:url('https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=1100&q=80');--hero-tint:#dff6ff}
+.workspace-content[data-view*='meal'],.workspace-content[data-view='recipes'],.workspace-content[data-view='foods']{--hero-photo:url('https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1100&q=80');--hero-tint:#fff0bf}
+.workspace-content[data-view*='health'],.workspace-content[data-view='client-progress'],.workspace-content[data-view='client-goals']{--hero-photo:url('https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=1100&q=80');--hero-tint:#d9f9ea}
+.workspace-content[data-view*='admin'],.workspace-content[data-view='admin-reports'],.workspace-content[data-view='admin-audit-logs']{--hero-photo:url('https://images.unsplash.com/photo-1556761175-b413da4baf72?auto=format&fit=crop&w=1100&q=80');--hero-tint:#eee2ff}
+.workspace-content[data-view='my-profile'],.workspace-content[data-view='verification-documents'],.workspace-content[data-view='dietitian-branches'],.workspace-content[data-view='clients']{--hero-photo:url('https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=1100&q=80');--hero-tint:#fce3f2}
+.workspace-content[data-view='client-recommendations']{--hero-photo:url('https://images.unsplash.com/photo-1498837167922-ddd27525d352?auto=format&fit=crop&w=1100&q=80');--hero-tint:#e5f6ca}
+.workspace-content .page-heading{background:linear-gradient(105deg,var(--hero-tint) 0%,#fff8f2 72%,#fff0fa)!important;border:1px solid rgba(244,162,175,.22);border-radius:22px;box-shadow:0 12px 32px rgba(109,78,114,.08)}
+.workspace-content .page-heading::after{background-image:linear-gradient(90deg,var(--hero-tint) 0%,rgba(255,255,255,.18) 40%,transparent 100%),var(--hero-photo)!important;background-size:cover!important;background-position:center!important}
+.workspace-content .page-heading h1{color:#273459}
+.workspace-content .content-panel,.workspace-content .stat-panel,.workspace-content .admin-stat,.workspace-content .quick-link,.workspace-content .dietitian-row{border-radius:17px;box-shadow:0 7px 24px rgba(57,76,117,.06)}
+.workspace-content .stat-panel:nth-of-type(4n+1),.workspace-content .admin-stat:nth-of-type(4n+1){background:#e4faf1}
+.workspace-content .stat-panel:nth-of-type(4n+2),.workspace-content .admin-stat:nth-of-type(4n+2){background:#fff0d5}
+.workspace-content .stat-panel:nth-of-type(4n+3),.workspace-content .admin-stat:nth-of-type(4n+3){background:#f3e8ff}
+.workspace-content .stat-panel:nth-of-type(4n+4),.workspace-content .admin-stat:nth-of-type(4n+4){background:#ffe8eb}
+.workspace-content .nutrition-workspace-banner{background-image:linear-gradient(90deg,#e4fff3 0%,rgba(232,255,241,.86) 52%,transparent 100%),url('https://images.unsplash.com/photo-1498837167922-ddd27525d352?auto=format&fit=crop&w=1200&q=80')!important;border-radius:22px}
+.workspace-content .content-panel:hover,.workspace-content .stat-panel:hover,.workspace-content .admin-stat:hover{transform:translateY(-4px);box-shadow:0 17px 32px rgba(50,76,118,.14)}
+@keyframes vibrantRise{from{opacity:0;transform:translateY(20px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes vibrantShimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+.workspace-content.view-enter .page-heading{animation:vibrantRise .55s cubic-bezier(.2,.8,.2,1) both}
+.workspace-content.view-enter .content-panel,.workspace-content.view-enter .stat-panel,.workspace-content.view-enter .admin-stat,.workspace-content.view-enter .quick-link{animation:vibrantRise .48s cubic-bezier(.2,.8,.2,1) both}
+.workspace-content.view-enter .content-panel:nth-child(2),.workspace-content.view-enter .stat-panel:nth-child(2){animation-delay:.07s}
+.workspace-content.view-enter .content-panel:nth-child(3),.workspace-content.view-enter .stat-panel:nth-child(3){animation-delay:.13s}
+.workspace-content .page-heading::after{transition:transform .6s ease,filter .5s ease,width .5s ease}
+.workspace-content .page-heading:hover::after{transform:scale(1.035);filter:saturate(1.22)}
+.workspace-content .button:hover:not(:disabled),.workspace-sidebar .nav-item:hover{transform:translateY(-2px)}
+@media(max-width:720px){.workspace-content .page-heading{border-radius:16px}.workspace-content .page-heading::after{opacity:.55}}
+@media(prefers-reduced-motion:reduce){.workspace-content.view-enter .page-heading,.workspace-content.view-enter .content-panel,.workspace-content.view-enter .stat-panel,.workspace-content.view-enter .admin-stat,.workspace-content.view-enter .quick-link{animation:none!important}*{scroll-behavior:auto!important}}
+
+/* October 2026 polish: local professional consultation photography and readable layouts. */
+.auth-story .story-image {
+  background-image: url('/static/nutrition-consultation.jpg?v=6') !important;
+  background-position: 53% 43%;
+  background-size: cover;
+}
+.auth-story .story-shade {
+  background: linear-gradient(180deg, rgba(10,41,58,.74) 0%, rgba(10,51,67,.36) 44%, rgba(14,42,64,.77) 100%);
+}
+.auth-story .story-copy { position: relative; z-index: 2; }
+/* Prevent the four child elements from being squeezed into horizontal columns. */
+.workspace-content .client-home-feature {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  gap: 12px !important;
+  padding: clamp(26px, 5vw, 48px) !important;
+  min-height: 290px;
+  background-image: linear-gradient(90deg, rgba(16,57,68,.98) 0%, rgba(18,72,77,.94) 51%, rgba(17,71,73,.22) 100%), url('/static/nutrition-consultation.jpg?v=6') !important;
+  background-position: center, 70% 38%;
+  background-size: cover;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 22px;
+}
+.workspace-content .client-home-feature > * {
+  flex: 0 0 auto !important;
+  max-width: min(100%, 440px) !important;
+  margin: 0 !important;
+  position: relative;
+  z-index: 1;
+}
+.workspace-content .client-home-feature .eyebrow { color: #d8f68a !important; letter-spacing: 1.8px; }
+.workspace-content .client-home-feature h2 { font-size: clamp(29px, 3.8vw, 44px); line-height: 1.08; color: #fff !important; }
+.workspace-content .client-home-feature p { font-size: 14px; line-height: 1.65; color: #e2f7f0 !important; }
+.workspace-content .client-home-feature .button { margin-top: 8px !important; align-self: flex-start; }
+.workspace-content .dietitian-home-feature { border-radius: 22px; }
+.workspace-content .page-heading { padding-right: min(35%, 240px); }
+.workspace-content .page-heading > div { position: relative; z-index: 1; min-width: 0; }
+.workspace-content .page-heading h1 { overflow-wrap: anywhere; }
+.workspace-content .page-heading::after { width: min(36%, 245px); }
+.workspace-content .page-heading:hover::after { width: min(38%, 260px); }
+.workspace-content .content-panel, .workspace-content .stat-panel, .workspace-content .quick-link { transition: transform .25s ease, box-shadow .25s ease; }
+@media(max-width: 720px) {
+  .workspace-content .client-home-feature { min-height: 320px; padding: 26px !important; background-image: linear-gradient(90deg,rgba(13,54,66,.97),rgba(16,62,73,.78)),url('/static/nutrition-consultation.jpg?v=6') !important; }
+  .workspace-content .client-home-feature > * { max-width: 100% !important; }
+  .workspace-content .page-heading { padding-right: 110px; }
+  .workspace-content .page-heading::after { width: 105px; }
+  .workspace-content .page-heading:hover::after { width: 110px; }
+}
+@media(prefers-reduced-motion: reduce) {
+  .workspace-content .content-panel, .workspace-content .stat-panel, .workspace-content .quick-link { transition: none !important; }
+}
+/* Improve sidebar footer readability */
+.sidebar-footer,
+.sidebar-footer a,
+.sidebar-footer button,
+.sidebar-footer span,
+.sidebar-footer p {
+    color: #ffffff !important;
+    opacity: 1 !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Improve visibility of footer links */
+.sidebar-footer a:hover,
+.sidebar-footer button:hover {
+    color: #d9ff85 !important;
+}
+
+/* Improve divider visibility */
+.sidebar-footer hr {
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+/* FIX: Sidebar footer visibility */
+
+.workspace-sidebar .sidebar-bottom {
+    background: #123b58 !important;
+    border-radius: 14px;
+    padding: 20px 16px !important;
+    margin: 12px 8px 16px;
+}
+
+.workspace-sidebar .connection-status,
+.workspace-sidebar .connection-status span,
+.workspace-sidebar .signout-button,
+.workspace-sidebar .signout-button .nav-glyph,
+.workspace-sidebar .sidebar-docs,
+.workspace-sidebar .sidebar-docs span {
+    color: #ffffff !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    text-shadow: none !important;
+}
+
+/* Bright green connection indicator */
+.workspace-sidebar .status-dot {
+    background: #a3ff90 !important;
+    border: 2px solid #ffffff;
+}
+
+/* Sign out button */
+.workspace-sidebar .signout-button {
+    background: rgba(255, 255, 255, 0.12) !important;
+    border-radius: 9px;
+    padding: 12px !important;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+}
+
+.workspace-sidebar .signout-button:hover {
+    background: rgba(255, 255, 255, 0.22) !important;
+}
+
+/* API documentation link */
+.workspace-sidebar .sidebar-docs {
+    display: inline-block;
+    margin-top: 12px;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.workspace-sidebar .sidebar-docs:hover {
+    color: #c7ff89 !important;
+}
+
+/* Ensure the sidebar status color communicates degradation, even with theme overrides. */
+.workspace-sidebar .connection-status[data-state="checking"] .status-dot { background:#c8b274 !important; }
+.workspace-sidebar .connection-status[data-state="degraded"] .status-dot { background:#f4b64b !important; }
+.workspace-sidebar .connection-status[data-state="offline"] .status-dot { background:#f27869 !important; }
