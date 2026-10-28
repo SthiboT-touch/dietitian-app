@@ -155,6 +155,24 @@ def _reply_to_greeting(state: ChatWorkflowState) -> dict:
     return {"reply": _greeting_reply(state["message"])}
 
 
+def _contains_unexecuted_tool_call(content: str) -> bool:
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(content):
+        if character != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(content[index:])
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(value, dict)
+            and isinstance(value.get("name"), str)
+            and any(key in value for key in ("parameters", "arguments", "input"))
+        ):
+            return True
+    return False
+
+
 def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
     messages = []
     for turn in state.get("conversation", [])[-8:]:
@@ -175,7 +193,11 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
             {"messages": messages},
             config=_langsmith_trace_config("chat-agent"),
         )
-        content = result["messages"][-1].content
+        final_message = result["messages"][-1]
+        if getattr(final_message, "tool_calls", None):
+            logger.warning("LangChain AI chat ended with an unexecuted tool call")
+            return {"reply": "I couldn't provide a clear nutrition response just now. Please ask again in plain language."}
+        content = final_message.content
         if isinstance(content, list):
             content = "".join(
                 block.get("text", "")
@@ -183,6 +205,9 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
                 if isinstance(block, dict) and isinstance(block.get("text"), str)
             )
         if isinstance(content, str) and content.strip():
+            if _contains_unexecuted_tool_call(content):
+                logger.warning("LangChain AI chat returned tool-call text instead of a response")
+                return {"reply": "I couldn't provide a clear nutrition response just now. Please ask again in plain language."}
             return {"reply": content.strip()}
     except (
         httpx.HTTPError,
