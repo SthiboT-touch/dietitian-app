@@ -3,6 +3,7 @@
 No outgoing messages or private files are processed unless explicitly provided by
 registration. Secrets are never included in API responses or application logs.
 """
+
 import base64
 import binascii
 import hashlib
@@ -23,9 +24,9 @@ def validate_attachment(attachment, *, photo=False):
     """Decode bounded base64, inspect file signature and reject content mismatch."""
     if attachment is None:
         return None
-    if attachment.filename != attachment.filename.rsplit('/', 1)[-1] or '\\' in attachment.filename:
+    if attachment.filename != attachment.filename.rsplit("/", 1)[-1] or "\\" in attachment.filename:
         raise HTTPException(422, "Use a simple filename without a file path")
-    filename = SAFE_NAME.sub('_', attachment.filename).strip('. ')
+    filename = SAFE_NAME.sub("_", attachment.filename).strip(". ")
     if not filename or len(filename) > 120:
         raise HTTPException(422, "Invalid attachment filename")
     try:
@@ -37,25 +38,26 @@ def validate_attachment(attachment, *, photo=False):
         raise HTTPException(422, "Attachment exceeds the permitted size")
     mime = attachment.content_type
     if photo:
-        if mime == "image/jpeg" and raw[:3] == b'\xff\xd8\xff':
+        if mime == "image/jpeg" and raw[:3] == b"\xff\xd8\xff":
             pass
-        elif mime == "image/png" and raw[:8] == b'\x89PNG\r\n\x1a\n':
+        elif mime == "image/png" and raw[:8] == b"\x89PNG\r\n\x1a\n":
             pass
         else:
             raise HTTPException(422, "Profile photo must be a JPEG or PNG image")
         # Keep stored images inert; decoding also detects truncated/corrupt images.
         try:
             from PIL import Image
+
             with Image.open(io.BytesIO(raw)) as image:
                 image.verify()
         except Exception:
             raise HTTPException(422, "Profile photo could not be read as an image") from None
     elif mime == "application/pdf":
-        if not raw.startswith(b'%PDF-'):
+        if not raw.startswith(b"%PDF-"):
             raise HTTPException(422, "Document content does not match PDF type")
-    elif mime == "image/jpeg" and raw[:3] == b'\xff\xd8\xff':
+    elif mime == "image/jpeg" and raw[:3] == b"\xff\xd8\xff":
         pass
-    elif mime == "image/png" and raw[:8] == b'\x89PNG\r\n\x1a\n':
+    elif mime == "image/png" and raw[:8] == b"\x89PNG\r\n\x1a\n":
         pass
     else:
         raise HTTPException(422, "Document must be PDF, JPEG or PNG")
@@ -110,9 +112,10 @@ def qr_svg(value):
     """Generate an SVG QR code locally; never request an external QR service."""
     import qrcode
     from qrcode.image.svg import SvgPathImage
+
     code = qrcode.QRCode(border=3, box_size=5, error_correction=qrcode.constants.ERROR_CORRECT_M)
     code.add_data(value)
     code.make(fit=True)
     buf = io.BytesIO()
     code.make_image(image_factory=SvgPathImage).save(buf)
-    return buf.getvalue().decode('utf-8')
+    return buf.getvalue().decode("utf-8")

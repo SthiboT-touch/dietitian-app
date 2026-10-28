@@ -1,5 +1,5 @@
 """Browser-level FR-1.2 smoke tests with mocked API (no production traffic)."""
-import json
+
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
@@ -9,7 +9,9 @@ js = (ROOT / "app.js").read_text()
 css = (ROOT / "styles.css").read_text() + "\n" + (ROOT / "vibrant-theme.css").read_text()
 
 with sync_playwright() as playwright:
-    browser = playwright.chromium.launch(headless=True, executable_path="/usr/bin/chromium", args=["--no-sandbox"])
+    browser = playwright.chromium.launch(
+        headless=True, executable_path="/usr/bin/chromium", args=["--no-sandbox"]
+    )
     for width in (1280, 375):
         page = browser.new_page(viewport={"width": width, "height": 820})
         errors = []
@@ -39,7 +41,9 @@ with sync_playwright() as playwright:
         page.locator("#signupLastName").fill("Example")
         email = page.locator("#signupEmail")
         email.fill("not-valid")
-        assert email.get_attribute("aria-invalid") == "true", f"email invalid state not rendered on {width}px"
+        assert (
+            email.get_attribute("aria-invalid") == "true"
+        ), f"email invalid state not rendered on {width}px"
         assert "valid email" in page.locator("#signupEmailHelp").inner_text()
         page.locator("#patientSignupNext").click()
         assert page.locator("#patientSignupStepLabel").inner_text().startswith("Step 1")
@@ -87,7 +91,9 @@ with sync_playwright() as playwright:
     page = browser.new_page()
     page.set_content(html, wait_until="domcontentloaded")
     page.add_style_tag(content=css)
-    page.evaluate("""() => {const bag=new Map();Object.defineProperty(window,'sessionStorage',{configurable:true,value:{getItem:k=>bag.get(k)||null,setItem:(k,v)=>bag.set(k,String(v)),removeItem:k=>bag.delete(k)}});window.fetch=async()=>({ok:true,status:200,json:async()=>({available:false})})} """)
+    page.evaluate(
+        """() => {const bag=new Map();Object.defineProperty(window,'sessionStorage',{configurable:true,value:{getItem:k=>bag.get(k)||null,setItem:(k,v)=>bag.set(k,String(v)),removeItem:k=>bag.delete(k)}});window.fetch=async()=>({ok:true,status:200,json:async()=>({available:false})})} """
+    )
     page.add_script_tag(content=js)
     page.locator("#signupTab").click()
     assert page.locator("#licenseNumber").is_visible()

@@ -4,6 +4,7 @@ The peer IP is authoritative. Only opt in to trusting a reverse proxy after
 configuring its *specific* address/CIDR via REGISTRATION_TRUSTED_PROXY_CIDRS.
 Otherwise an attacker could forge X-Real-IP directly to the API.
 """
+
 from datetime import datetime, timezone
 import ipaddress
 import os

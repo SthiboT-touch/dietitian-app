@@ -3,6 +3,7 @@
 Run explicitly from the local API container after reviewing the SQL:
     docker compose exec api python migrations/apply_009_client_registration_phone.py
 """
+
 from pathlib import Path
 import sys
 

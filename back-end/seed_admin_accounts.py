@@ -3,14 +3,12 @@ import secrets
 import sys
 import uuid
 
-
 BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BACKEND_DIR))
 
 import config
 import database
 import security
-
 
 DEFAULT_ADMIN_EMAILS = [
     ("admin1@nutritionpractice.local", "Admin", "One"),
@@ -21,7 +19,9 @@ DEFAULT_ADMIN_EMAILS = [
 
 def main():
     if not config.DATABASE_ENABLED:
-        raise SystemExit("Configure DATABASE_URL before creating persistent administrator accounts.")
+        raise SystemExit(
+            "Configure DATABASE_URL before creating persistent administrator accounts."
+        )
 
     created = []
     with database.cursor() as cursor:

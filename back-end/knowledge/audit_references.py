@@ -1,4 +1,5 @@
 """Offline metadata and local file consistency audit; does not validate clinical content."""
+
 import json
 from pathlib import Path
 from datetime import date
@@ -31,5 +32,6 @@ for index, entry in enumerate(manifest.get("documents", []), 1):
     except (KeyError, TypeError, ValueError):
         issues.append(f"Entry {index}: invalid reviewed_on date")
 print(f"Manifest entries: {len(manifest.get('documents', []))}; issues: {len(issues)}")
-for issue in issues: print("-", issue)
+for issue in issues:
+    print("-", issue)
 raise SystemExit(1 if issues else 0)

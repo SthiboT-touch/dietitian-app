@@ -2,6 +2,7 @@
 
 Run from project root: python qa/verify_fr12_api.py
 """
+
 import os
 import sys
 import types
@@ -26,12 +27,15 @@ app.include_router(router)
 client = TestClient(app)
 
 VALID = {
-    "first_name": "Taylor", "last_name": "Example",
+    "first_name": "Taylor",
+    "last_name": "Example",
     "email": " Taylor@Example.Test ",
     "id_number": "9005140012345",
     "phone": "082 123 4567",
-        "consent_to_care": True, "privacy_notice_version": "2026-10-28-v1",
-    "date_of_birth": "1990-05-14", "gender": "other",
+    "consent_to_care": True,
+    "privacy_notice_version": "2026-10-28-v1",
+    "date_of_birth": "1990-05-14",
+    "gender": "other",
     "password": "testpassword123",
 }
 
@@ -64,20 +68,42 @@ def main():
     assert user["email"] == "taylor@example.test", user
     assert user["phone"] == "+27821234567", user
     assert "password" not in user
-    assert client.post("/api/v1/auth/login", json={"email": "taylor@example.test", "password": VALID["password"]}).status_code == 200
-    duplicate = client.post("/api/v1/auth/register/client", json={**VALID, "phone": "+27 82 123 4567"})
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": "taylor@example.test", "password": VALID["password"]},
+        ).status_code
+        == 200
+    )
+    duplicate = client.post(
+        "/api/v1/auth/register/client", json={**VALID, "phone": "+27 82 123 4567"}
+    )
     assert duplicate.status_code == 409, duplicate.text
-    dietitian = client.post("/api/v1/auth/register/dietitian", json={
-        "first_name": "Alex", "last_name": "Example", "email": "alex@example.test",
-        "license_number": "RD-TEST-12", "password": "testpassword123",
-    })
+    dietitian = client.post(
+        "/api/v1/auth/register/dietitian",
+        json={
+            "first_name": "Alex",
+            "last_name": "Example",
+            "email": "alex@example.test",
+            "license_number": "RD-TEST-12",
+            "password": "testpassword123",
+        },
+    )
     assert dietitian.status_code == 200, dietitian.text
-    bad_dietitian = client.post("/api/v1/auth/register/dietitian", json={
-        "first_name": "Alex", "last_name": "Example", "email": "bad-email",
-        "license_number": "RD-TEST-12", "password": "testpassword123",
-    })
+    bad_dietitian = client.post(
+        "/api/v1/auth/register/dietitian",
+        json={
+            "first_name": "Alex",
+            "last_name": "Example",
+            "email": "bad-email",
+            "license_number": "RD-TEST-12",
+            "password": "testpassword123",
+        },
+    )
     assert bad_dietitian.status_code == 422
-    print("PASS: FR-1.2 rejects invalid fields, stores normalized email/phone, retains login and dietitian signup")
+    print(
+        "PASS: FR-1.2 rejects invalid fields, stores normalized email/phone, retains login and dietitian signup"
+    )
 
 
 if __name__ == "__main__":

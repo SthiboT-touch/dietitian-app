@@ -4,6 +4,7 @@ A second, duplicate ``LactationLog`` schema (field ``is_lactating``) used to
 shadow the real one (field ``is_active``). The front-end and the router both use
 ``is_active``, so every "Save lactation details" request was rejected with 422.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -41,13 +42,21 @@ def test_lactation_active_payload_from_frontend_is_accepted():
 
 
 def test_lactation_inactive_payload_is_accepted_without_notes():
-    response = client.post("/api/v1/clients/C1/lactation", json={"is_active": False}, headers={"Authorization": "Bearer lactation-client-token"})
+    response = client.post(
+        "/api/v1/clients/C1/lactation",
+        json={"is_active": False},
+        headers={"Authorization": "Bearer lactation-client-token"},
+    )
 
     assert response.status_code == 200
     assert response.json()["data"]["is_active"] is False
 
 
 def test_lactation_payload_missing_is_active_is_rejected():
-    response = client.post("/api/v1/clients/C1/lactation", json={"notes": "no status given"}, headers={"Authorization": "Bearer lactation-client-token"})
+    response = client.post(
+        "/api/v1/clients/C1/lactation",
+        json={"notes": "no status given"},
+        headers={"Authorization": "Bearer lactation-client-token"},
+    )
 
     assert response.status_code == 422

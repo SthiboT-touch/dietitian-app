@@ -81,7 +81,9 @@ async def request_diagnostics(request: Request, call_next):
     duration = round((time.monotonic() - started) * 1000, 1)
     status = response.status_code
     # Keep logs useful but avoid a line per static asset or health poll.
-    if status >= 400 or (request.url.path.startswith("/api/") and request.url.path != "/api/openapi.json"):
+    if status >= 400 or (
+        request.url.path.startswith("/api/") and request.url.path != "/api/openapi.json"
+    ):
         logger.log(
             logging.ERROR if status >= 500 else logging.WARNING if status >= 400 else logging.INFO,
             "http_request",

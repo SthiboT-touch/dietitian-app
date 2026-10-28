@@ -1,0 +1,14 @@
+{
+    "tabWidth": 4,
+    "printWidth": 100,
+    "singleAttributePerLine": true,
+    "htmlWhitespaceSensitivity": "strict",
+    "overrides": [
+        {
+            "files": ["*.yml", "*.yaml"],
+            "options": {
+                "tabWidth": 2
+            }
+        }
+    ]
+}

@@ -3,6 +3,7 @@
 Run explicitly after migration 009:
     docker compose exec api python migrations/apply_010_client_registration_consent.py
 """
+
 from pathlib import Path
 import sys
 

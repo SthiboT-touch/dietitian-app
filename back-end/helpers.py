@@ -1,4 +1,5 @@
 """Small helpers shared by several API areas."""
+
 import json
 from fastapi import HTTPException
 import database
@@ -25,9 +26,12 @@ def email_is_registered(email: str) -> bool:
             cursor.execute("SELECT 1 FROM staff_account WHERE LOWER(email) = LOWER(%s)", (email,))
             return cursor.fetchone() is not None
     from state import admins_db, staff_accounts_db
+
     return any(
         user.get("email", "").casefold() == email.casefold()
-        for user in list(users_db.values()) + list(admins_db.values()) + list(staff_accounts_db.values())
+        for user in list(users_db.values())
+        + list(admins_db.values())
+        + list(staff_accounts_db.values())
     )
 
 
@@ -54,7 +58,9 @@ def fetch_client_profile(cursor, client_id: str) -> dict:
         "WHERE cml.client_id = %s ORDER BY cml.recorded_at",
         (client_id,),
     )
-    metrics = [{"metric_type": row["metric_type"], "value": str(row["value"])} for row in cursor.fetchall()]
+    metrics = [
+        {"metric_type": row["metric_type"], "value": str(row["value"])} for row in cursor.fetchall()
+    ]
     cursor.execute(
         "SELECT weight AS weight_kg, calories_consumed AS calories, steps, "
         "sleep_minutes / 60.0 AS sleep_hours FROM progress_log "
@@ -62,7 +68,12 @@ def fetch_client_profile(cursor, client_id: str) -> dict:
         (client_id,),
     )
     progress = [dict(row) for row in cursor.fetchall()]
-    profile = {"allergies": allergies, "conditions": conditions, "metrics": metrics, "progress": progress}
+    profile = {
+        "allergies": allergies,
+        "conditions": conditions,
+        "metrics": metrics,
+        "progress": progress,
+    }
     cursor.execute(
         "SELECT due_date, notes FROM pregnancy_profile WHERE client_id = %s AND is_active "
         "ORDER BY pregnancy_id DESC LIMIT 1",

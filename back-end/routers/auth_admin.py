@@ -1,31 +1,147 @@
 """1. Authentication, administration and practice setup."""
+
 import secrets
 import uuid
-from fastapi import APIRouter, Depends, File, HTTPException, Request as FastAPIRequest, status, UploadFile
+import time
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Request as FastAPIRequest,
+    status,
+    UploadFile,
+)
 from fastapi.responses import Response
 from datetime import date
-from onboarding_services import validate_attachment, new_checkin_credential
+from onboarding_services import validate_attachment
 from role_management import require_roles
 from registration_consent import consent_details
 import database
 import config
-from state import users_db, admins_db, businesses_db, branches_db, admin_sessions_db, dietitian_sessions_db, client_sessions_db, client_registration_consents_db, staff_sessions_db, staff_accounts_db, dietitian_documents_db, approval_log_db, appointments_db, meal_plans_db, welcome_outbox_db, profile_photos_db, client_documents_db, checkin_credentials_db
-from schemas import DietitianRegister, ClientRegister, LoginRequest, AdminSetup, AdminApproval, BranchCreate, DietitianBranchCreate
-from security import hash_password, verify_password, public_user, request_is_loopback, require_admin, require_dietitian
+from state import (
+    users_db,
+    admins_db,
+    businesses_db,
+    branches_db,
+    admin_sessions_db,
+    dietitian_sessions_db,
+    client_sessions_db,
+    verified_email_db,
+    client_registration_consents_db,
+    staff_sessions_db,
+    staff_accounts_db,
+    dietitian_documents_db,
+    approval_log_db,
+    appointments_db,
+    meal_plans_db,
+    welcome_outbox_db,
+    profile_photos_db,
+    client_documents_db,
+)
+from schemas import (
+    DietitianRegister,
+    ClientRegister,
+    LoginRequest,
+    EmailVerificationSend,
+    EmailVerificationCheck,
+    AdminCreate,
+    AdminSetup,
+    AdminApproval,
+    BranchCreate,
+    DietitianBranchCreate,
+)
+from security import (
+    hash_password,
+    verify_password,
+    public_user,
+    request_is_loopback,
+    require_admin,
+    require_dietitian,
+)
 from helpers import email_is_registered, build_full_name
-
+from stytch_service import StytchEmailError, send_email_code, verify_email_code
 
 router = APIRouter()
 
 
-# --- 1. AUTHENTICATION, ADMINISTRATION & PRACTICE SETUP ---
+def _set_email_verification(email: str, verified: bool, stytch_user_id: str | None = None) -> None:
+    """Update the local account after Stytch verifies an email address."""
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "UPDATE dietitian SET email_verified = %s, stytch_user_id = COALESCE(%s, stytch_user_id) WHERE LOWER(email) = LOWER(%s)",
+                (verified, stytch_user_id, email),
+            )
+            cursor.execute(
+                "UPDATE client SET email_verified = %s, stytch_user_id = COALESCE(%s, stytch_user_id) WHERE LOWER(email) = LOWER(%s)",
+                (verified, stytch_user_id, email),
+            )
+        return
+    for user in users_db.values():
+        if user.get("email", "").casefold() == email.casefold():
+            user["email_verified"] = verified
+            if stytch_user_id:
+                user["stytch_user_id"] = stytch_user_id
 
+
+def _require_verified_registration_email(email: str) -> dict | None:
+    if not config.STYTCH_ENABLED:
+        return None
+    verification = verified_email_db.get(email.casefold())
+    if not verification or verification["expires_at"] < time.time():
+        verified_email_db.pop(email.casefold(), None)
+        raise HTTPException(
+            status_code=403, detail="Verify your email address before creating the account."
+        )
+    return verification
+
+
+@router.post("/api/v1/auth/email/send-code", tags=["1. Auth & Admin"])
+def send_email_verification_code(data: EmailVerificationSend):
+    try:
+        result = send_email_code(data.email)
+    except StytchEmailError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return {
+        "enabled": result["enabled"],
+        "method_id": result.get("method_id"),
+        "message": (
+            "A verification code was sent to your email."
+            if result["enabled"]
+            else "Email verification is disabled in this environment."
+        ),
+    }
+
+
+@router.post("/api/v1/auth/email/verify-code", tags=["1. Auth & Admin"])
+def verify_email_verification_code(data: EmailVerificationCheck):
+    try:
+        result = verify_email_code(data.method_id, data.code)
+    except StytchEmailError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    if not result.get("enabled"):
+        return {
+            "verified": False,
+            "enabled": False,
+            "message": "Email verification is disabled in this environment.",
+        }
+    verified_email_db[data.email.casefold()] = {
+        "stytch_user_id": result.get("user_id"),
+        "expires_at": time.time() + 600,
+    }
+    _set_email_verification(data.email, True, result.get("user_id"))
+    return {"verified": True, "enabled": True, "message": "Email verified successfully."}
+
+
+# --- 1. AUTHENTICATION, ADMINISTRATION & PRACTICE SETUP ---
 
 
 @router.post("/api/v1/auth/register/dietitian", tags=["1. Auth & Admin"])
 def register_dietitian(data: DietitianRegister):
     if email_is_registered(data.email):
         raise HTTPException(status_code=409, detail="An account with this email already exists")
+    verified_email = _require_verified_registration_email(data.email)
     user_id = f"diet_{uuid.uuid4().hex[:8]}"
     full_name = build_full_name(data.first_name, data.last_name)
     registration = {**data.model_dump(exclude={"password"}), "full_name": full_name}
@@ -34,9 +150,13 @@ def register_dietitian(data: DietitianRegister):
         business_id = str(uuid.uuid4())
         branch_id = str(uuid.uuid4())
         with database.cursor() as cursor:
-            cursor.execute("SELECT 1 FROM dietitian WHERE registration_number = %s", (data.license_number,))
+            cursor.execute(
+                "SELECT 1 FROM dietitian WHERE registration_number = %s", (data.license_number,)
+            )
             if cursor.fetchone():
-                raise HTTPException(status_code=409, detail="This license number is already registered")
+                raise HTTPException(
+                    status_code=409, detail="This license number is already registered"
+                )
             cursor.execute(
                 "INSERT INTO business (business_id, name, registration_number, contact_email) "
                 "VALUES (%s, %s, %s, %s)",
@@ -48,14 +168,25 @@ def register_dietitian(data: DietitianRegister):
             )
             cursor.execute(
                 "INSERT INTO dietitian "
-                "(dietitian_id, branch_id, first_name, last_name, email, password, registration_number) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (user_id, branch_id, data.first_name.strip(), data.last_name.strip(), data.email, password_hash, data.license_number),
+                "(dietitian_id, branch_id, first_name, last_name, email, password, registration_number, email_verified) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    user_id,
+                    branch_id,
+                    data.first_name.strip(),
+                    data.last_name.strip(),
+                    data.email,
+                    password_hash,
+                    data.license_number,
+                    bool(verified_email) or not config.STYTCH_ENABLED,
+                ),
             )
         user = {
             "id": user_id,
             "type": "dietitian",
             "status": "PENDING",
+            "email_verified": bool(verified_email) or not config.STYTCH_ENABLED,
+            "stytch_user_id": verified_email.get("stytch_user_id") if verified_email else None,
             **registration,
             "password_hash": password_hash,
         }
@@ -82,13 +213,17 @@ def register_dietitian(data: DietitianRegister):
         "id": user_id,
         "type": "dietitian",
         "status": "PENDING",
+        "email_verified": bool(verified_email) or not config.STYTCH_ENABLED,
+        "stytch_user_id": verified_email.get("stytch_user_id") if verified_email else None,
         "business_id": business_id,
         "branch_id": branch_id,
         **registration,
         "password_hash": hash_password(data.password),
     }
     users_db[user_id] = user
+    verified_email_db.pop(data.email.casefold(), None)
     return {"message": "Dietitian registered successfully", "user": public_user(user)}
+
 
 @router.post("/api/v1/auth/register/client", tags=["1. Auth & Admin"])
 def register_client(data: ClientRegister, request: FastAPIRequest):
@@ -98,7 +233,8 @@ def register_client(data: ClientRegister, request: FastAPIRequest):
 
 @router.post("/api/v1/auth/register/client/assisted", tags=["1. Auth & Admin"])
 def register_client_assisted(
-    data: ClientRegister, request: FastAPIRequest,
+    data: ClientRegister,
+    request: FastAPIRequest,
     identity=Depends(require_roles("reception")),
 ):
     """FR-1.8: branch-linked reception staff can help a consenting patient.
@@ -109,17 +245,26 @@ def register_client_assisted(
     return _create_client(data, request, registration_mode="ASSISTED", staff_id=identity[1])
 
 
-def _create_client(data: ClientRegister, request: FastAPIRequest, registration_mode="SELF", staff_id=None):
+def _create_client(
+    data: ClientRegister, request: FastAPIRequest, registration_mode="SELF", staff_id=None
+):
     # FR-1.9: validate both unique identifiers before taking any writes.
     if email_is_registered(data.email):
         raise HTTPException(status_code=409, detail="An account with this email already exists")
+    verified_email = _require_verified_registration_email(data.email)
     photo = validate_attachment(data.profile_photo, photo=True)
     document = validate_attachment(data.initial_document, photo=False)
     full_name = build_full_name(data.first_name, data.last_name)
     # Never echo submitted sensitive attachments, consent, or password.
-    registration = data.model_dump(exclude={
-        "password", "consent_to_care", "privacy_notice_version", "profile_photo", "initial_document"
-    })
+    registration = data.model_dump(
+        exclude={
+            "password",
+            "consent_to_care",
+            "privacy_notice_version",
+            "profile_photo",
+            "initial_document",
+        }
+    )
     registration["full_name"] = full_name
     consent = consent_details(request)
     consent["registration_mode"] = registration_mode
@@ -133,26 +278,68 @@ def _create_client(data: ClientRegister, request: FastAPIRequest, registration_m
                 if cursor.fetchone():
                     raise HTTPException(409, "An account with this identity number already exists")
                 if data.dietitian_id:
-                    cursor.execute("SELECT 1 FROM dietitian WHERE dietitian_id = %s", (data.dietitian_id,))
+                    cursor.execute(
+                        "SELECT 1 FROM dietitian WHERE dietitian_id = %s", (data.dietitian_id,)
+                    )
                     if not cursor.fetchone():
                         raise HTTPException(404, "Dietitian not found")
                 if staff_id:
-                    cursor.execute("SELECT branch_id, is_active FROM staff_account WHERE staff_id = %s", (staff_id,))
+                    cursor.execute(
+                        "SELECT branch_id, is_active FROM staff_account WHERE staff_id = %s",
+                        (staff_id,),
+                    )
                     staff = cursor.fetchone()
                     if not staff or not staff["is_active"] or not staff["branch_id"]:
-                        raise HTTPException(403, "Receptionist requires an active branch assignment")
+                        raise HTTPException(
+                            403, "Receptionist requires an active branch assignment"
+                        )
                 cursor.execute(
                     "INSERT INTO client (client_id, dietitian_id, name, email, password, id_number, "
                     "date_of_birth, gender, phone) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (client_id, data.dietitian_id, full_name, data.email, hash_password(data.password),
-                     data.id_number, data.date_of_birth, data.gender, data.phone),
+                    (
+                        client_id,
+                        data.dietitian_id,
+                        full_name,
+                        data.email,
+                        hash_password(data.password),
+                        data.id_number,
+                        data.date_of_birth,
+                        data.gender,
+                        data.phone,
+                    ),
+                )
+                cursor.execute(
+                    "UPDATE client SET phone_number = %s, consent_accepted = %s, consent_at = %s, "
+                    "consent_ip = %s, privacy_notice_acknowledged = %s, consent_location = %s, "
+                    "consent_date = %s, consent_signatory_name = %s, consent_signature = %s, "
+                    "email_verified = %s, stytch_user_id = %s WHERE client_id = %s",
+                    (
+                        data.phone_number or data.phone,
+                        data.consent_accepted,
+                        consent["consented_at"],
+                        consent["ip_address"],
+                        data.privacy_notice_acknowledged,
+                        data.consent_location,
+                        data.consent_date,
+                        data.consent_signatory_name,
+                        data.consent_signature,
+                        bool(verified_email) or not config.STYTCH_ENABLED,
+                        verified_email.get("stytch_user_id") if verified_email else None,
+                        client_id,
+                    ),
                 )
                 cursor.execute(
                     "INSERT INTO client_registration_consent "
                     "(client_id, privacy_notice_version, consented_at, ip_address, registration_mode, registered_by_staff_id) "
                     "VALUES (%s, %s, %s, %s, %s, %s)",
-                    (client_id, consent["privacy_notice_version"], consent["consented_at"],
-                     consent["ip_address"], registration_mode, staff_id),
+                    (
+                        client_id,
+                        consent["privacy_notice_version"],
+                        consent["consented_at"],
+                        consent["ip_address"],
+                        registration_mode,
+                        staff_id,
+                    ),
                 )
                 if photo:
                     cursor.execute(
@@ -164,8 +351,13 @@ def _create_client(data: ClientRegister, request: FastAPIRequest, registration_m
                     cursor.execute(
                         "INSERT INTO client_medical_document "
                         "(document_id, client_id, file_name, content_type, file_data) VALUES (%s, %s, %s, %s, %s)",
-                        (str(uuid.uuid4()), client_id, document["filename"],
-                         document["content_type"], document["bytes"]),
+                        (
+                            str(uuid.uuid4()),
+                            client_id,
+                            document["filename"],
+                            document["content_type"],
+                            document["bytes"],
+                        ),
                     )
                 # Queued transactionally: a failed insert means no partial signup.
                 cursor.execute(
@@ -179,27 +371,118 @@ def _create_client(data: ClientRegister, request: FastAPIRequest, registration_m
             if getattr(error, "pgcode", None) == "23505":
                 raise HTTPException(409, "Email or identity number already registered") from None
             raise
-        return {"message": "Patient registered successfully", "user": {"id": client_id, "type": "client", **registration},
-                "welcome_email": "queued"}
+        verified_email_db.pop(data.email.casefold(), None)
+        return {
+            "message": "Patient registered successfully",
+            "user": {
+                "id": client_id,
+                "type": "client",
+                **registration,
+            },
+            "welcome_email": "queued",
+        }
 
     # Nonproduction in-memory mode: preserve the same contract for isolated tests.
-    if any(u.get("type") == "client" and u.get("id_number") == data.id_number for u in users_db.values()):
+    if any(
+        u.get("type") == "client" and u.get("id_number") == data.id_number
+        for u in users_db.values()
+    ):
         raise HTTPException(409, "An account with this identity number already exists")
-    if data.dietitian_id and (data.dietitian_id not in users_db or users_db[data.dietitian_id].get("type") != "dietitian"):
+    if data.dietitian_id and (
+        data.dietitian_id not in users_db or users_db[data.dietitian_id].get("type") != "dietitian"
+    ):
         raise HTTPException(404, "Dietitian not found")
     if staff_id:
         staff = staff_accounts_db.get(staff_id)
         if not staff or not staff.get("is_active") or not staff.get("branch_id"):
             raise HTTPException(403, "Receptionist requires an active branch assignment")
-    user = {"id": client_id, "type": "client", **registration, "password_hash": hash_password(data.password)}
+    user = {
+        "id": client_id,
+        "type": "client",
+        **registration,
+        "password_hash": hash_password(data.password),
+    }
+    user["email_verified"] = bool(verified_email) or not config.STYTCH_ENABLED
+    user["stytch_user_id"] = verified_email.get("stytch_user_id") if verified_email else None
+    verified_email_db.pop(data.email.casefold(), None)
     users_db[client_id] = user
     client_registration_consents_db[client_id] = consent
     if photo:
         profile_photos_db[client_id] = photo
     if document:
-        client_documents_db[str(uuid.uuid4())] = {"client_id": client_id, "file_name": document["filename"], "content_type": document["content_type"], "file_data": document["bytes"]}
+        client_documents_db[str(uuid.uuid4())] = {
+            "client_id": client_id,
+            "file_name": document["filename"],
+            "content_type": document["content_type"],
+            "file_data": document["bytes"],
+        }
     welcome_outbox_db[client_id] = {"email": data.email, "name": full_name, "status": "PENDING"}
-    return {"message": "Patient registered successfully", "user": public_user(user), "welcome_email": "queued"}
+    return {
+        "message": "Patient registered successfully",
+        "user": public_user(user),
+        "welcome_email": "queued",
+    }
+
+
+@router.get("/api/v1/admin/administrators", tags=["1. Auth & Admin"])
+def list_administrators(admin_id: str = Depends(require_admin)):
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT admin_id, TRIM(first_name || ' ' || last_name) AS full_name, email, role "
+                "FROM admin ORDER BY LOWER(last_name), LOWER(first_name)"
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    return [
+        {
+            "admin_id": user["id"],
+            "full_name": user["full_name"],
+            "email": user["email"],
+            "role": user.get("type", "admin"),
+        }
+        for user in admins_db.values()
+    ]
+
+
+@router.post(
+    "/api/v1/admin/administrators", status_code=status.HTTP_201_CREATED, tags=["1. Auth & Admin"]
+)
+def create_administrator(data: AdminCreate, admin_id: str = Depends(require_admin)):
+    if email_is_registered(data.email):
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+    new_admin_id = str(uuid.uuid4())
+    full_name = build_full_name(data.first_name, data.last_name)
+    password_hash = hash_password(data.password)
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO admin (admin_id, first_name, last_name, email, password, role) VALUES (%s, %s, %s, %s, %s, %s)",
+                (
+                    new_admin_id,
+                    data.first_name.strip(),
+                    data.last_name.strip(),
+                    data.email,
+                    password_hash,
+                    data.role,
+                ),
+            )
+    else:
+        admins_db[new_admin_id] = {
+            "id": new_admin_id,
+            "type": data.role,
+            "full_name": full_name,
+            "email": data.email,
+            "password_hash": password_hash,
+        }
+    return {
+        "message": "Staff account created successfully",
+        "administrator": {
+            "admin_id": new_admin_id,
+            "full_name": full_name,
+            "email": data.email,
+            "role": data.role,
+        },
+    }
 
 
 def admin_setup_available() -> bool:
@@ -218,7 +501,9 @@ def get_admin_setup_status(request: FastAPIRequest):
 @router.post("/api/v1/admin/setup", status_code=status.HTTP_201_CREATED, tags=["1. Auth & Admin"])
 def setup_first_admin(data: AdminSetup, request: FastAPIRequest):
     if not request_is_loopback(request):
-        raise HTTPException(status_code=403, detail="Admin setup is available only from this computer")
+        raise HTTPException(
+            status_code=403, detail="Admin setup is available only from this computer"
+        )
     admin_id = str(uuid.uuid4())
     full_name = build_full_name(data.first_name, data.last_name)
     password_hash = hash_password(data.password)
@@ -227,11 +512,19 @@ def setup_first_admin(data: AdminSetup, request: FastAPIRequest):
             cursor.execute("SELECT pg_advisory_xact_lock(%s)", (731904281,))
             cursor.execute("SELECT EXISTS (SELECT 1 FROM admin)")
             if cursor.fetchone()["exists"]:
-                raise HTTPException(status_code=409, detail="Admin setup has already been completed")
+                raise HTTPException(
+                    status_code=409, detail="Admin setup has already been completed"
+                )
             cursor.execute(
                 "INSERT INTO admin (admin_id, first_name, last_name, email, password) "
                 "VALUES (%s, %s, %s, %s, %s)",
-                (admin_id, data.first_name.strip(), data.last_name.strip(), data.email, password_hash),
+                (
+                    admin_id,
+                    data.first_name.strip(),
+                    data.last_name.strip(),
+                    data.email,
+                    password_hash,
+                ),
             )
     else:
         if admins_db:
@@ -248,6 +541,7 @@ def setup_first_admin(data: AdminSetup, request: FastAPIRequest):
         "user": {"id": admin_id, "type": "admin", "full_name": full_name, "email": data.email},
     }
 
+
 @router.post("/api/v1/auth/login", tags=["1. Auth & Admin"])
 def login(data: LoginRequest):
     if config.DATABASE_ENABLED:
@@ -255,7 +549,7 @@ def login(data: LoginRequest):
             cursor.execute(
                 "SELECT dietitian_id AS id, 'dietitian' AS type, "
                 "TRIM(first_name || ' ' || last_name) AS full_name, email, "
-                "registration_number AS license_number, status, password AS password_hash "
+                "registration_number AS license_number, status, email_verified, password AS password_hash "
                 "FROM dietitian WHERE LOWER(email) = LOWER(%s)",
                 (data.email,),
             )
@@ -263,14 +557,14 @@ def login(data: LoginRequest):
             if not user:
                 cursor.execute(
                     "SELECT client_id AS id, 'client' AS type, name AS full_name, email, "
-                    "dietitian_id, id_number, date_of_birth, gender, password AS password_hash "
+                    "dietitian_id, id_number, date_of_birth, gender, phone_number, consent_accepted, email_verified, password AS password_hash "
                     "FROM client WHERE LOWER(email) = LOWER(%s)",
                     (data.email,),
                 )
                 user = cursor.fetchone()
             if not user:
                 cursor.execute(
-                    "SELECT admin_id AS id, 'admin' AS type, "
+                    "SELECT admin_id AS id, COALESCE(role, 'admin') AS type, "
                     "TRIM(first_name || ' ' || last_name) AS full_name, email, password AS password_hash "
                     "FROM admin WHERE LOWER(email) = LOWER(%s)",
                     (data.email,),
@@ -289,19 +583,44 @@ def login(data: LoginRequest):
                     )
                     user = cursor.fetchone()
     else:
-        user = next((user for user in users_db.values() if user["email"].casefold() == data.email.casefold()), None)
-        if not user:
-            user = next((user for user in admins_db.values() if user["email"].casefold() == data.email.casefold()), None)
-        if not user:
-            user = next((u for u in staff_accounts_db.values() if u["email"].casefold() == data.email.casefold()), None)
+        # Search each account store in the same order as the database queries.
+        user = None
+        login_email = data.email.casefold()
+        for account_store in (users_db, admins_db, staff_accounts_db):
+            for account in account_store.values():
+                if account["email"].casefold() == login_email:
+                    user = account
+                    break
+            if user is not None:
+                break
     if user and "role" in user and "type" not in user:
         user = {**user, "id": user["staff_id"], "type": user["role"]}
-    if user and user.get("type", user.get("role")) in {"reception", "branch_manager", "compliance_officer", "executive", "content_manager"} and not user.get("is_active", False):
+    if (
+        user
+        and user.get("type", user.get("role"))
+        in {"reception", "branch_manager", "compliance_officer", "executive", "content_manager"}
+        and not user.get("is_active", False)
+    ):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user or not verify_password(data.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    if (
+        config.STYTCH_ENABLED
+        and user.get("type") in {"client", "dietitian"}
+        and not user.get("email_verified", False)
+    ):
+        raise HTTPException(
+            status_code=403, detail="Please verify your email address before signing in."
+        )
     access_token = f"mock_jwt_token_{uuid.uuid4().hex[:12]}"
-    if user["type"] == "admin":
+    if user["type"] in {
+        "admin",
+        "reception_staff",
+        "branch_manager",
+        "compliance",
+        "executive",
+        "content_manager",
+    } and not user.get("staff_id"):
         access_token = secrets.token_urlsafe(32)
         admin_sessions_db[access_token] = user["id"]
     elif user["type"] == "dietitian":
@@ -310,7 +629,13 @@ def login(data: LoginRequest):
     elif user["type"] == "client":
         access_token = secrets.token_urlsafe(32)
         client_sessions_db[access_token] = user["id"]
-    elif user["type"] in {"reception", "branch_manager", "compliance_officer", "executive", "content_manager"}:
+    elif user["type"] in {
+        "reception",
+        "branch_manager",
+        "compliance_officer",
+        "executive",
+        "content_manager",
+    }:
         access_token = secrets.token_urlsafe(32)
         staff_sessions_db[access_token] = user.get("id") or user["staff_id"]
     return {
@@ -417,17 +742,23 @@ def create_my_dietitian_branch(
             if not dietitian:
                 raise HTTPException(status_code=404, detail="Dietitian record not found")
             if dietitian["status"] not in {"APPROVED", "PENDING", "REJECTED"}:
-                raise HTTPException(status_code=403, detail="Your account is not allowed to add branches")
+                raise HTTPException(
+                    status_code=403, detail="Your account is not allowed to add branches"
+                )
             cursor.execute(
                 "SELECT 1 FROM branch WHERE business_id = %s AND branch_id <> %s "
                 "AND LOWER(name) = LOWER(%s) LIMIT 1",
                 (dietitian["business_id"], dietitian["branch_id"], name),
             )
             if cursor.fetchone():
-                raise HTTPException(status_code=409, detail="A branch with this name already exists in your practice")
-            if not (dietitian["current_branch_name"] or "").strip() or not (
-                dietitian["current_branch_address"] or ""
-            ).strip():
+                raise HTTPException(
+                    status_code=409,
+                    detail="A branch with this name already exists in your practice",
+                )
+            if (
+                not (dietitian["current_branch_name"] or "").strip()
+                or not (dietitian["current_branch_address"] or "").strip()
+            ):
                 branch_id = dietitian["branch_id"]
                 cursor.execute(
                     "UPDATE branch SET name = %s, address = %s WHERE branch_id = %s",
@@ -470,7 +801,9 @@ def create_my_dietitian_branch(
         and branch["name"].casefold() == name.casefold()
         for branch in branches_db.values()
     ):
-        raise HTTPException(status_code=409, detail="A branch with this name already exists in your practice")
+        raise HTTPException(
+            status_code=409, detail="A branch with this name already exists in your practice"
+        )
     if current_branch and (
         not (current_branch.get("name") or "").strip()
         or not (current_branch.get("address") or "").strip()
@@ -518,7 +851,8 @@ def get_my_dietitian_approval(dietitian_id: str = Depends(require_dietitian)):
         raise HTTPException(status_code=404, detail="Dietitian not found")
     latest_rejection = next(
         (
-            entry for entry in reversed(approval_log_db)
+            entry
+            for entry in reversed(approval_log_db)
             if entry.get("entity_type") == "DIETITIAN"
             and entry.get("entity_id") == dietitian_id
             and entry.get("action") == "REJECTED"
@@ -547,13 +881,17 @@ def resubmit_dietitian_approval(dietitian_id: str = Depends(require_dietitian)):
             dietitian = cursor.fetchone()
             if not dietitian:
                 raise HTTPException(status_code=404, detail="Dietitian not found")
-            raise HTTPException(status_code=409, detail="Only rejected registrations can be resubmitted")
+            raise HTTPException(
+                status_code=409, detail="Only rejected registrations can be resubmitted"
+            )
 
     user = users_db.get(dietitian_id)
     if not user or user.get("type") != "dietitian":
         raise HTTPException(status_code=404, detail="Dietitian not found")
     if user.get("status") != "REJECTED":
-        raise HTTPException(status_code=409, detail="Only rejected registrations can be resubmitted")
+        raise HTTPException(
+            status_code=409, detail="Only rejected registrations can be resubmitted"
+        )
     user["status"] = "PENDING"
     return {"message": "Registration resubmitted for admin review", "status": "PENDING"}
 
@@ -584,15 +922,16 @@ def list_my_dietitian_documents(dietitian_id: str = Depends(require_dietitian)):
                 },
             }
             for document in dietitian_documents_db.values()
-            if document["dietitian_id"] == dietitian_id
-            and document.get("branch_id") in branches_db
+            if document["dietitian_id"] == dietitian_id and document.get("branch_id") in branches_db
         ],
         key=lambda document: document["uploaded_at"],
         reverse=True,
     )
 
 
-@router.post("/api/v1/dietitians/me/documents", status_code=status.HTTP_201_CREATED, tags=["1. Auth & Admin"])
+@router.post(
+    "/api/v1/dietitians/me/documents", status_code=status.HTTP_201_CREATED, tags=["1. Auth & Admin"]
+)
 async def submit_dietitian_document(
     file: UploadFile = File(...),
     dietitian_id: str = Depends(require_dietitian),
@@ -617,7 +956,11 @@ async def submit_dietitian_document(
     else:
         user = users_db.get(dietitian_id)
         branch = branches_db.get(user.get("branch_id")) if user else None
-        if not branch or not branch.get("name", "").strip() or not branch.get("address", "").strip():
+        if (
+            not branch
+            or not branch.get("name", "").strip()
+            or not branch.get("address", "").strip()
+        ):
             raise HTTPException(
                 status_code=409,
                 detail="Add your branch name and location before submitting verification documents",
@@ -670,7 +1013,9 @@ async def submit_dietitian_document(
             "business_id": branch["business_id"],
             "name": branch["name"],
             "address": branch["address"],
-            "practice_name": branch["practice_name"] if config.DATABASE_ENABLED else branch["business_name"],
+            "practice_name": (
+                branch["practice_name"] if config.DATABASE_ENABLED else branch["business_name"]
+            ),
         },
     }
 
@@ -721,11 +1066,13 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
                     "WHERE dd.dietitian_id = %s ORDER BY dd.uploaded_at DESC",
                     (row["dietitian_id"],),
                 )
-                pending.append({
-                    **dict(row),
-                    "full_name": f"{row['first_name']} {row['last_name']}".strip(),
-                    "documents": [dict(document) for document in cursor.fetchall()],
-                })
+                pending.append(
+                    {
+                        **dict(row),
+                        "full_name": f"{row['first_name']} {row['last_name']}".strip(),
+                        "documents": [dict(document) for document in cursor.fetchall()],
+                    }
+                )
             return pending
     return [
         {
@@ -763,7 +1110,9 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
 def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)):
     notes = data.notes.strip() if data.notes else ""
     if data.status == "REJECTED" and not notes:
-        raise HTTPException(status_code=422, detail="A reason is required when rejecting a dietitian")
+        raise HTTPException(
+            status_code=422, detail="A reason is required when rejecting a dietitian"
+        )
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             if data.status == "APPROVED":
@@ -786,7 +1135,10 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
                     (data.dietitian_id,),
                 )
                 if cursor.fetchone()["document_count"] == 0:
-                    raise HTTPException(status_code=409, detail="A verification document is required before approval")
+                    raise HTTPException(
+                        status_code=409,
+                        detail="A verification document is required before approval",
+                    )
             cursor.execute(
                 "UPDATE dietitian SET status = %s WHERE dietitian_id = %s RETURNING dietitian_id",
                 (data.status, data.dietitian_id),
@@ -803,24 +1155,34 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
         raise HTTPException(status_code=404, detail="Dietitian not found")
     if data.status == "APPROVED":
         branch = branches_db.get(users_db[data.dietitian_id].get("branch_id"))
-        if not branch or not branch.get("name", "").strip() or not branch.get("address", "").strip():
+        if (
+            not branch
+            or not branch.get("name", "").strip()
+            or not branch.get("address", "").strip()
+        ):
             raise HTTPException(
                 status_code=409,
                 detail="A branch name and location are required before approval",
             )
     if data.status == "APPROVED" and not any(
-        document["dietitian_id"] == data.dietitian_id for document in dietitian_documents_db.values()
+        document["dietitian_id"] == data.dietitian_id
+        for document in dietitian_documents_db.values()
     ):
-        raise HTTPException(status_code=409, detail="A verification document is required before approval")
+        raise HTTPException(
+            status_code=409, detail="A verification document is required before approval"
+        )
     users_db[data.dietitian_id]["status"] = data.status
-    approval_log_db.append({
-        "admin_id": admin_id,
-        "entity_type": "DIETITIAN",
-        "entity_id": data.dietitian_id,
-        "action": data.status,
-        "comments": notes or None,
-    })
+    approval_log_db.append(
+        {
+            "admin_id": admin_id,
+            "entity_type": "DIETITIAN",
+            "entity_id": data.dietitian_id,
+            "action": data.status,
+            "comments": notes or None,
+        }
+    )
     return {"message": f"Dietitian status updated to {data.status}"}
+
 
 @router.post("/api/v1/branches", tags=["1. Auth & Admin"])
 def create_branch(data: BranchCreate, admin_id: str = Depends(require_admin)):
@@ -829,7 +1191,9 @@ def create_branch(data: BranchCreate, admin_id: str = Depends(require_admin)):
         with database.cursor() as cursor:
             business_id = data.business_id
             if business_id:
-                cursor.execute("SELECT business_id FROM business WHERE business_id = %s", (business_id,))
+                cursor.execute(
+                    "SELECT business_id FROM business WHERE business_id = %s", (business_id,)
+                )
             else:
                 cursor.execute("SELECT business_id FROM business ORDER BY name LIMIT 1")
             business = cursor.fetchone()
@@ -849,7 +1213,12 @@ def create_branch(data: BranchCreate, admin_id: str = Depends(require_admin)):
             )
         return {
             "message": "Branch created successfully",
-            "branch": {"branch_id": branch_id, "business_id": business_id, "name": data.name, "address": data.address},
+            "branch": {
+                "branch_id": branch_id,
+                "business_id": business_id,
+                "name": data.name,
+                "address": data.address,
+            },
         }
     business_id = data.business_id
     if business_id and business_id not in businesses_db:
@@ -901,15 +1270,24 @@ def get_admin_dashboard(admin_id: str = Depends(require_admin)):
             cursor.execute("SELECT COUNT(*) AS total FROM approval_log")
             counts["audit_events"] = cursor.fetchone()["total"]
         return counts
-    dietitians = [user for user in users_db.values() if user.get("type") == "dietitian"]
+    dietitian_count = 0
+    client_count = 0
+    pending_count = 0
+    for user in users_db.values():
+        if user.get("type") == "dietitian":
+            dietitian_count += 1
+            if user.get("status") == "PENDING":
+                pending_count += 1
+        elif user.get("type") == "client":
+            client_count += 1
     return {
         "businesses": len(businesses_db),
         "branches": len(branches_db),
-        "dietitians": len(dietitians),
-        "clients": sum(user.get("type") == "client" for user in users_db.values()),
+        "dietitians": dietitian_count,
+        "clients": client_count,
         "appointments": len(appointments_db),
         "meal_plans": len(meal_plans_db),
-        "pending_approvals": sum(user.get("type") == "dietitian" and user.get("status") == "PENDING" for user in users_db.values()),
+        "pending_approvals": pending_count,
         "audit_events": len(approval_log_db),
     }
 
@@ -933,16 +1311,18 @@ def list_admin_dietitians(admin_id: str = Depends(require_admin)):
         if user.get("type") != "dietitian":
             continue
         branch = branches_db.get(user.get("branch_id"), {})
-        rows.append({
-            "dietitian_id": user["id"],
-            "full_name": user["full_name"],
-            "email": user["email"],
-            "license_number": user.get("license_number", ""),
-            "status": user.get("status", "PENDING"),
-            "branch_name": branch.get("name", "Main Practice"),
-            "branch_address": branch.get("address"),
-            "business_name": branch.get("business_name", f"{user['full_name']} Practice"),
-        })
+        rows.append(
+            {
+                "dietitian_id": user["id"],
+                "full_name": user["full_name"],
+                "email": user["email"],
+                "license_number": user.get("license_number", ""),
+                "status": user.get("status", "PENDING"),
+                "branch_name": branch.get("name", "Main Practice"),
+                "branch_address": branch.get("address"),
+                "business_name": branch.get("business_name", f"{user['full_name']} Practice"),
+            }
+        )
     return sorted(rows, key=lambda item: item["full_name"].casefold())
 
 
@@ -973,7 +1353,10 @@ def list_admin_branches(admin_id: str = Depends(require_admin)):
                 "GROUP BY br.branch_id, b.business_id ORDER BY LOWER(b.name), LOWER(br.name)"
             )
             return [dict(row) for row in cursor.fetchall()]
-    return sorted(branches_db.values(), key=lambda item: (item["business_name"].casefold(), item["name"].casefold()))
+    return sorted(
+        branches_db.values(),
+        key=lambda item: (item["business_name"].casefold(), item["name"].casefold()),
+    )
 
 
 @router.get("/api/v1/admin/clients", tags=["1. Auth & Admin"])
@@ -987,7 +1370,12 @@ def list_admin_clients(admin_id: str = Depends(require_admin)):
                 "ORDER BY LOWER(c.name)"
             )
             return [
-                {**dict(row), "date_of_birth": row["date_of_birth"].isoformat() if row["date_of_birth"] else None}
+                {
+                    **dict(row),
+                    "date_of_birth": (
+                        row["date_of_birth"].isoformat() if row["date_of_birth"] else None
+                    ),
+                }
                 for row in cursor.fetchall()
             ]
     return [
@@ -996,7 +1384,9 @@ def list_admin_clients(admin_id: str = Depends(require_admin)):
             "name": user["full_name"],
             "email": user["email"],
             "status": "ACTIVE",
-            "date_of_birth": user.get("date_of_birth").isoformat() if user.get("date_of_birth") else None,
+            "date_of_birth": (
+                user.get("date_of_birth").isoformat() if user.get("date_of_birth") else None
+            ),
             "dietitian_name": users_db.get(user.get("dietitian_id"), {}).get("full_name"),
         }
         for user in sorted(users_db.values(), key=lambda item: item.get("full_name", "").casefold())

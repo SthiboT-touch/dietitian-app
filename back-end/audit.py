@@ -4,6 +4,7 @@ Never log request bodies, passwords, bearer tokens, or clinical response data.
 Audit writes are best-effort for this milestone; a production-grade fail-closed,
 transactional audit implementation and retention policies remain future work.
 """
+
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -32,6 +33,7 @@ def _is_sensitive_path(path: str) -> bool:
         or path.startswith("/api/v1/ai/")
         or path.startswith("/api/v1/dietitians/me/")
         or path.startswith("/api/v1/staff/")
+        or path.startswith("/api/v1/support/")
         or path.startswith("/api/v1/admin/audit-logs")
         or path.startswith("/api/v1/admin/access-events")
     )
@@ -40,6 +42,7 @@ def _is_sensitive_path(path: str) -> bool:
 def _safe_actor(authorization):
     from security import current_identity
     from fastapi import HTTPException
+
     try:
         return current_identity(authorization)
     except HTTPException:
@@ -53,9 +56,15 @@ def record_event(event):
                 "INSERT INTO access_audit_event "
                 "(event_id, actor_id, actor_role, http_method, resource_path, status_code, occurred_at) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (event["event_id"], event["actor_id"], event["actor_role"],
-                 event["http_method"], event["resource_path"], event["status_code"],
-                 event["occurred_at"]),
+                (
+                    event["event_id"],
+                    event["actor_id"],
+                    event["actor_role"],
+                    event["http_method"],
+                    event["resource_path"],
+                    event["status_code"],
+                    event["occurred_at"],
+                ),
             )
     else:
         access_audit_events_db.append(event)
@@ -93,4 +102,6 @@ async def audit_sensitive_requests(request: Request, call_next):
         except Exception as error:
             # Only the exception class is logged; database errors may contain
             # connection details, SQL or clinical identifiers.
-            logger.error("Failed to persist access audit event (error_type=%s)", type(error).__name__)
+            logger.error(
+                "Failed to persist access audit event (error_type=%s)", type(error).__name__
+            )

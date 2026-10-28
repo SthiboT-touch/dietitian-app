@@ -1,5 +1,5 @@
-"""Client.py"""
-"""2. Patient health history and 3. clinical labs and daily progress."""
+"""Routes for patient profiles, health records, documents and daily progress."""
+
 import json
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -10,23 +10,38 @@ import database
 import config
 from state import users_db, clients_db, client_documents_db
 from schemas import (
-    PregnancyLog, LactationLog, AllergyEntry, MedicalConditionEntry, MetricLog, ProgressLog,
-    LactationStatusEntry, DailyFeedingLog, MilkSupplyLog, WeaningLog,
-    MaternalDiscomfortLog, InfantSensitivityLog, MealLog,
+    PregnancyLog,
+    LactationLog,
+    AllergyEntry,
+    MedicalConditionEntry,
+    MetricLog,
+    ProgressLog,
+    LactationStatusEntry,
+    DailyFeedingLog,
+    MilkSupplyLog,
+    WeaningLog,
+    MaternalDiscomfortLog,
+    InfantSensitivityLog,
+    MealLog,
+    ClientProfileUpdate,
 )
 from lactation_guidance import (
-    INCREASE_MILK_GUIDANCE, OVERSUPPLY_GUIDANCE, DISCOMFORT_SELF_CARE,
-    weaning_guidance, discomfort_red_flags, infant_red_flags, daily_feeding_observations,
+    INCREASE_MILK_GUIDANCE,
+    OVERSUPPLY_GUIDANCE,
+    DISCOMFORT_SELF_CARE,
+    weaning_guidance,
+    discomfort_red_flags,
+    infant_red_flags,
+    daily_feeding_observations,
 )
 from helpers import fetch_client_profile
-from security import (current_identity, authorize_client_access,
-                      require_client_record_access)
-
+from security import current_identity, authorize_client_access, require_client_record_access
 
 router = APIRouter()
 
 
 # --- 2. PATIENT HEALTH, LIFE STAGE & CLINICAL HISTORY ---
+
 
 @router.get("/api/v1/clients", tags=["2. Patient Health & History"])
 def list_clients(
@@ -34,11 +49,14 @@ def list_clients(
     client_id: Optional[str] = None,
     authorization: Optional[str] = Header(default=None),
 ):
-    role, account_id = identity = current_identity(authorization)
+    identity = current_identity(authorization)
+    role, account_id = identity
     if client_id:
         authorize_client_access(client_id, identity)
     elif dietitian_id:
-        if role not in {"admin", "dietitian"} or (role == "dietitian" and dietitian_id != account_id):
+        if role not in {"admin", "dietitian"} or (
+            role == "dietitian" and dietitian_id != account_id
+        ):
             raise HTTPException(status_code=403, detail="Not authorized to list these clients")
     elif role != "admin":
         return []
@@ -48,7 +66,7 @@ def list_clients(
             if client_id:
                 cursor.execute(
                     "SELECT client_id AS id, name, email, dietitian_id, status, id_number, date_of_birth, "
-                    "gender, height, activity_level, dietary_preferences "
+                    "gender, phone_number, consent_accepted, height, activity_level, dietary_preferences "
                     "FROM client WHERE client_id = %s",
                     (client_id,),
                 )
@@ -68,27 +86,34 @@ def list_clients(
         clients = [user for user in clients if user.get("dietitian_id") == dietitian_id]
     else:
         return []
-    return [
-        {
+    results = []
+    for user in sorted(clients, key=lambda item: item["full_name"].casefold()):
+        client = {
             "id": user["id"],
             "name": user["full_name"],
             "dietitian_id": user.get("dietitian_id"),
             "status": "ACTIVE",
-            **({
-                "email": user.get("email"),
-                "id_number": user.get("id_number"),
-                "date_of_birth": user.get("date_of_birth"),
-                "gender": user.get("gender"),
-                "height": user.get("height"),
-                "activity_level": user.get("activity_level"),
-                "dietary_preferences": user.get("dietary_preferences"),
-            } if client_id else {}),
         }
-        for user in sorted(clients, key=lambda item: item["full_name"].casefold())
-    ]
+        # Extra profile details are only included when viewing one patient.
+        if client_id:
+            client["email"] = user.get("email")
+            client["id_number"] = user.get("id_number")
+            client["date_of_birth"] = user.get("date_of_birth")
+            client["gender"] = user.get("gender")
+            client["phone_number"] = user.get("phone_number")
+            client["consent_accepted"] = user.get("consent_accepted", False)
+            client["height"] = user.get("height")
+            client["activity_level"] = user.get("activity_level")
+            client["dietary_preferences"] = user.get("dietary_preferences")
+        results.append(client)
+    return results
 
 
-@router.get("/api/v1/clients/{client_id}/profile", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+@router.get(
+    "/api/v1/clients/{client_id}/profile",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def get_client_profile(client_id: str):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -97,7 +122,46 @@ def get_client_profile(client_id: str):
         clients_db[client_id] = {"allergies": [], "conditions": [], "metrics": [], "progress": []}
     return clients_db[client_id]
 
-@router.post("/api/v1/clients/{client_id}/pregnancy", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.patch(
+    "/api/v1/clients/{client_id}/profile",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
+def update_client_profile(client_id: str, data: ClientProfileUpdate):
+    # Skip fields the user did not fill in.
+    values = {}
+    for field_name, value in data.model_dump().items():
+        if value is not None:
+            values[field_name] = value
+    if config.DATABASE_ENABLED:
+        if not values:
+            return {"message": "Profile unchanged"}
+        with database.cursor() as cursor:
+            cursor.execute("SELECT client_id FROM client WHERE client_id = %s", (client_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="Patient record not found")
+            assignments = ", ".join(f"{key} = %s" for key in values)
+            cursor.execute(
+                f"UPDATE client SET {assignments} WHERE client_id = %s",
+                (*values.values(), client_id),
+            )
+        return {"message": "Profile saved", "profile": values}
+    user = users_db.get(client_id)
+    if not user or user.get("type") != "client":
+        raise HTTPException(status_code=404, detail="Patient record not found")
+    user.update(values)
+    clients_db.setdefault(
+        client_id, {"allergies": [], "conditions": [], "metrics": [], "progress": []}
+    )
+    return {"message": "Profile saved", "profile": values}
+
+
+@router.post(
+    "/api/v1/clients/{client_id}/pregnancy",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def log_pregnancy(client_id: str, data: PregnancyLog):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -111,7 +175,12 @@ def log_pregnancy(client_id: str, data: PregnancyLog):
     clients_db[client_id]["pregnancy"] = data.model_dump()
     return {"message": "Pregnancy parameters updated", "data": clients_db[client_id]["pregnancy"]}
 
-@router.post("/api/v1/clients/{client_id}/lactation", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/lactation",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def log_lactation(client_id: str, data: LactationLog):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -133,6 +202,8 @@ def log_lactation(client_id: str, data: LactationLog):
         clients_db[client_id] = {"allergies": [], "conditions": [], "metrics": [], "progress": []}
     clients_db[client_id]["lactation"] = data.model_dump()
     return {"message": "Lactation state updated", "data": clients_db[client_id]["lactation"]}
+
+
 # --- LACTATION TRACKING (status, feeding, supply, weaning, discomfort, infant sensitivities) ---
 
 LACTATION_LOGS = {
@@ -150,6 +221,7 @@ LACTATION_DATE_FIELDS = {
     "maternal-discomfort": "log_date",
     "infant-sensitivities": "log_date",
 }
+
 
 def save_lactation_entry(client_id: str, kind: str, data):
     table, _ = LACTATION_LOGS[kind]
@@ -171,9 +243,15 @@ def save_lactation_entry(client_id: str, kind: str, data):
             return dict(cursor.fetchone())
     if client_id not in clients_db:
         clients_db[client_id] = {"allergies": [], "conditions": [], "metrics": [], "progress": []}
-    entry = {"log_id": str(uuid4()), "client_id": client_id, **values, "logged_at": datetime.now().isoformat()}
+    entry = {
+        "log_id": str(uuid4()),
+        "client_id": client_id,
+        **values,
+        "logged_at": datetime.now().isoformat(),
+    }
     clients_db[client_id].setdefault("lactation_tracking", {}).setdefault(kind, []).append(entry)
     return entry
+
 
 def list_lactation_entries(client_id: str, kind: str):
     table, order = LACTATION_LOGS[kind]
@@ -182,72 +260,145 @@ def list_lactation_entries(client_id: str, kind: str):
             cursor.execute("SELECT client_id FROM client WHERE client_id = %s", (client_id,))
             if not cursor.fetchone():
                 raise HTTPException(status_code=404, detail="Patient record not found")
-            cursor.execute(f"SELECT * FROM {table} WHERE client_id = %s ORDER BY {order}", (client_id,))
+            cursor.execute(
+                f"SELECT * FROM {table} WHERE client_id = %s ORDER BY {order}", (client_id,)
+            )
             return [dict(row) for row in cursor.fetchall()]
     if client_id not in clients_db:
         raise HTTPException(status_code=404, detail="Patient record not found")
     return list(reversed(clients_db[client_id].get("lactation_tracking", {}).get(kind, [])))
 
-@router.post("/api/v1/clients/{client_id}/lactation/status", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/lactation/status",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def log_lactation_status(client_id: str, data: LactationStatusEntry):
     if data.infant_age_months is None and data.infant_birth_date:
         today = date.today()
-        months = (today.year - data.infant_birth_date.year) * 12 + today.month - data.infant_birth_date.month
+        months = (
+            (today.year - data.infant_birth_date.year) * 12
+            + today.month
+            - data.infant_birth_date.month
+        )
         if today.day < data.infant_birth_date.day:
             months -= 1
         data.infant_age_months = max(months, 0)
-    return {"message": "Lactation status saved", "record": save_lactation_entry(client_id, "status", data)}
+    return {
+        "message": "Lactation status saved",
+        "record": save_lactation_entry(client_id, "status", data),
+    }
 
-@router.get("/api/v1/clients/{client_id}/lactation/status", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/lactation/status",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def get_lactation_status(client_id: str):
     return list_lactation_entries(client_id, "status")
 
-@router.post("/api/v1/clients/{client_id}/lactation/daily-feeding", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/lactation/daily-feeding",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def log_daily_feeding(client_id: str, data: DailyFeedingLog):
     record = save_lactation_entry(client_id, "daily-feeding", data)
-    return {"message": "Daily feeding saved", "record": record, "observations": daily_feeding_observations(record)}
+    return {
+        "message": "Daily feeding saved",
+        "record": record,
+        "observations": daily_feeding_observations(record),
+    }
 
-@router.get("/api/v1/clients/{client_id}/lactation/daily-feeding", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/lactation/daily-feeding",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def get_daily_feeding(client_id: str):
     return list_lactation_entries(client_id, "daily-feeding")
 
-@router.post("/api/v1/clients/{client_id}/lactation/milk-supply", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/lactation/milk-supply",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def log_milk_supply(client_id: str, data: MilkSupplyLog):
     guidance = INCREASE_MILK_GUIDANCE if data.concern == "low_supply" else OVERSUPPLY_GUIDANCE
-    return {"message": "Milk supply entry saved", "record": save_lactation_entry(client_id, "milk-supply", data), "guidance": guidance}
+    return {
+        "message": "Milk supply entry saved",
+        "record": save_lactation_entry(client_id, "milk-supply", data),
+        "guidance": guidance,
+    }
 
-@router.get("/api/v1/clients/{client_id}/lactation/milk-supply", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/lactation/milk-supply",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def get_milk_supply(client_id: str):
     return list_lactation_entries(client_id, "milk-supply")
 
-@router.get("/api/v1/lactation/guidance/increase-milk-production", tags=["2. Patient Health & History"])
+
+@router.get(
+    "/api/v1/lactation/guidance/increase-milk-production", tags=["2. Patient Health & History"]
+)
 def guidance_increase_milk_production():
     return INCREASE_MILK_GUIDANCE
+
 
 @router.get("/api/v1/lactation/guidance/manage-oversupply", tags=["2. Patient Health & History"])
 def guidance_manage_oversupply():
     return OVERSUPPLY_GUIDANCE
 
+
 @router.get("/api/v1/lactation/guidance/weaning-nutrition", tags=["2. Patient Health & History"])
-def guidance_weaning_nutrition(current_sessions: int = 6, target_sessions: int = 0, approach: str = "gradual"):
+def guidance_weaning_nutrition(
+    current_sessions: int = 6, target_sessions: int = 0, approach: str = "gradual"
+):
     if approach not in ("gradual", "partial", "abrupt_medical"):
-        raise HTTPException(status_code=422, detail="approach must be gradual, partial or abrupt_medical")
+        raise HTTPException(
+            status_code=422, detail="approach must be gradual, partial or abrupt_medical"
+        )
     return weaning_guidance(current_sessions, target_sessions, approach)
 
-@router.post("/api/v1/clients/{client_id}/lactation/weaning", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/lactation/weaning",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def log_weaning_plan(client_id: str, data: WeaningLog):
     record = save_lactation_entry(client_id, "weaning", data)
     return {
         "message": "Weaning plan saved",
         "record": record,
-        "guidance": weaning_guidance(data.feeds_per_day_current, data.feeds_per_day_target, data.approach),
+        "guidance": weaning_guidance(
+            data.feeds_per_day_current, data.feeds_per_day_target, data.approach
+        ),
     }
 
-@router.get("/api/v1/clients/{client_id}/lactation/weaning", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/lactation/weaning",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def get_weaning_plans(client_id: str):
     return list_lactation_entries(client_id, "weaning")
 
-@router.post("/api/v1/clients/{client_id}/lactation/maternal-discomfort", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/lactation/maternal-discomfort",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def log_maternal_discomfort(client_id: str, data: MaternalDiscomfortLog):
     flags = discomfort_red_flags(data)
     return {
@@ -258,11 +409,21 @@ def log_maternal_discomfort(client_id: str, data: MaternalDiscomfortLog):
         "seek_medical_care": bool(flags),
     }
 
-@router.get("/api/v1/clients/{client_id}/lactation/maternal-discomfort", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/lactation/maternal-discomfort",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def get_maternal_discomfort(client_id: str):
     return list_lactation_entries(client_id, "maternal-discomfort")
 
-@router.post("/api/v1/clients/{client_id}/lactation/infant-sensitivities", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/lactation/infant-sensitivities",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def log_infant_sensitivity(client_id: str, data: InfantSensitivityLog):
     flags = infant_red_flags(data)
     return {
@@ -272,11 +433,21 @@ def log_infant_sensitivity(client_id: str, data: InfantSensitivityLog):
         "seek_medical_care": bool(flags),
     }
 
-@router.get("/api/v1/clients/{client_id}/lactation/infant-sensitivities", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/lactation/infant-sensitivities",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def get_infant_sensitivities(client_id: str):
     return list_lactation_entries(client_id, "infant-sensitivities")
 
-@router.get("/api/v1/clients/{client_id}/lactation/overview", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/lactation/overview",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def get_lactation_overview(client_id: str):
     entries = {kind: list_lactation_entries(client_id, kind) for kind in LACTATION_LOGS}
     counts = {}
@@ -284,10 +455,17 @@ def get_lactation_overview(client_id: str):
         trigger = (entry.get("suspected_trigger") or "").strip().lower()
         if trigger:
             counts[trigger] = counts.get(trigger, 0) + 1
-    entries["recurring_triggers"] = sorted((name for name, total in counts.items() if total >= 2), key=lambda name: -counts[name])
+    entries["recurring_triggers"] = sorted(
+        (name for name, total in counts.items() if total >= 2), key=lambda name: -counts[name]
+    )
     return entries
 
-@router.post("/api/v1/clients/{client_id}/allergies", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/allergies",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def add_allergy(client_id: str, data: AllergyEntry):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -307,9 +485,17 @@ def add_allergy(client_id: str, data: AllergyEntry):
     if client_id not in clients_db:
         clients_db[client_id] = {"allergies": [], "conditions": [], "metrics": [], "progress": []}
     clients_db[client_id]["allergies"].append(data.model_dump())
-    return {"message": "Allergy mapped successfully", "allergies": clients_db[client_id]["allergies"]}
+    return {
+        "message": "Allergy mapped successfully",
+        "allergies": clients_db[client_id]["allergies"],
+    }
 
-@router.post("/api/v1/clients/{client_id}/medical-conditions", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/medical-conditions",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def add_medical_condition(client_id: str, data: MedicalConditionEntry):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -335,7 +521,12 @@ def add_medical_condition(client_id: str, data: MedicalConditionEntry):
 
 # --- 3. CLINICAL LABS & DAILY PROGRESS LOGS ---
 
-@router.post("/api/v1/clients/{client_id}/metrics", dependencies=[Depends(require_client_record_access)], tags=["3. Clinical Labs & Progress"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/metrics",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["3. Clinical Labs & Progress"],
+)
 def log_metric(client_id: str, data: MetricLog):
     if config.DATABASE_ENABLED:
         try:
@@ -359,14 +550,22 @@ def log_metric(client_id: str, data: MetricLog):
                 "WHERE cml.client_id = %s ORDER BY cml.recorded_at",
                 (client_id,),
             )
-            metrics = [{"metric_type": row["metric_type"], "value": str(row["value"])} for row in cursor.fetchall()]
+            metrics = [
+                {"metric_type": row["metric_type"], "value": str(row["value"])}
+                for row in cursor.fetchall()
+            ]
         return {"message": "Metric logged successfully", "metrics": metrics}
     if client_id not in clients_db:
         clients_db[client_id] = {"allergies": [], "conditions": [], "metrics": [], "progress": []}
     clients_db[client_id]["metrics"].append(data.model_dump())
     return {"message": "Metric logged successfully", "metrics": clients_db[client_id]["metrics"]}
 
-@router.get("/api/v1/clients/{client_id}/metrics", dependencies=[Depends(require_client_record_access)], tags=["3. Clinical Labs & Progress"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/metrics",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["3. Clinical Labs & Progress"],
+)
 def get_metrics(client_id: str):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -379,12 +578,20 @@ def get_metrics(client_id: str):
                 "WHERE cml.client_id = %s ORDER BY cml.recorded_at",
                 (client_id,),
             )
-            return [{"metric_type": row["metric_type"], "value": str(row["value"])} for row in cursor.fetchall()]
+            return [
+                {"metric_type": row["metric_type"], "value": str(row["value"])}
+                for row in cursor.fetchall()
+            ]
     if client_id not in clients_db:
         raise HTTPException(status_code=404, detail="Patient record not found")
     return clients_db[client_id].get("metrics", [])
 
-@router.post("/api/v1/clients/{client_id}/progress", dependencies=[Depends(require_client_record_access)], tags=["3. Clinical Labs & Progress"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/progress",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["3. Clinical Labs & Progress"],
+)
 def log_progress(client_id: str, data: ProgressLog):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -426,15 +633,28 @@ def log_progress(client_id: str, data: ProgressLog):
         clients_db[client_id] = {"allergies": [], "conditions": [], "metrics": [], "progress": []}
     log_date = date.today().isoformat()
     progress = clients_db[client_id]["progress"]
-    existing_entry = next((entry for entry in progress if entry.get("log_date") == log_date), None)
-    values = {key: value for key, value in data.model_dump().items() if value is not None}
+    existing_entry = None
+    for entry in progress:
+        if entry.get("log_date") == log_date:
+            existing_entry = entry
+            break
+    # Skip fields the user did not fill in.
+    values = {}
+    for field_name, value in data.model_dump().items():
+        if value is not None:
+            values[field_name] = value
     if existing_entry:
         existing_entry.update(values)
     else:
         progress.append({**values, "log_date": log_date})
     return {"message": "Progress entry saved", "progress": progress}
 
-@router.get("/api/v1/clients/{client_id}/progress", dependencies=[Depends(require_client_record_access)], tags=["3. Clinical Labs & Progress"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/progress",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["3. Clinical Labs & Progress"],
+)
 def get_progress(client_id: str):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -449,14 +669,18 @@ def get_progress(client_id: str):
                 (client_id,),
             )
             return [
-                {**dict(row), "log_date": row["log_date"].isoformat()}
-                for row in cursor.fetchall()
+                {**dict(row), "log_date": row["log_date"].isoformat()} for row in cursor.fetchall()
             ]
     if client_id not in clients_db:
         raise HTTPException(status_code=404, detail="Patient record not found")
     return clients_db[client_id].get("progress", [])
 
-@router.post("/api/v1/clients/{client_id}/meals", dependencies=[Depends(require_client_record_access)], tags=["3. Clinical Labs & Progress"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/meals",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["3. Clinical Labs & Progress"],
+)
 def log_meal(client_id: str, data: MealLog):
     values = data.model_dump()
     values["log_date"] = (data.log_date or date.today()).isoformat()
@@ -466,7 +690,16 @@ def log_meal(client_id: str, data: MealLog):
             cursor.execute(
                 "INSERT INTO meal_log (meal_log_id, client_id, log_date, meal_time, meal_type, description, calories, notes) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (values["meal_log_id"], client_id, values["log_date"], values["meal_time"], values["meal_type"], values["description"], values["calories"], values["notes"]),
+                (
+                    values["meal_log_id"],
+                    client_id,
+                    values["log_date"],
+                    values["meal_time"],
+                    values["meal_type"],
+                    values["description"],
+                    values["calories"],
+                    values["notes"],
+                ),
             )
             return {"message": "Meal saved", "meal": values}
     if client_id not in clients_db:
@@ -474,7 +707,12 @@ def log_meal(client_id: str, data: MealLog):
     clients_db[client_id].setdefault("meals", []).append({"client_id": client_id, **values})
     return {"message": "Meal saved", "meal": values}
 
-@router.get("/api/v1/clients/{client_id}/meals", dependencies=[Depends(require_client_record_access)], tags=["3. Clinical Labs & Progress"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/meals",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["3. Clinical Labs & Progress"],
+)
 def get_meals(client_id: str):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -488,7 +726,13 @@ def get_meals(client_id: str):
         raise HTTPException(status_code=404, detail="Patient record not found")
     return list(reversed(clients_db[client_id].get("meals", [])))
 
-@router.post("/api/v1/clients/{client_id}/medical-documents", status_code=201, dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.post(
+    "/api/v1/clients/{client_id}/medical-documents",
+    status_code=201,
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 async def upload_medical_document(
     client_id: str,
     file: UploadFile = File(...),
@@ -506,34 +750,73 @@ async def upload_medical_document(
     if len(contents) > config.MAX_CLIENT_DOCUMENT_BYTES:
         raise HTTPException(status_code=413, detail="Document must be 10 MB or smaller")
     document_id = str(uuid4())
-    metadata = {"document_id": document_id, "client_id": client_id, "file_name": file_name, "content_type": content_type, "condition_name": condition_name, "doctor_name": doctor_name, "doctor_information": doctor_information, "uploaded_at": datetime.now().isoformat()}
+    metadata = {
+        "document_id": document_id,
+        "client_id": client_id,
+        "file_name": file_name,
+        "content_type": content_type,
+        "condition_name": condition_name,
+        "doctor_name": doctor_name,
+        "doctor_information": doctor_information,
+        "uploaded_at": datetime.now().isoformat(),
+    }
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO client_medical_document (document_id, client_id, file_name, content_type, file_data, condition_name, doctor_name, doctor_information) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (document_id, client_id, file_name, content_type, contents, condition_name, doctor_name, doctor_information),
+                (
+                    document_id,
+                    client_id,
+                    file_name,
+                    content_type,
+                    contents,
+                    condition_name,
+                    doctor_name,
+                    doctor_information,
+                ),
             )
     else:
         client_documents_db[document_id] = {**metadata, "file_data": contents}
     return metadata
 
-@router.get("/api/v1/clients/{client_id}/medical-documents", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/medical-documents",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def list_medical_documents(client_id: str):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
                 "SELECT document_id, client_id, file_name, content_type, condition_name, doctor_name, doctor_information, uploaded_at "
-                "FROM client_medical_document WHERE client_id = %s ORDER BY uploaded_at DESC", (client_id,)
+                "FROM client_medical_document WHERE client_id = %s ORDER BY uploaded_at DESC",
+                (client_id,),
             )
             return [dict(row) for row in cursor.fetchall()]
-    return [{key: value for key, value in item.items() if key != "file_data"} for item in client_documents_db.values() if item["client_id"] == client_id]
+    documents = []
+    for document in client_documents_db.values():
+        if document["client_id"] == client_id:
+            # File bytes are only returned by the protected download route.
+            details = document.copy()
+            details.pop("file_data", None)
+            documents.append(details)
+    return documents
 
-@router.get("/api/v1/clients/{client_id}/medical-documents/{document_id}", dependencies=[Depends(require_client_record_access)], tags=["2. Patient Health & History"])
+
+@router.get(
+    "/api/v1/clients/{client_id}/medical-documents/{document_id}",
+    dependencies=[Depends(require_client_record_access)],
+    tags=["2. Patient Health & History"],
+)
 def download_medical_document(client_id: str, document_id: str):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute("SELECT content_type, file_data FROM client_medical_document WHERE client_id = %s AND document_id = %s", (client_id, document_id))
+            cursor.execute(
+                "SELECT content_type, file_data FROM client_medical_document WHERE client_id = %s AND document_id = %s",
+                (client_id, document_id),
+            )
             document = cursor.fetchone()
     else:
         document = client_documents_db.get(document_id)
@@ -541,4 +824,8 @@ def download_medical_document(client_id: str, document_id: str):
             document = None
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-    return Response(content=bytes(document["file_data"]), media_type=document["content_type"], headers={"Content-Disposition": "inline"})
+    return Response(
+        content=bytes(document["file_data"]),
+        media_type=document["content_type"],
+        headers={"Content-Disposition": "inline"},
+    )

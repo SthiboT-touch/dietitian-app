@@ -1,11 +1,18 @@
 """Password hashing and bearer-session dependencies."""
+
 import hashlib
 import hmac
 import ipaddress
 import secrets
 from fastapi import Header, HTTPException, Request as FastAPIRequest
 from typing import Optional
-from state import admin_sessions_db, dietitian_sessions_db, client_sessions_db, staff_sessions_db, staff_accounts_db
+from state import (
+    admin_sessions_db,
+    dietitian_sessions_db,
+    client_sessions_db,
+    staff_sessions_db,
+    staff_accounts_db,
+)
 
 
 def hash_password(password: str) -> str:
@@ -79,6 +86,7 @@ def current_identity(authorization: Optional[str] = None) -> tuple[str, str]:
     if staff_id:
         import config
         import database
+
         if config.DATABASE_ENABLED:
             with database.cursor() as cursor:
                 cursor.execute(

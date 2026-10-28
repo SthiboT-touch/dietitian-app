@@ -3,6 +3,7 @@
 This module deliberately does NOT calculate nutrition prescriptions or declare
 any meal safe for a medical condition. All findings require dietitian review.
 """
+
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -14,11 +15,16 @@ class ScreeningResult:
     cautions: list[str] = field(default_factory=list)
 
 
-def screen_meal_plan_context(*, client_id: str, diet_type: str,
-                             days: int, allergies: Iterable[str] | None = None,
-                             conditions: Iterable[str] | None = None,
-                             life_stage: str | None = None,
-                             ingredients: Iterable[str] | None = None) -> ScreeningResult:
+def screen_meal_plan_context(
+    *,
+    client_id: str,
+    diet_type: str,
+    days: int,
+    allergies: Iterable[str] | None = None,
+    conditions: Iterable[str] | None = None,
+    life_stage: str | None = None,
+    ingredients: Iterable[str] | None = None
+) -> ScreeningResult:
     """Flag missing context and exact-name ingredient/allergy overlaps.
 
     Exact-name overlap is NOT sufficient allergy safety screening: synonyms,
@@ -46,6 +52,8 @@ def screen_meal_plan_context(*, client_id: str, diet_type: str,
                 blockers.append("Potential allergen ingredient: " + str(allergen).strip())
     if conditions:
         cautions.append("Medical conditions require individualized dietitian assessment")
-    cautions.append("Exact-name matching cannot establish allergy safety; check derivatives and cross-contact")
+    cautions.append(
+        "Exact-name matching cannot establish allergy safety; check derivatives and cross-contact"
+    )
     cautions.append("Screening is not clinical approval; a dietitian must review the full plan")
     return ScreeningResult(not blockers, blockers, cautions)

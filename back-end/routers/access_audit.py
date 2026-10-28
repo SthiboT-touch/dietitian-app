@@ -2,6 +2,7 @@
 
 Distinct from the existing administrator's dietitian approval history.
 """
+
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -34,9 +35,10 @@ def list_access_events(
             rows = [dict(row) for row in cursor.fetchall()]
         return rows
     filtered = [
-        event for event in access_audit_events_db
+        event
+        for event in access_audit_events_db
         if actor_role is None or event["actor_role"] == actor_role
     ]
-    return sorted(
-        filtered, key=lambda e: (e["occurred_at"], e["event_id"]), reverse=True
-    )[offset:offset + limit]
+    return sorted(filtered, key=lambda e: (e["occurred_at"], e["event_id"]), reverse=True)[
+        offset : offset + limit
+    ]

@@ -45,9 +45,15 @@ OVERSUPPLY_GUIDANCE = {
 }
 
 
-def weaning_guidance(current_sessions: int = 6, target_sessions: int = 0, approach: str = "gradual"):
+def weaning_guidance(
+    current_sessions: int = 6, target_sessions: int = 0, approach: str = "gradual"
+):
     sessions_to_drop = max(current_sessions - target_sessions, 0)
-    pace = "Follow your prescriber's plan" if approach == "abrupt_medical" else "Drop one feed or pump session every 3-7 days"
+    pace = (
+        "Follow your prescriber's plan"
+        if approach == "abrupt_medical"
+        else "Drop one feed or pump session every 3-7 days"
+    )
     return {
         "title": "Weaning nutrition: safely lowering milk production",
         "plan": {
@@ -82,11 +88,31 @@ def weaning_guidance(current_sessions: int = 6, target_sessions: int = 0, approa
 
 
 DISCOMFORT_SELF_CARE = {
-    "mastitis": ["Keep feeding or expressing from the affected breast; do not stop abruptly.", "Rest, drink fluids and wear a supportive bra.", "Use gentle massage (not deep pressure) and cool compresses after feeds."],
-    "clogged_duct": ["Feed often, starting on the affected side.", "Use warmth before feeds, gentle massage toward the nipple, and a cool compress after.", "Check bra fit and latch position."],
-    "sore_nipples": ["Check latch and positioning with a lactation consultant.", "Express a little milk onto the nipple and air dry after feeds.", "Lanolin or hydrogel pads may help if comfortable."],
-    "cracked_nipples": ["Correct latch and positioning; use a nipple shield only with guidance.", "Keep the area clean and use moist-healing (lanolin or hydrogel).", "Seek care if it looks infected (pus, spreading redness) or is not healing."],
-    "engorgement": ["Feed or express often to soften the breast.", "Use cold packs between feeds and brief warmth before feeds.", "Reverse-pressure softening around the areola can help the baby latch."],
+    "mastitis": [
+        "Keep feeding or expressing from the affected breast; do not stop abruptly.",
+        "Rest, drink fluids and wear a supportive bra.",
+        "Use gentle massage (not deep pressure) and cool compresses after feeds.",
+    ],
+    "clogged_duct": [
+        "Feed often, starting on the affected side.",
+        "Use warmth before feeds, gentle massage toward the nipple, and a cool compress after.",
+        "Check bra fit and latch position.",
+    ],
+    "sore_nipples": [
+        "Check latch and positioning with a lactation consultant.",
+        "Express a little milk onto the nipple and air dry after feeds.",
+        "Lanolin or hydrogel pads may help if comfortable.",
+    ],
+    "cracked_nipples": [
+        "Correct latch and positioning; use a nipple shield only with guidance.",
+        "Keep the area clean and use moist-healing (lanolin or hydrogel).",
+        "Seek care if it looks infected (pus, spreading redness) or is not healing.",
+    ],
+    "engorgement": [
+        "Feed or express often to soften the breast.",
+        "Use cold packs between feeds and brief warmth before feeds.",
+        "Reverse-pressure softening around the areola can help the baby latch.",
+    ],
     "other": ["Track the pattern and discuss it with your healthcare provider."],
 }
 
@@ -97,7 +123,11 @@ def discomfort_red_flags(data):
         flags.append("Fever (38.5 C or higher).")
     if data.flu_like_symptoms:
         flags.append("Flu-like symptoms (aches, chills, fatigue).")
-    if data.symptom_type in ("mastitis", "clogged_duct") and data.redness_or_hard_lump and data.severity >= 7:
+    if (
+        data.symptom_type in ("mastitis", "clogged_duct")
+        and data.redness_or_hard_lump
+        and data.severity >= 7
+    ):
         flags.append("Severe, red or hard painful area.")
     return flags
 
@@ -105,7 +135,9 @@ def discomfort_red_flags(data):
 def infant_red_flags(data):
     flags = []
     if data.breathing_difficulty_or_swelling:
-        flags.append("Breathing difficulty or face/lip swelling - call emergency services immediately.")
+        flags.append(
+            "Breathing difficulty or face/lip swelling - call emergency services immediately."
+        )
     if data.blood_in_stool:
         flags.append("Blood in the stool - contact the baby's paediatrician promptly.")
     if data.category == "allergy" and data.severity >= 7:
@@ -116,8 +148,12 @@ def infant_red_flags(data):
 def daily_feeding_observations(entry):
     notes = []
     if entry.get("wet_diapers") is not None and entry["wet_diapers"] < 6:
-        notes.append("Fewer than 6 wet diapers in 24 hours may signal low intake - contact a healthcare provider.")
+        notes.append(
+            "Fewer than 6 wet diapers in 24 hours may signal low intake - contact a healthcare provider."
+        )
     sessions = (entry.get("breastfeeding_sessions") or 0) + (entry.get("pumping_sessions") or 0)
     if sessions < 8 and not entry.get("formula_feeds"):
-        notes.append("Fewer than about 8 milk-removal sessions in 24 hours may reduce supply in young infants.")
+        notes.append(
+            "Fewer than about 8 milk-removal sessions in 24 hours may reduce supply in young infants."
+        )
     return notes

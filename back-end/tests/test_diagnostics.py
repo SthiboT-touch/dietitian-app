@@ -44,13 +44,17 @@ def create_test_app():
 
 def test_request_id_and_normal_response_are_unchanged():
     client = create_test_app()
-    response = client.get("/api/v1/clients/patient-private-001/records", params={"secret": "no-log"})
+    response = client.get(
+        "/api/v1/clients/patient-private-001/records", params={"secret": "no-log"}
+    )
     assert response.status_code == 200
     assert response.json() == {"found": True}
     assert len(response.headers["x-request-id"]) == 32
     assert response.headers["x-request-id"].isalnum()
     # Ignore external request IDs: identifiers must be server-generated.
-    response2 = client.get("/api/v1/clients/some-other-record/records", headers={"X-Request-ID": "forged-ref"})
+    response2 = client.get(
+        "/api/v1/clients/some-other-record/records", headers={"X-Request-ID": "forged-ref"}
+    )
     assert response2.headers["x-request-id"] != "forged-ref"
     assert response2.headers["x-request-id"] != response.headers["x-request-id"]
 
@@ -83,7 +87,10 @@ def test_json_logs_use_route_template_without_private_data():
     logger.addHandler(handler)
     try:
         client = create_test_app()
-        client.get("/api/v1/clients/patient-private-001/error?token=SECRET-URL-QUERY", headers={"Authorization": "Bearer SECRET-BEARER-TOKEN"})
+        client.get(
+            "/api/v1/clients/patient-private-001/error?token=SECRET-URL-QUERY",
+            headers={"Authorization": "Bearer SECRET-BEARER-TOKEN"},
+        )
         entries = out.getvalue()
         assert "SECRET-URL-QUERY" not in entries
         assert "patient-private-001" not in entries
@@ -103,9 +110,11 @@ def test_json_logs_use_route_template_without_private_data():
 def test_health_and_static_successes_do_not_fill_logs():
     app = FastAPI()
     app.middleware("http")(request_diagnostics)
+
     @app.get("/health")
     def health():
         return {"status": "online"}
+
     client = TestClient(app)
     assert client.get("/health").json() == {"status": "online"}
 
@@ -125,7 +134,9 @@ def test_unexpected_sensitive_failure_is_audited_as_500(monkeypatch):
     def fail(client_id: str):
         raise RuntimeError("Do not return patient data")
 
-    response = TestClient(app, raise_server_exceptions=False).get("/api/v1/clients/secret-patient/status")
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/api/v1/clients/secret-patient/status"
+    )
     assert response.status_code == 500
     assert len(access_audit_events_db) == 1
     assert access_audit_events_db[0]["status_code"] == 500

@@ -3,6 +3,7 @@
 Run: python qa/verify_fr11_api.py
 Does not connect to the real database or Oracle Cloud.
 """
+
 import os
 import sys
 import types
@@ -43,22 +44,33 @@ def main():
     state.staff_accounts_db.clear()
     # The 3-step form must send the same payload the API already accepts.
     details = {
-        "first_name": "Taylor", "last_name": "Example",
-        "email": "taylor@example.test", "id_number": "9005140012345",
-        "date_of_birth": "1990-05-14", "gender": "other",
+        "first_name": "Taylor",
+        "last_name": "Example",
+        "email": "taylor@example.test",
+        "id_number": "9005140012345",
+        "date_of_birth": "1990-05-14",
+        "gender": "other",
         "phone": "082 123 4567",
-        "consent_to_care": True, "privacy_notice_version": "2026-10-28-v1",
+        "consent_to_care": True,
+        "privacy_notice_version": "2026-10-28-v1",
         "password": "testpassword123",
     }
     result = client.post("/api/v1/auth/register/client", json=details)
-    check(result.status_code == 200, f"Client registration failed: {result.status_code}: {result.text}")
+    check(
+        result.status_code == 200,
+        f"Client registration failed: {result.status_code}: {result.text}",
+    )
     check(result.json()["user"]["type"] == "client", "Wrong account type")
     check("password" not in result.json()["user"], "Registration leaked a password")
-    login = client.post("/api/v1/auth/login", json={"email": details["email"], "password": details["password"]})
+    login = client.post(
+        "/api/v1/auth/login", json={"email": details["email"], "password": details["password"]}
+    )
     check(login.status_code == 200, "Newly registered client could not log in")
     duplicate = client.post("/api/v1/auth/register/client", json=details)
     check(duplicate.status_code == 409, "Duplicate email registration was not rejected")
-    print("PASS: existing client registration, sign-in and duplicate prevention in isolated API test")
+    print(
+        "PASS: existing client registration, sign-in and duplicate prevention in isolated API test"
+    )
 
 
 if __name__ == "__main__":

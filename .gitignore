@@ -12,3 +12,10 @@ venv/
 
 # Database backups (may contain real client health data)
 *.dump
+.server.stdout.log
+.server.stderr.log
+server.stdout.log
+server.stderr.log
+
+# Local source exports
+exports/

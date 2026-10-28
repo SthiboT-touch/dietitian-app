@@ -62,7 +62,11 @@ CREATE TABLE admin (
 
     email       VARCHAR(150) UNIQUE NOT NULL,
 
-    password    VARCHAR(255) NOT NULL
+    password    VARCHAR(255) NOT NULL,
+
+    role        VARCHAR(30) NOT NULL DEFAULT 'admin'
+
+        CHECK (role IN ('admin','reception_staff','branch_manager','compliance','executive','content_manager'))
 
 );
 
@@ -109,6 +113,10 @@ CREATE TABLE dietitian (
     email                 VARCHAR(150) UNIQUE NOT NULL,
 
     password              VARCHAR(255) NOT NULL,
+
+    email_verified       BOOLEAN NOT NULL DEFAULT TRUE,
+
+    stytch_user_id       VARCHAR(80),
 
     registration_number   VARCHAR(50) UNIQUE NOT NULL,
 
@@ -179,6 +187,10 @@ CREATE TABLE client (
 
     password              VARCHAR(255) NOT NULL,
 
+    email_verified       BOOLEAN NOT NULL DEFAULT TRUE,
+
+    stytch_user_id       VARCHAR(80),
+
     id_number            VARCHAR(30) UNIQUE NOT NULL,
 
     phone                VARCHAR(16),   -- normalized +27; nullable for existing patients
@@ -186,6 +198,24 @@ CREATE TABLE client (
     date_of_birth        DATE NOT NULL,
 
     gender               VARCHAR(20) NOT NULL CHECK (gender IN ('male','female','other')),
+
+    phone_number         VARCHAR(30),
+
+    consent_accepted     BOOLEAN NOT NULL DEFAULT FALSE,
+
+    consent_at           TIMESTAMP,
+
+    consent_ip           VARCHAR(45),
+
+    privacy_notice_acknowledged BOOLEAN NOT NULL DEFAULT FALSE,
+
+    consent_location     VARCHAR(150),
+
+    consent_date         DATE,
+
+    consent_signatory_name VARCHAR(150),
+
+    consent_signature    VARCHAR(150),
 
     height               NUMERIC(5,2),   -- cm
 
@@ -1032,3 +1062,27 @@ CREATE TABLE IF NOT EXISTS client_checkin_event (
 CREATE INDEX IF NOT EXISTS idx_client_checkin_event_client ON client_checkin_event(client_id, checked_in_at DESC);
 
 ALTER TABLE client_registration_consent ADD CONSTRAINT fk_registration_staff FOREIGN KEY (registered_by_staff_id) REFERENCES staff_account(staff_id) ON DELETE SET NULL;
+
+-- User support tickets and conversations
+CREATE TABLE IF NOT EXISTS support_ticket (
+    ticket_id VARCHAR(36) PRIMARY KEY,
+    owner_role VARCHAR(32) NOT NULL,
+    owner_id VARCHAR(36) NOT NULL,
+    subject VARCHAR(160) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','IN_PROGRESS','RESOLVED')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_support_ticket_owner ON support_ticket(owner_role, owner_id, updated_at DESC);
+CREATE TABLE IF NOT EXISTS support_message (
+    message_id VARCHAR(36) PRIMARY KEY,
+    ticket_id VARCHAR(36) NOT NULL REFERENCES support_ticket(ticket_id) ON DELETE CASCADE,
+    author_role VARCHAR(32) NOT NULL,
+    author_id VARCHAR(36) NOT NULL,
+    body TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_support_message_ticket ON support_message(ticket_id, created_at);
+
+ALTER TABLE support_ticket ADD COLUMN IF NOT EXISTS contact_email VARCHAR(150);
+CREATE INDEX IF NOT EXISTS idx_support_contact_time ON support_ticket(contact_email, created_at);

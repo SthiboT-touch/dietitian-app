@@ -4,6 +4,7 @@ The URLs and JSON payloads are unchanged for backwards compatibility with
 existing NutriCare screens. Recipe changes require an authenticated dietitian;
 food creation remains restricted to system administrators.
 """
+
 import json
 import uuid
 from typing import List
@@ -34,6 +35,7 @@ class RecipeCreated(BaseModel):
 
 
 # --- 5. FOODS, RECIPES & MEAL PLANNING ---
+
 
 @router.get("/api/v1/foods", response_model=List[FoodItem], tags=["5. Foods & Meal Planning"])
 def get_foods():
@@ -105,14 +107,21 @@ def create_food(data: FoodItemCreate, admin_id: str = Depends(require_admin)):
     return food
 
 
-@router.post("/api/v1/recipes", response_model=RecipeCreated, tags=["5. Foods & Meal Planning"], summary="Create a recipe (dietitian only)")
+@router.post(
+    "/api/v1/recipes",
+    response_model=RecipeCreated,
+    tags=["5. Foods & Meal Planning"],
+    summary="Create a recipe (dietitian only)",
+)
 def create_recipe(data: RecipeCreate, dietitian_id: str = Depends(require_dietitian)):
     recipe_id = f"rec_{uuid.uuid4().hex[:8]}"
     if config.DATABASE_ENABLED:
-        stored_instructions = json.dumps({
-            "instructions": data.instructions,
-            "ingredients": data.ingredients,
-        })
+        stored_instructions = json.dumps(
+            {
+                "instructions": data.instructions,
+                "ingredients": data.ingredients,
+            }
+        )
         with database.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO recipe (recipe_id, name, instructions) VALUES (%s, %s, %s)",
@@ -123,7 +132,12 @@ def create_recipe(data: RecipeCreate, dietitian_id: str = Depends(require_dietit
     return {"message": "Recipe created", "recipe_id": recipe_id, "details": data.model_dump()}
 
 
-@router.get("/api/v1/recipes", response_model=List[RecipeItem], tags=["5. Foods & Meal Planning"], summary="List recipe catalogue")
+@router.get(
+    "/api/v1/recipes",
+    response_model=List[RecipeItem],
+    tags=["5. Foods & Meal Planning"],
+    summary="List recipe catalogue",
+)
 def list_recipes():
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -134,19 +148,24 @@ def list_recipes():
                     stored = json.loads(row["instructions"])
                 except (TypeError, json.JSONDecodeError):
                     stored = {"instructions": row["instructions"], "ingredients": []}
-                recipes.append({
-                    "recipe_id": row["recipe_id"],
-                    "title": row["name"],
-                    "ingredients": stored.get("ingredients", []),
-                    "instructions": stored.get("instructions", ""),
-                })
+                recipes.append(
+                    {
+                        "recipe_id": row["recipe_id"],
+                        "title": row["name"],
+                        "ingredients": stored.get("ingredients", []),
+                        "instructions": stored.get("instructions", ""),
+                    }
+                )
             return recipes
     return sorted(
         [
-            {"recipe_id": recipe["recipe_id"], "title": recipe["title"],
-             "ingredients": recipe["ingredients"], "instructions": recipe["instructions"]}
+            {
+                "recipe_id": recipe["recipe_id"],
+                "title": recipe["title"],
+                "ingredients": recipe["ingredients"],
+                "instructions": recipe["instructions"],
+            }
             for recipe in recipes_db.values()
         ],
         key=lambda recipe: recipe["title"].casefold(),
     )
-

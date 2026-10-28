@@ -3,13 +3,14 @@
 This module deliberately grants no clinical-record access to new staff roles.
 Permissions must be added explicitly to an endpoint after branch scoping is tested.
 """
+
 from typing import Optional
-from fastapi import Depends, Header, HTTPException
+from fastapi import Header, HTTPException
 from security import current_identity
 
-STAFF_ROLES = frozenset({
-    "reception", "branch_manager", "compliance_officer", "executive", "content_manager"
-})
+STAFF_ROLES = frozenset(
+    {"reception", "branch_manager", "compliance_officer", "executive", "content_manager"}
+)
 BRANCH_REQUIRED_ROLES = frozenset({"reception", "branch_manager"})
 ROLE_LABELS = {
     "admin": "System Administrator",

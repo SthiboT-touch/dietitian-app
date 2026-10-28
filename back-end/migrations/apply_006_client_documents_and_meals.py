@@ -1,13 +1,11 @@
 from pathlib import Path
 import sys
 
-
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
 import app  # noqa: F401
 import database
-
 
 migration_path = Path(__file__).with_name("006_client_documents_and_meals.sql")
 with database.cursor() as cursor:

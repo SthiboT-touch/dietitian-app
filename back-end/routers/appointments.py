@@ -1,4 +1,5 @@
 """4. Appointments and goals."""
+
 import uuid
 from fastapi import APIRouter, Header, HTTPException
 from typing import Optional
@@ -9,14 +10,15 @@ from state import appointments_db, goals_db, users_db
 from schemas import AppointmentCreate, AppointmentDecision, GoalCreate
 from security import current_identity, authorize_client_access
 
-
 router = APIRouter()
 
 
 # --- 4. APPOINTMENTS & GOALS ---
 
 
-def _authorize_appointment_decision(appointment: dict, action: str, identity: tuple[str, str]) -> None:
+def _authorize_appointment_decision(
+    appointment: dict, action: str, identity: tuple[str, str]
+) -> None:
     """Only participants or an administrator may change an appointment.
 
     Clients can cancel their own booking. Dietitians can review requests made
@@ -33,14 +35,18 @@ def _authorize_appointment_decision(appointment: dict, action: str, identity: tu
 
 
 @router.post("/api/v1/appointments", tags=["4. Appointments & Goals"])
-def create_appointment(data: AppointmentCreate, authorization: Optional[str] = Header(default=None)):
+def create_appointment(
+    data: AppointmentCreate, authorization: Optional[str] = Header(default=None)
+):
     # Clients may book any listed dietitian; only the client themselves (or
     # authorized staff) may submit an appointment for their client account.
     authorize_client_access(data.client_id, current_identity(authorization))
     try:
         appointment_date = datetime.fromisoformat(data.appointment_date.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail="Appointment date must be a valid date and time") from exc
+        raise HTTPException(
+            status_code=422, detail="Appointment date must be a valid date and time"
+        ) from exc
     now = datetime.now(appointment_date.tzinfo) if appointment_date.tzinfo else datetime.now()
     if appointment_date <= now:
         raise HTTPException(status_code=422, detail="Appointment date must be in the future")
@@ -70,6 +76,7 @@ def create_appointment(data: AppointmentCreate, authorization: Optional[str] = H
     }
     appointments_db[appt_id] = appointment
     return {"message": "Appointment scheduled", "appointment": appointment}
+
 
 @router.get("/api/v1/appointments", tags=["4. Appointments & Goals"])
 def get_appointments(
@@ -110,20 +117,29 @@ def get_appointments(
             ]
     appointments = list(appointments_db.values())
     if client_id:
-        appointments = [appointment for appointment in appointments if appointment["client_id"] == client_id]
+        appointments = [
+            appointment for appointment in appointments if appointment["client_id"] == client_id
+        ]
     if dietitian_id:
-        appointments = [appointment for appointment in appointments if appointment["dietitian_id"] == dietitian_id]
+        appointments = [
+            appointment
+            for appointment in appointments
+            if appointment["dietitian_id"] == dietitian_id
+        ]
     return appointments
 
 
 @router.patch("/api/v1/appointments/{appointment_id}", tags=["4. Appointments & Goals"])
 def decide_appointment(
-    appointment_id: str, data: AppointmentDecision,
+    appointment_id: str,
+    data: AppointmentDecision,
     authorization: Optional[str] = Header(default=None),
 ):
     identity = current_identity(authorization)
 
-    new_status = {"APPROVED": "CONFIRMED", "REJECTED": "REJECTED", "CANCELLED": "CANCELLED"}[data.action]
+    new_status = {"APPROVED": "CONFIRMED", "REJECTED": "REJECTED", "CANCELLED": "CANCELLED"}[
+        data.action
+    ]
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -137,10 +153,18 @@ def decide_appointment(
             _authorize_appointment_decision(appointment, data.action, identity)
             current_status = appointment["status"]
             if data.action == "CANCELLED":
-                if current_status not in {"PENDING", "CONFIRMED", "SCHEDULED"} or not appointment["is_future"]:
-                    raise HTTPException(status_code=409, detail="Only future pending or confirmed appointments can be cancelled")
+                if (
+                    current_status not in {"PENDING", "CONFIRMED", "SCHEDULED"}
+                    or not appointment["is_future"]
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Only future pending or confirmed appointments can be cancelled",
+                    )
             elif current_status != "PENDING":
-                raise HTTPException(status_code=409, detail="Only pending appointment requests can be reviewed")
+                raise HTTPException(
+                    status_code=409, detail="Only pending appointment requests can be reviewed"
+                )
             cursor.execute(
                 "UPDATE appointment SET status = %s WHERE appointment_id = %s "
                 "RETURNING appointment_id, client_id, dietitian_id, date_time AS appointment_date, status",
@@ -152,9 +176,13 @@ def decide_appointment(
                     "UPDATE client SET dietitian_id = %s WHERE client_id = %s",
                     (updated["dietitian_id"], updated["client_id"]),
                 )
-        return {"message": "Appointment status updated", "appointment": {
-            **dict(updated), "appointment_date": updated["appointment_date"].isoformat(),
-        }}
+        return {
+            "message": "Appointment status updated",
+            "appointment": {
+                **dict(updated),
+                "appointment_date": updated["appointment_date"].isoformat(),
+            },
+        }
 
     appointment = appointments_db.get(appointment_id)
     if not appointment:
@@ -162,18 +190,26 @@ def decide_appointment(
     _authorize_appointment_decision(appointment, data.action, identity)
     current_status = appointment["status"]
     if data.action == "CANCELLED":
-        appointment_date = datetime.fromisoformat(appointment["appointment_date"].replace("Z", "+00:00"))
+        appointment_date = datetime.fromisoformat(
+            appointment["appointment_date"].replace("Z", "+00:00")
+        )
         now = datetime.now(appointment_date.tzinfo) if appointment_date.tzinfo else datetime.now()
         if current_status not in {"PENDING", "CONFIRMED", "SCHEDULED"} or appointment_date <= now:
-            raise HTTPException(status_code=409, detail="Only future pending or confirmed appointments can be cancelled")
+            raise HTTPException(
+                status_code=409,
+                detail="Only future pending or confirmed appointments can be cancelled",
+            )
     elif current_status != "PENDING":
-        raise HTTPException(status_code=409, detail="Only pending appointment requests can be reviewed")
+        raise HTTPException(
+            status_code=409, detail="Only pending appointment requests can be reviewed"
+        )
     appointment["status"] = new_status
     if new_status == "CONFIRMED":
         client = users_db.get(appointment["client_id"])
         if client:
             client["dietitian_id"] = appointment["dietitian_id"]
     return {"message": "Appointment status updated", "appointment": appointment}
+
 
 @router.post("/api/v1/goals", tags=["4. Appointments & Goals"])
 def set_goal(data: GoalCreate, authorization: Optional[str] = Header(default=None)):
@@ -189,7 +225,10 @@ def set_goal(data: GoalCreate, authorization: Optional[str] = Header(default=Non
     else:
         goal_id = f"goal_{uuid.uuid4().hex[:8]}"
         goals_db.setdefault(data.client_id, []).append({"goal_id": goal_id, **data.model_dump()})
-    return {"message": "Target goal created successfully", "goal": {"goal_id": goal_id, **data.model_dump()}}
+    return {
+        "message": "Target goal created successfully",
+        "goal": {"goal_id": goal_id, **data.model_dump()},
+    }
 
 
 @router.get("/api/v1/goals", tags=["4. Appointments & Goals"])
@@ -203,7 +242,10 @@ def get_goals(client_id: str, authorization: Optional[str] = Header(default=None
                 (client_id,),
             )
             return [
-                {**dict(row), "target_date": row["target_date"].isoformat() if row["target_date"] else None}
+                {
+                    **dict(row),
+                    "target_date": row["target_date"].isoformat() if row["target_date"] else None,
+                }
                 for row in cursor.fetchall()
             ]
     return goals_db.get(client_id, [])

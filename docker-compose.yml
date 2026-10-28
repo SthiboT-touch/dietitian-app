@@ -25,6 +25,9 @@ services:
       OLLAMA_TIMEOUT_SECONDS: "240"
       # Optional: only the IP/CIDR of a reverse proxy you control.
       REGISTRATION_TRUSTED_PROXY_CIDRS: ${REGISTRATION_TRUSTED_PROXY_CIDRS:-}
+      STYTCH_PROJECT_ID: ${STYTCH_PROJECT_ID:-}
+      STYTCH_SECRET: ${STYTCH_SECRET:-}
+      STYTCH_ENABLED: ${STYTCH_ENABLED:-1}
     depends_on:
       - db
       - ollama

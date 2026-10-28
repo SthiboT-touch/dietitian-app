@@ -3,6 +3,7 @@
 This is a backend foundation for the extra BRS roles. No staff role receives
 client health record privileges or broad administrator permissions by default.
 """
+
 import uuid
 from typing import Literal, Optional
 
@@ -12,11 +13,13 @@ from pydantic import BaseModel, Field
 import config
 import database
 from role_management import STAFF_ROLES, BRANCH_REQUIRED_ROLES, ROLE_LABELS, require_roles
-from security import hash_password, public_user
+from security import hash_password
 from state import branches_db, staff_accounts_db, staff_sessions_db, users_db, admins_db
 
 router = APIRouter(tags=["Staff Roles & Permissions"])
-StaffRole = Literal["reception", "branch_manager", "compliance_officer", "executive", "content_manager"]
+StaffRole = Literal[
+    "reception", "branch_manager", "compliance_officer", "executive", "content_manager"
+]
 
 
 class StaffCreate(BaseModel):
@@ -34,7 +37,9 @@ class StaffUpdate(BaseModel):
 
 
 def _present(row):
-    return {key: value for key, value in dict(row).items() if key not in ("password_hash", "password")}
+    return {
+        key: value for key, value in dict(row).items() if key not in ("password_hash", "password")
+    }
 
 
 def _check_branch(role, branch_id):
@@ -66,7 +71,9 @@ def _ensure_unique_email(email):
     else:
         taken = any(
             u.get("email", "").casefold() == email.casefold()
-            for u in list(users_db.values()) + list(admins_db.values()) + list(staff_accounts_db.values())
+            for u in list(users_db.values())
+            + list(admins_db.values())
+            + list(staff_accounts_db.values())
         )
     if taken:
         raise HTTPException(status_code=409, detail="An account with this email already exists")
@@ -85,7 +92,8 @@ def my_staff_profile(identity=Depends(require_roles(*sorted(STAFF_ROLES)))):
         with database.cursor() as cursor:
             cursor.execute(
                 "SELECT staff_id, full_name, email, role, branch_id, is_active "
-                "FROM staff_account WHERE staff_id = %s", (staff_id,)
+                "FROM staff_account WHERE staff_id = %s",
+                (staff_id,),
             )
             record = cursor.fetchone()
     else:
@@ -104,7 +112,9 @@ def list_staff(identity=Depends(require_roles("admin"))):
                 "FROM staff_account ORDER BY LOWER(full_name)"
             )
             return [dict(row) for row in cursor.fetchall()]
-    return sorted((_present(r) for r in staff_accounts_db.values()), key=lambda r: r["full_name"].casefold())
+    return sorted(
+        (_present(r) for r in staff_accounts_db.values()), key=lambda r: r["full_name"].casefold()
+    )
 
 
 @router.post("/api/v1/admin/staff", status_code=201)
@@ -130,7 +140,14 @@ def create_staff(data: StaffCreate, identity=Depends(require_roles("admin"))):
                 "INSERT INTO staff_account "
                 "(staff_id, full_name, email, password_hash, role, branch_id, is_active) "
                 "VALUES (%s, %s, %s, %s, %s, %s, TRUE)",
-                (record["staff_id"], name, email, record["password_hash"], data.role, data.branch_id),
+                (
+                    record["staff_id"],
+                    name,
+                    email,
+                    record["password_hash"],
+                    data.role,
+                    data.branch_id,
+                ),
             )
     else:
         staff_accounts_db[record["staff_id"]] = record

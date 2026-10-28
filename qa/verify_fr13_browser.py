@@ -1,4 +1,5 @@
 """FR-1.3 patient consent on desktop/mobile with a mocked API."""
+
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
@@ -8,7 +9,9 @@ js = (ROOT / "app.js").read_text()
 css = (ROOT / "styles.css").read_text() + "\n" + (ROOT / "vibrant-theme.css").read_text()
 
 with sync_playwright() as playwright:
-    browser = playwright.chromium.launch(headless=True, executable_path="/usr/bin/chromium", args=["--no-sandbox"])
+    browser = playwright.chromium.launch(
+        headless=True, executable_path="/usr/bin/chromium", args=["--no-sandbox"]
+    )
     for width in (1280, 375):
         page = browser.new_page(viewport={"width": width, "height": 820})
         page_errors = []
@@ -48,11 +51,15 @@ with sync_playwright() as playwright:
         page.locator("#signupPassword").fill("testpassword123")
         page.locator("#signupConfirmPassword").fill("testpassword123")
         page.locator("#signupSubmit").click()
-        assert page.evaluate("window.__registered.length") == 0, "Registration bypassed unchecked consent"
+        assert (
+            page.evaluate("window.__registered.length") == 0
+        ), "Registration bypassed unchecked consent"
         page.locator("#registrationPrivacyNotice summary").click()
         assert page.locator(".privacy-notice-body").is_visible()
         if width == 1280:
-            page.screenshot(path=str(ROOT.parent.parent / "NutriCare_FR13_Preview.png"), full_page=True)
+            page.screenshot(
+                path=str(ROOT.parent.parent / "NutriCare_FR13_Preview.png"), full_page=True
+            )
         page.locator("#signupConsentToCare").check()
         page.locator("#signupSubmit").click()
         page.wait_for_timeout(450)

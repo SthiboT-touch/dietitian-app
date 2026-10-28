@@ -3,9 +3,9 @@
 Only applies to NEW registrations. Existing client ID values are not altered.
 Phone numbers are stored in South African E.164 format for consistency.
 """
+
 from datetime import date
 import re
-
 
 _EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
 
@@ -27,7 +27,9 @@ def validate_sa_phone(value: str) -> str:
         return "+27" + digits[1:]
     if re.fullmatch(r"(?:\+27|27)[1-8][0-9]{8}", digits):
         return "+27" + digits.lstrip("+")[2:]
-    raise ValueError("Enter a 10-digit South African number (e.g. 082 123 4567 or +27 82 123 4567).")
+    raise ValueError(
+        "Enter a 10-digit South African number (e.g. 082 123 4567 or +27 82 123 4567)."
+    )
 
 
 def validate_sa_id_number(value: str) -> str:
