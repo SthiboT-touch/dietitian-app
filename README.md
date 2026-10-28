@@ -23,18 +23,12 @@ python -m uvicorn app:app --app-dir back-end --host 127.0.0.1 --port 8001
 
 Open `http://127.0.0.1:8001`. Run the test suite from the project root with `python -m pytest -q`.
 
-All frontend screens are in `front-end/index.html`. The navigation at the top
-switches between the main app, traditional portal (`/#traditional/index`), and
-student demo (`/#student/login`). The student demo still uses demo-only forms.
-Traditional screens and the student sections are stored in HTML templates in
-the same file. Their CSS and JavaScript remain separate. Old page URLs redirect
-to the matching section in the combined page.
+The application uses `front-end/index.html` with its supporting CSS and JavaScript.
 
 Signed-in users can open **Support & Tickets** to submit and reply to their own
 tickets. System administrators use the same screen to review all tickets, reply,
 mark them open/in progress/resolved, and search accounts to change passwords.
-The traditional portal includes these controls at `/#traditional/admin-management`
-and a user-facing support section at `/#traditional/support`. Password changes
+Password changes
 require at least 12 characters and invalidate the account's existing sessions.
 
 For an existing PostgreSQL installation, apply the additive ticket migration
@@ -43,7 +37,7 @@ with the normal database environment configured. The deployment workflow runs
 this migration automatically. New databases include these tables in the base
 schema. Local in-memory tickets last until the API restarts.
 
-Both login pages also offer **Need help signing in? Contact support**. Guest
+The login page also offers **Need help signing in? Contact support**. Guest
 requests include a contact email and appear in the administrator's queue;
 they do not grant access to an account or its tickets. Replies are kept in the
 admin ticket thread; email delivery is not automatic. Existing databases also

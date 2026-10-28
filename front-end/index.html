@@ -33,621 +33,211 @@
             href="/static/vibrant-theme.css?v=3"
         />
         <script
-            src="/static/support.js?v=2"
+            src="/static/support.js?v=3"
             defer
         ></script>
         <script
             src="/static/app.js?v=30"
             defer
         ></script>
-        <script
-            src="/static/combined.js?v=1"
-            defer
-        ></script>
-        <link
-            rel="stylesheet"
-            href="/static/combined.css?v=1"
-        />
     </head>
     <body>
-        <nav
-            class="combined-navigation"
-            aria-label="Application views"
+        <main
+            id="authScreen"
+            class="auth-screen"
         >
-            <a
-                href="#main"
-                data-frontend="main"
-                >Main app</a
+            <section
+                class="auth-story"
+                aria-label="Nutrition practice"
             >
-            <a
-                href="#traditional/index"
-                data-frontend="traditional"
-                >Traditional portal</a
-            >
-            <a
-                href="#student/login"
-                data-frontend="student"
-                >Student demo</a
-            >
-        </nav>
-        <div id="combinedMain">
-            <main
-                id="authScreen"
-                class="auth-screen"
-            >
-                <section
-                    class="auth-story"
-                    aria-label="Nutrition practice"
+                <div
+                    class="story-image"
+                    role="img"
+                    aria-label="A nutritionist and patient reviewing a meal plan with fresh fruit"
+                ></div>
+                <div class="story-shade"></div>
+                <div class="story-copy">
+                    <span class="eyebrow">GOOD CARE, MADE PERSONAL</span>
+                    <h1>Make room<br />for better habits.</h1>
+                    <p
+                        >A calmer place to care for patients, build thoughtful plans, and keep
+                        progress in view.</p
+                    >
+                </div>
+                <div class="story-foot"
+                    ><span>01</span><span class="story-rule"></span
+                    ><span>Care that keeps up with real life</span></div
                 >
+            </section>
+
+            <section
+                class="auth-main"
+                aria-label="Account access"
+            >
+                <div class="auth-wrap">
+                    <div class="auth-intro">
+                        <span class="eyebrow eyebrow-green">YOUR PRACTICE, IN GOOD HANDS</span>
+                        <h2 id="authHeading">Welcome back.</h2>
+                        <p id="authSubheading">Sign in to continue to your nutrition workspace.</p>
+                    </div>
+
                     <div
-                        class="story-image"
-                        role="img"
-                        aria-label="A nutritionist and patient reviewing a meal plan with fresh fruit"
-                    ></div>
-                    <div class="story-shade"></div>
-                    <div class="story-copy">
-                        <span class="eyebrow">GOOD CARE, MADE PERSONAL</span>
-                        <h1>Make room<br />for better habits.</h1>
-                        <p
-                            >A calmer place to care for patients, build thoughtful plans, and keep
-                            progress in view.</p
+                        class="auth-tabs"
+                        role="tablist"
+                        aria-label="Account access"
+                    >
+                        <button
+                            class="auth-tab is-active"
+                            id="loginTab"
+                            type="button"
+                            role="tab"
+                            aria-selected="true"
+                            >Sign in</button
+                        >
+                        <button
+                            class="auth-tab"
+                            id="signupTab"
+                            type="button"
+                            role="tab"
+                            aria-selected="false"
+                            >Create account</button
+                        >
+                        <button
+                            class="auth-tab"
+                            id="adminSetupTab"
+                            type="button"
+                            role="tab"
+                            aria-selected="false"
+                            hidden
+                            >Admin setup</button
                         >
                     </div>
-                    <div class="story-foot"
-                        ><span>01</span><span class="story-rule"></span
-                        ><span>Care that keeps up with real life</span></div
+
+                    <div
+                        id="authMessage"
+                        class="form-message"
+                        role="status"
+                        aria-live="polite"
+                        hidden
+                    ></div>
+
+                    <form
+                        id="loginForm"
+                        class="auth-form"
                     >
-                </section>
-
-                <section
-                    class="auth-main"
-                    aria-label="Account access"
-                >
-                    <div class="auth-wrap">
-                        <div class="auth-intro">
-                            <span class="eyebrow eyebrow-green">YOUR PRACTICE, IN GOOD HANDS</span>
-                            <h2 id="authHeading">Welcome back.</h2>
-                            <p id="authSubheading"
-                                >Sign in to continue to your nutrition workspace.</p
-                            >
-                        </div>
-
-                        <div
-                            class="auth-tabs"
-                            role="tablist"
-                            aria-label="Account access"
+                        <label
+                            class="field-label"
+                            for="loginEmail"
+                            >Email address</label
                         >
-                            <button
-                                class="auth-tab is-active"
-                                id="loginTab"
-                                type="button"
-                                role="tab"
-                                aria-selected="true"
-                                >Sign in</button
-                            >
-                            <button
-                                class="auth-tab"
-                                id="signupTab"
-                                type="button"
-                                role="tab"
-                                aria-selected="false"
-                                >Create account</button
-                            >
-                            <button
-                                class="auth-tab"
-                                id="adminSetupTab"
-                                type="button"
-                                role="tab"
-                                aria-selected="false"
-                                hidden
-                                >Admin setup</button
-                            >
-                        </div>
-
-                        <div
-                            id="authMessage"
-                            class="form-message"
-                            role="status"
-                            aria-live="polite"
-                            hidden
-                        ></div>
-
-                        <form
-                            id="loginForm"
-                            class="auth-form"
-                        >
-                            <label
+                        <input
+                            id="loginEmail"
+                            name="email"
+                            type="email"
+                            autocomplete="email"
+                            placeholder="you@example.com"
+                            required
+                        />
+                        <div class="field-heading"
+                            ><label
                                 class="field-label"
-                                for="loginEmail"
-                                >Email address</label
-                            >
-                            <input
-                                id="loginEmail"
-                                name="email"
-                                type="email"
-                                autocomplete="email"
-                                placeholder="you@example.com"
-                                required
-                            />
-                            <div class="field-heading"
-                                ><label
-                                    class="field-label"
-                                    for="loginPassword"
-                                    >Password</label
-                                ></div
-                            >
-                            <input
-                                id="loginPassword"
-                                name="password"
-                                type="password"
-                                autocomplete="current-password"
-                                placeholder="Enter your password"
-                                required
-                            />
-                            <button
-                                class="button button-primary auth-submit"
-                                type="submit"
-                                ><span>Sign in</span
-                                ><span
-                                    class="button-arrow"
-                                    aria-hidden="true"
-                                    >&#8594;</span
-                                ></button
-                            >
-                        </form>
+                                for="loginPassword"
+                                >Password</label
+                            ></div
+                        >
+                        <input
+                            id="loginPassword"
+                            name="password"
+                            type="password"
+                            autocomplete="current-password"
+                            placeholder="Enter your password"
+                            required
+                        />
+                        <button
+                            class="button button-primary auth-submit"
+                            type="submit"
+                            ><span>Sign in</span
+                            ><span
+                                class="button-arrow"
+                                aria-hidden="true"
+                                >&#8594;</span
+                            ></button
+                        >
+                    </form>
 
-                        <form
-                            id="signupForm"
-                            class="auth-form"
+                    <form
+                        id="signupForm"
+                        class="auth-form"
+                        hidden
+                    >
+                        <fieldset class="role-picker">
+                            <legend class="field-label">I am joining as a</legend>
+                            <label class="role-option is-selected"
+                                ><input
+                                    type="radio"
+                                    name="role"
+                                    value="dietitian"
+                                    checked
+                                /><span>Dietitian</span></label
+                            >
+                            <label class="role-option"
+                                ><input
+                                    type="radio"
+                                    name="role"
+                                    value="client"
+                                /><span>Patient</span></label
+                            >
+                        </fieldset>
+                        <!-- FR-1.1: patient registration is progressive; dietitian registration stays compatible. -->
+                        <div
+                            id="patientSignupProgress"
+                            class="signup-progress"
                             hidden
                         >
-                            <fieldset class="role-picker">
-                                <legend class="field-label">I am joining as a</legend>
-                                <label class="role-option is-selected"
-                                    ><input
-                                        type="radio"
-                                        name="role"
-                                        value="dietitian"
-                                        checked
-                                    /><span>Dietitian</span></label
-                                >
-                                <label class="role-option"
-                                    ><input
-                                        type="radio"
-                                        name="role"
-                                        value="client"
-                                    /><span>Patient</span></label
-                                >
-                            </fieldset>
-                            <!-- FR-1.1: patient registration is progressive; dietitian registration stays compatible. -->
-                            <div
-                                id="patientSignupProgress"
-                                class="signup-progress"
-                                hidden
-                            >
-                                <div class="signup-progress-heading">
-                                    <span
-                                        id="patientSignupStepLabel"
-                                        aria-live="polite"
-                                        >Step 1 of 3 · Your details</span
-                                    >
-                                    <span>Patient registration</span>
-                                </div>
-                                <div
-                                    class="signup-progress-track"
-                                    role="progressbar"
-                                    aria-label="Registration progress"
-                                    aria-valuemin="1"
-                                    aria-valuemax="3"
-                                    aria-valuenow="1"
-                                >
-                                    <span id="patientSignupProgressBar"></span>
-                                </div>
-                            </div>
-                            <section
-                                class="signup-step"
-                                data-signup-step="1"
-                                aria-label="Personal details"
-                            >
-                                <h3
-                                    class="signup-step-title"
-                                    tabindex="-1"
-                                    data-patient-signup-only
-                                    hidden
-                                    >Your details</h3
-                                >
-                                <p
-                                    class="signup-step-help"
-                                    data-patient-signup-only
-                                    hidden
-                                    >Let's start with the information you'll use to sign in.</p
-                                >
-                                <label
-                                    class="field-label"
-                                    for="signupFirstName"
-                                    >First name</label
-                                >
-                                <input
-                                    id="signupFirstName"
-                                    name="first_name"
-                                    autocomplete="given-name"
-                                    placeholder="First name"
-                                    required
-                                />
-                                <label
-                                    class="field-label"
-                                    for="signupLastName"
-                                    >Last name</label
-                                >
-                                <input
-                                    id="signupLastName"
-                                    name="last_name"
-                                    autocomplete="family-name"
-                                    placeholder="Last name"
-                                    required
-                                />
-                                <label
-                                    class="field-label"
-                                    for="signupEmail"
-                                    >Email address</label
-                                >
-                                <input
-                                    id="signupEmail"
-                                    name="email"
-                                    type="email"
-                                    autocomplete="email"
-                                    placeholder="you@example.com"
-                                    aria-describedby="signupEmailHelp"
-                                    maxlength="150"
-                                    required
-                                />
-                                <small
-                                    id="signupEmailHelp"
-                                    class="registration-field-help"
-                                    aria-live="polite"
-                                    >Use a valid email address.</small
-                                >
-                                <div id="dietitianFields">
-                                    <label
-                                        class="field-label"
-                                        for="licenseNumber"
-                                        >License number</label
-                                    >
-                                    <input
-                                        id="licenseNumber"
-                                        name="license_number"
-                                        placeholder="e.g. RD-2048"
-                                        required
-                                    />
-                                </div>
-                            </section>
-                            <section
-                                class="signup-step"
-                                data-signup-step="2"
-                                aria-label="Patient details"
-                            >
-                                <h3
-                                    class="signup-step-title"
-                                    tabindex="-1"
-                                    >Patient details</h3
-                                >
-                                <p class="signup-step-help"
-                                    >These details help create your clinical profile.</p
-                                >
-                                <div
-                                    id="clientFields"
-                                    hidden
-                                >
-                                    <label
-                                        class="field-label"
-                                        for="idNumber"
-                                        >ID number</label
-                                    >
-                                    <input
-                                        id="idNumber"
-                                        name="id_number"
-                                        autocomplete="off"
-                                        inputmode="numeric"
-                                        maxlength="13"
-                                        placeholder="13-digit South African ID"
-                                        aria-describedby="idNumberHelp"
-                                    />
-                                    <small
-                                        id="idNumberHelp"
-                                        class="registration-field-help"
-                                        aria-live="polite"
-                                        >Enter your 13-digit South African identity number.</small
-                                    >
-                                    <label
-                                        class="field-label"
-                                        for="signupPhone"
-                                        >Contact phone number</label
-                                    >
-                                    <input
-                                        id="signupPhone"
-                                        name="phone"
-                                        type="tel"
-                                        autocomplete="tel"
-                                        inputmode="tel"
-                                        maxlength="35"
-                                        placeholder="082 123 4567"
-                                        aria-describedby="signupPhoneHelp"
-                                    />
-                                    <small
-                                        id="signupPhoneHelp"
-                                        class="registration-field-help"
-                                        aria-live="polite"
-                                        >South African number, e.g. 082 123 4567 or +27 82 123
-                                        4567.</small
-                                    >
-                                    <label
-                                        class="field-label"
-                                        for="gender"
-                                        >Gender</label
-                                    >
-                                    <select
-                                        id="gender"
-                                        name="gender"
-                                    >
-                                        <option value="">Select gender</option>
-                                        <option value="female">Female</option>
-                                        <option value="male">Male</option>
-                                        <option value="other">Other / prefer not to say</option>
-                                    </select>
-                                    <label
-                                        class="field-label"
-                                        for="dateOfBirth"
-                                        >Date of birth</label
-                                    >
-                                    <input
-                                        id="dateOfBirth"
-                                        name="date_of_birth"
-                                        type="date"
-                                        autocomplete="bday"
-                                        aria-describedby="dateOfBirthHelp"
-                                    />
-                                    <small
-                                        id="dateOfBirthHelp"
-                                        class="registration-field-help"
-                                        aria-live="polite"
-                                        >Must match the date encoded in your ID number.</small
-                                    >
-                                    <div class="registration-uploads">
-                                        <h4>Optional documents</h4>
-                                        <p
-                                            >Add a profile photo or an initial medical document now,
-                                            or upload documents later.</p
-                                        >
-                                        <label
-                                            class="field-label"
-                                            for="signupPhoto"
-                                            >Profile photo (JPEG/PNG, max 1 MB)</label
-                                        >
-                                        <input
-                                            id="signupPhoto"
-                                            name="profile_photo_file"
-                                            type="file"
-                                            accept="image/png,image/jpeg"
-                                        />
-                                        <label
-                                            class="field-label"
-                                            for="signupDocument"
-                                            >Initial medical document (PDF/JPEG/PNG, max 3
-                                            MB)</label
-                                        >
-                                        <input
-                                            id="signupDocument"
-                                            name="initial_document_file"
-                                            type="file"
-                                            accept="application/pdf,image/png,image/jpeg"
-                                        />
-                                    </div>
-                                </div>
-                            </section>
-                            <section
-                                class="signup-step"
-                                data-signup-step="3"
-                                aria-label="Account security"
-                            >
-                                <h3
-                                    class="signup-step-title"
-                                    tabindex="-1"
-                                    data-patient-signup-only
-                                    hidden
-                                    >Secure your account</h3
-                                >
-                                <p
-                                    class="signup-step-help"
-                                    data-patient-signup-only
-                                    hidden
-                                    >Create a password to protect your account.</p
-                                >
-                                <label
-                                    class="field-label"
-                                    for="signupPassword"
-                                    >Create password</label
-                                >
-                                <input
-                                    id="signupPassword"
-                                    name="password"
-                                    type="password"
-                                    autocomplete="new-password"
-                                    minlength="8"
-                                    placeholder="At least 8 characters"
-                                    required
-                                />
-                                <label
-                                    class="field-label"
-                                    for="signupConfirmPassword"
-                                    >Confirm password</label
-                                >
-                                <input
-                                    id="signupConfirmPassword"
-                                    name="confirm_password"
-                                    type="password"
-                                    autocomplete="new-password"
-                                    placeholder="Re-enter your password"
-                                    required
-                                />
-                                <div
-                                    id="clientPrivacyConsent"
-                                    class="privacy-consent"
-                                    hidden
-                                >
-                                    <h4>Privacy and consent</h4>
-                                    <p
-                                        >Before creating your patient account, please review how
-                                        your information will be handled.</p
-                                    >
-                                    <details
-                                        id="registrationPrivacyNotice"
-                                        class="privacy-notice"
-                                        aria-label="Privacy notice"
-                                    >
-                                        <summary>Read the registration privacy notice</summary>
-                                        <div class="privacy-notice-body">
-                                            <p
-                                                ><strong>Version 2026-10-28-v1.</strong> NutriCare
-                                                collects your contact details, identity details,
-                                                dietary preferences and health information to
-                                                register your account and support nutrition
-                                                consultations and follow-up care.</p
-                                            >
-                                            <p
-                                                >Authorized practice staff and your assigned
-                                                dietitian may need access to the information
-                                                relevant to their roles. Records are protected by
-                                                access controls and kept for applicable healthcare
-                                                record-keeping periods.</p
-                                            >
-                                            <p
-                                                >You may contact the dietetic practice to ask about
-                                                your information, request a correction or learn
-                                                about your rights under South Africa's POPIA.
-                                                Optional marketing communications are
-                                                <strong>not</strong> included in this consent.</p
-                                            >
-                                            <p class="privacy-notice-warning"
-                                                >This is a project privacy notice draft that must be
-                                                reviewed and approved by the practice before use
-                                                with real patients.</p
-                                            >
-                                        </div>
-                                    </details>
-                                    <label
-                                        class="privacy-consent-choice"
-                                        for="signupConsentToCare"
-                                    >
-                                        <input
-                                            id="signupConsentToCare"
-                                            name="consent_to_care"
-                                            type="checkbox"
-                                            value="true"
-                                            aria-describedby="consentHelp"
-                                        />
-                                        <span
-                                            >I have read the privacy notice and consent to the
-                                            processing of my personal and health information for
-                                            patient registration and dietetic care.</span
-                                        >
-                                    </label>
-                                    <small
-                                        id="consentHelp"
-                                        class="registration-field-help"
-                                        aria-live="polite"
-                                        >You must confirm your decision to register as a
-                                        patient.</small
-                                    >
-                                    <input
-                                        type="hidden"
-                                        name="privacy_notice_version"
-                                        value="2026-10-28-v1"
-                                        disabled
-                                    />
-                                </div>
-                            </section>
-                            <div
-                                id="patientSignupActions"
-                                class="signup-step-actions"
-                                hidden
-                            >
-                                <button
-                                    class="button signup-back"
-                                    id="patientSignupBack"
-                                    type="button"
-                                    hidden
-                                    >Back</button
-                                >
-                                <button
-                                    class="button button-primary signup-next"
-                                    id="patientSignupNext"
-                                    type="button"
-                                    >Continue <span aria-hidden="true">&#8594;</span></button
-                                >
-                            </div>
-                            <div
-                                id="signupDraftActions"
-                                class="signup-draft-actions"
-                                hidden
-                            >
-                                <p
-                                    >Your password, identity number, birth date, consent and
-                                    documents will <strong>never</strong> be saved in a draft. Avoid
-                                    saving drafts on shared computers.</p
-                                >
-                                <button
-                                    id="signupSaveDraft"
-                                    type="button"
-                                    class="button quiet-button"
-                                    >Save draft on this device</button
-                                >
-                                <button
-                                    id="signupRestoreDraft"
-                                    type="button"
-                                    class="button quiet-button"
-                                    >Resume saved draft</button
-                                >
-                                <button
-                                    id="signupClearDraft"
-                                    type="button"
-                                    class="button quiet-button"
-                                    >Discard draft</button
-                                >
+                            <div class="signup-progress-heading">
                                 <span
-                                    id="signupDraftMessage"
-                                    role="status"
+                                    id="patientSignupStepLabel"
                                     aria-live="polite"
-                                ></span>
+                                    >Step 1 of 3 · Your details</span
+                                >
+                                <span>Patient registration</span>
                             </div>
-                            <button
-                                id="signupSubmit"
-                                class="button button-primary auth-submit"
-                                type="submit"
-                                ><span>Create account</span
-                                ><span
-                                    class="button-arrow"
-                                    aria-hidden="true"
-                                    >&#8594;</span
-                                ></button
+                            <div
+                                class="signup-progress-track"
+                                role="progressbar"
+                                aria-label="Registration progress"
+                                aria-valuemin="1"
+                                aria-valuemax="3"
+                                aria-valuenow="1"
                             >
-                        </form>
-
-                        <form
-                            id="adminSetupForm"
-                            class="auth-form"
-                            hidden
+                                <span id="patientSignupProgressBar"></span>
+                            </div>
+                        </div>
+                        <section
+                            class="signup-step"
+                            data-signup-step="1"
+                            aria-label="Personal details"
                         >
-                            <p class="admin-setup-notice"
-                                >Create the first administrator for this installation. Setup is
-                                available only from this computer.</p
+                            <h3
+                                class="signup-step-title"
+                                tabindex="-1"
+                                data-patient-signup-only
+                                hidden
+                                >Your details</h3
+                            >
+                            <p
+                                class="signup-step-help"
+                                data-patient-signup-only
+                                hidden
+                                >Let's start with the information you'll use to sign in.</p
                             >
                             <label
                                 class="field-label"
-                                for="adminSetupFirstName"
+                                for="signupFirstName"
                                 >First name</label
                             >
                             <input
-                                id="adminSetupFirstName"
+                                id="signupFirstName"
                                 name="first_name"
                                 autocomplete="given-name"
                                 placeholder="First name"
@@ -655,11 +245,11 @@
                             />
                             <label
                                 class="field-label"
-                                for="adminSetupLastName"
+                                for="signupLastName"
                                 >Last name</label
                             >
                             <input
-                                id="adminSetupLastName"
+                                id="signupLastName"
                                 name="last_name"
                                 autocomplete="family-name"
                                 placeholder="Last name"
@@ -667,24 +257,186 @@
                             />
                             <label
                                 class="field-label"
-                                for="adminSetupEmail"
+                                for="signupEmail"
                                 >Email address</label
                             >
                             <input
-                                id="adminSetupEmail"
+                                id="signupEmail"
                                 name="email"
                                 type="email"
                                 autocomplete="email"
                                 placeholder="you@example.com"
+                                aria-describedby="signupEmailHelp"
+                                maxlength="150"
                                 required
                             />
+                            <small
+                                id="signupEmailHelp"
+                                class="registration-field-help"
+                                aria-live="polite"
+                                >Use a valid email address.</small
+                            >
+                            <div id="dietitianFields">
+                                <label
+                                    class="field-label"
+                                    for="licenseNumber"
+                                    >License number</label
+                                >
+                                <input
+                                    id="licenseNumber"
+                                    name="license_number"
+                                    placeholder="e.g. RD-2048"
+                                    required
+                                />
+                            </div>
+                        </section>
+                        <section
+                            class="signup-step"
+                            data-signup-step="2"
+                            aria-label="Patient details"
+                        >
+                            <h3
+                                class="signup-step-title"
+                                tabindex="-1"
+                                >Patient details</h3
+                            >
+                            <p class="signup-step-help"
+                                >These details help create your clinical profile.</p
+                            >
+                            <div
+                                id="clientFields"
+                                hidden
+                            >
+                                <label
+                                    class="field-label"
+                                    for="idNumber"
+                                    >ID number</label
+                                >
+                                <input
+                                    id="idNumber"
+                                    name="id_number"
+                                    autocomplete="off"
+                                    inputmode="numeric"
+                                    maxlength="13"
+                                    placeholder="13-digit South African ID"
+                                    aria-describedby="idNumberHelp"
+                                />
+                                <small
+                                    id="idNumberHelp"
+                                    class="registration-field-help"
+                                    aria-live="polite"
+                                    >Enter your 13-digit South African identity number.</small
+                                >
+                                <label
+                                    class="field-label"
+                                    for="signupPhone"
+                                    >Contact phone number</label
+                                >
+                                <input
+                                    id="signupPhone"
+                                    name="phone"
+                                    type="tel"
+                                    autocomplete="tel"
+                                    inputmode="tel"
+                                    maxlength="35"
+                                    placeholder="082 123 4567"
+                                    aria-describedby="signupPhoneHelp"
+                                />
+                                <small
+                                    id="signupPhoneHelp"
+                                    class="registration-field-help"
+                                    aria-live="polite"
+                                    >South African number, e.g. 082 123 4567 or +27 82 123
+                                    4567.</small
+                                >
+                                <label
+                                    class="field-label"
+                                    for="gender"
+                                    >Gender</label
+                                >
+                                <select
+                                    id="gender"
+                                    name="gender"
+                                >
+                                    <option value="">Select gender</option>
+                                    <option value="female">Female</option>
+                                    <option value="male">Male</option>
+                                    <option value="other">Other / prefer not to say</option>
+                                </select>
+                                <label
+                                    class="field-label"
+                                    for="dateOfBirth"
+                                    >Date of birth</label
+                                >
+                                <input
+                                    id="dateOfBirth"
+                                    name="date_of_birth"
+                                    type="date"
+                                    autocomplete="bday"
+                                    aria-describedby="dateOfBirthHelp"
+                                />
+                                <small
+                                    id="dateOfBirthHelp"
+                                    class="registration-field-help"
+                                    aria-live="polite"
+                                    >Must match the date encoded in your ID number.</small
+                                >
+                                <div class="registration-uploads">
+                                    <h4>Optional documents</h4>
+                                    <p
+                                        >Add a profile photo or an initial medical document now, or
+                                        upload documents later.</p
+                                    >
+                                    <label
+                                        class="field-label"
+                                        for="signupPhoto"
+                                        >Profile photo (JPEG/PNG, max 1 MB)</label
+                                    >
+                                    <input
+                                        id="signupPhoto"
+                                        name="profile_photo_file"
+                                        type="file"
+                                        accept="image/png,image/jpeg"
+                                    />
+                                    <label
+                                        class="field-label"
+                                        for="signupDocument"
+                                        >Initial medical document (PDF/JPEG/PNG, max 3 MB)</label
+                                    >
+                                    <input
+                                        id="signupDocument"
+                                        name="initial_document_file"
+                                        type="file"
+                                        accept="application/pdf,image/png,image/jpeg"
+                                    />
+                                </div>
+                            </div>
+                        </section>
+                        <section
+                            class="signup-step"
+                            data-signup-step="3"
+                            aria-label="Account security"
+                        >
+                            <h3
+                                class="signup-step-title"
+                                tabindex="-1"
+                                data-patient-signup-only
+                                hidden
+                                >Secure your account</h3
+                            >
+                            <p
+                                class="signup-step-help"
+                                data-patient-signup-only
+                                hidden
+                                >Create a password to protect your account.</p
+                            >
                             <label
                                 class="field-label"
-                                for="adminSetupPassword"
+                                for="signupPassword"
                                 >Create password</label
                             >
                             <input
-                                id="adminSetupPassword"
+                                id="signupPassword"
                                 name="password"
                                 type="password"
                                 autocomplete="new-password"
@@ -694,1040 +446,244 @@
                             />
                             <label
                                 class="field-label"
-                                for="adminSetupConfirmPassword"
+                                for="signupConfirmPassword"
                                 >Confirm password</label
                             >
                             <input
-                                id="adminSetupConfirmPassword"
+                                id="signupConfirmPassword"
                                 name="confirm_password"
                                 type="password"
                                 autocomplete="new-password"
                                 placeholder="Re-enter your password"
                                 required
                             />
-                            <button
-                                class="button button-primary auth-submit"
-                                type="submit"
-                                ><span>Create administrator</span
-                                ><span
-                                    class="button-arrow"
-                                    aria-hidden="true"
-                                    >&#8594;</span
-                                ></button
+                            <div
+                                id="clientPrivacyConsent"
+                                class="privacy-consent"
+                                hidden
                             >
-                        </form>
-
-                        <details class="login-support">
-                            <summary>Need help signing in? Contact support</summary>
-                            <p
-                                >Send a support ticket without signing in. Do not include passwords
-                                or medical information.</p
-                            >
-                            <form
-                                data-guest-support
-                                class="auth-form traditional-form"
-                            >
-                                <label
-                                    class="field-label"
-                                    for="supportContactEmail"
-                                    >Contact email</label
-                                >
-                                <input
-                                    id="supportContactEmail"
-                                    name="contact_email"
-                                    type="email"
-                                    autocomplete="email"
-                                    maxlength="150"
-                                    required
-                                />
-                                <label
-                                    class="field-label"
-                                    for="supportSubject"
-                                    >Subject</label
-                                >
-                                <input
-                                    id="supportSubject"
-                                    name="subject"
-                                    maxlength="160"
-                                    required
-                                />
-                                <label
-                                    class="field-label"
-                                    for="supportBody"
-                                    >How can we help?</label
-                                >
-                                <textarea
-                                    id="supportBody"
-                                    name="body"
-                                    maxlength="5000"
-                                    required
-                                ></textarea>
-                                <button
-                                    class="button button-primary traditional-button"
-                                    type="submit"
-                                    >Submit support ticket</button
-                                >
+                                <h4>Privacy and consent</h4>
                                 <p
-                                    data-guest-support-message
-                                    role="status"
+                                    >Before creating your patient account, please review how your
+                                    information will be handled.</p
+                                >
+                                <details
+                                    id="registrationPrivacyNotice"
+                                    class="privacy-notice"
+                                    aria-label="Privacy notice"
+                                >
+                                    <summary>Read the registration privacy notice</summary>
+                                    <div class="privacy-notice-body">
+                                        <p
+                                            ><strong>Version 2026-10-28-v1.</strong> NutriCare
+                                            collects your contact details, identity details, dietary
+                                            preferences and health information to register your
+                                            account and support nutrition consultations and
+                                            follow-up care.</p
+                                        >
+                                        <p
+                                            >Authorized practice staff and your assigned dietitian
+                                            may need access to the information relevant to their
+                                            roles. Records are protected by access controls and kept
+                                            for applicable healthcare record-keeping periods.</p
+                                        >
+                                        <p
+                                            >You may contact the dietetic practice to ask about your
+                                            information, request a correction or learn about your
+                                            rights under South Africa's POPIA. Optional marketing
+                                            communications are <strong>not</strong> included in this
+                                            consent.</p
+                                        >
+                                        <p class="privacy-notice-warning"
+                                            >This is a project privacy notice draft that must be
+                                            reviewed and approved by the practice before use with
+                                            real patients.</p
+                                        >
+                                    </div>
+                                </details>
+                                <label
+                                    class="privacy-consent-choice"
+                                    for="signupConsentToCare"
+                                >
+                                    <input
+                                        id="signupConsentToCare"
+                                        name="consent_to_care"
+                                        type="checkbox"
+                                        value="true"
+                                        aria-describedby="consentHelp"
+                                    />
+                                    <span
+                                        >I have read the privacy notice and consent to the
+                                        processing of my personal and health information for patient
+                                        registration and dietetic care.</span
+                                    >
+                                </label>
+                                <small
+                                    id="consentHelp"
+                                    class="registration-field-help"
                                     aria-live="polite"
-                                ></p>
-                            </form>
-                        </details>
-                        <p class="auth-note"
-                            ><span class="note-dot"></span> A thoughtful workspace for everyday
-                            nutrition care.</p
-                        >
-                    </div>
-                    <footer class="auth-footer"><span>&copy; 2026 Nutrition Practice</span></footer>
-                </section>
-            </main>
-
-            <main
-                id="workspace"
-                class="workspace"
-                hidden
-            >
-                <aside class="workspace-sidebar">
-                    <div class="sidebar-label">WORKSPACE</div>
-                    <nav
-                        class="side-nav"
-                        aria-label="Main navigation"
-                    >
-                        <button
-                            class="nav-item is-current"
-                            data-view="overview"
-                            type="button"
-                            ><span class="nav-glyph">&#9633;</span>Dashboard</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="support"
-                            type="button"
-                            ><span class="nav-glyph">&#9993;</span>Support &amp; Tickets</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="admin-staff"
-                            data-admin-only
-                            type="button"
-                            ><span class="nav-glyph">&#9787;</span>Staff &amp; Roles</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="admin-access-events"
-                            data-admin-only
-                            type="button"
-                            ><span class="nav-glyph">&#9776;</span>Access Events</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="admin-dietitians"
-                            data-admin-only
-                            type="button"
-                            ><span class="nav-glyph">&#9787;</span>Dietitians</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="admin-branches"
-                            data-admin-only
-                            type="button"
-                            ><span class="nav-glyph">&#9636;</span>Branches</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="admin-businesses"
-                            data-admin-only
-                            type="button"
-                            ><span class="nav-glyph">&#9633;</span>Businesses</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="admin-clients"
-                            data-admin-only
-                            type="button"
-                            ><span class="nav-glyph">&#9787;</span>Patients</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="admin-approvals"
-                            data-admin-only
-                            type="button"
-                            ><span class="nav-glyph">&#9678;</span>Approvals<span
-                                id="adminApprovalCount"
-                                class="nav-count"
-                                >0</span
-                            ></button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="admin-reports"
-                            data-admin-only
-                            type="button"
-                            ><span class="nav-glyph">&#9636;</span>Reports</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="admin-audit-logs"
-                            data-admin-only
-                            type="button"
-                            ><span class="nav-glyph">&#9776;</span>Audit Logs</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="admin-settings"
-                            data-admin-only
-                            type="button"
-                            ><span class="nav-glyph">&#9881;</span>Settings</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="reception-onboarding"
-                            data-reception-only
-                            type="button"
-                            ><span class="nav-glyph">&#9787;</span>Register Patient</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="reception-checkin"
-                            data-reception-only
-                            type="button"
-                            ><span class="nav-glyph">&#9636;</span>Patient Check-In</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="staff-profile"
-                            data-staff-only
-                            type="button"
-                            ><span class="nav-glyph">&#9787;</span>My Staff Profile</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="staff-access-events"
-                            data-compliance-only
-                            type="button"
-                            ><span class="nav-glyph">&#9776;</span>Access Events</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="client-checkin"
-                            data-client-only
-                            type="button"
-                            ><span class="nav-glyph">&#9636;</span>My QR Check-In</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="my-profile"
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#9787;</span>My Profile</button
-                        >
-                        <div
-                            class="nav-section-label"
-                            data-client-only
-                            >HEALTH INFORMATION</div
-                        >
-                        <button
-                            class="nav-item nav-subitem"
-                            data-view="health-conditions"
-                            data-client-only
-                            data-standard-only
-                            type="button"
-                            >Medical Conditions</button
-                        >
-                        <button
-                            class="nav-item nav-subitem"
-                            data-view="health-allergies"
-                            data-client-only
-                            data-standard-only
-                            type="button"
-                            >Allergies</button
-                        >
-                        <button
-                            class="nav-item nav-subitem"
-                            data-view="health-pregnancy"
-                            data-client-only
-                            data-standard-only
-                            data-maternal-only
-                            type="button"
-                            >Pregnancy</button
-                        >
-                        <button
-                            class="nav-item nav-subitem"
-                            data-view="health-lactation"
-                            data-client-only
-                            data-standard-only
-                            data-maternal-only
-                            type="button"
-                            >Lactation</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="client-progress"
-                            data-client-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#9636;</span>My Progress</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="client-goals"
-                            data-client-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#9673;</span>My Goals</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="client-meal-plan"
-                            data-client-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#9776;</span>My Meal Plan</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="client-appointments"
-                            data-client-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#9635;</span>Appointments</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="client-recommendations"
-                            data-client-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#10022;</span>Recommendations</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="ai-workspace"
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#10022;</span>AI Coach</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="appointment-requests"
-                            data-dietitian-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#9635;</span>Appointment Requests</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="reviews"
-                            data-dietitian-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#9678;</span>Review queue<span
-                                id="reviewCount"
-                                class="nav-count"
-                                >0</span
-                            ></button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="verification-documents"
-                            data-dietitian-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#9636;</span>Verification documents</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="dietitian-branches"
-                            data-dietitian-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#9636;</span>My branches</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="clients"
-                            data-dietitian-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#9787;</span>My Patients</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="foods"
-                            data-admin-only
-                            data-dietitian-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#10047;</span>Food library</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="recipes"
-                            data-dietitian-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#10047;</span>Recipes</button
-                        >
-                        <button
-                            class="nav-item"
-                            data-view="meal-plans"
-                            data-dietitian-only
-                            data-standard-only
-                            type="button"
-                            ><span class="nav-glyph">&#9776;</span>Meal plans</button
-                        >
-                    </nav>
-                    <div class="sidebar-bottom">
-                        <div
-                            id="connectionStatus"
-                            class="connection-status"
-                            data-state="checking"
-                            role="status"
-                            aria-live="polite"
-                            ><span
-                                class="status-dot"
-                                aria-hidden="true"
-                            ></span
-                            ><span id="connectionStatusText">Checking connection…</span></div
-                        >
-                        <button
-                            id="signOutButton"
-                            class="signout-button"
-                            type="button"
-                            ><span class="nav-glyph">&#8592;</span>Sign out</button
-                        >
-                    </div>
-                </aside>
-                <section class="workspace-main">
-                    <header class="workspace-header">
-                        <div class="header-context"
-                            ><span class="eyebrow eyebrow-green">NUTRICARE</span
-                            ><span
-                                id="headerDate"
-                                class="header-date"
-                            ></span
-                        ></div>
-                        <div class="profile-chip"
-                            ><span
-                                id="profileInitials"
-                                class="profile-avatar"
-                                >FN</span
-                            ><span id="profileName">Your account</span></div
-                        >
-                        <button
-                            id="mobileSignOutButton"
-                            class="mobile-signout"
-                            type="button"
-                            >Sign out</button
-                        >
-                    </header>
-                    <div
-                        id="workspaceContent"
-                        class="workspace-content"
-                        aria-live="polite"
-                    ></div>
-                </section>
-            </main>
-        </div>
-        <iframe
-            id="combinedFrame"
-            class="combined-frame"
-            title="Application view"
-            hidden
-        ></iframe>
-
-        <!-- Student: index -->
-        <template
-            id="combined-student-index"
-            data-title="Student Dietitian App - Login"
-        >
-            <main
-                class="student-main"
-                id="studentLogin"
-                data-student-page="login"
-            >
-                <section class="student-card">
-                    <h1>Student Dietitian App</h1>
-                    <p class="student-note">A simple nutrition practice project.</p>
-                    <form data-student-message>
-                        <div class="student-grid">
-                            <div class="student-field"
-                                ><label for="email">Email</label
-                                ><input
-                                    id="email"
-                                    type="email"
-                                    required
-                            /></div>
-                            <div class="student-field"
-                                ><label for="password">Password</label
-                                ><input
-                                    id="password"
-                                    type="password"
-                                    required
-                            /></div>
-                        </div>
-                        <div class="student-actions"
-                            ><button
-                                class="student-button"
-                                type="submit"
-                                >Login</button
-                            ><a
-                                class="student-button secondary"
-                                href="#dashboard"
-                                >View demo</a
-                            ></div
-                        >
-                        <div
-                            class="student-message"
-                            aria-live="polite"
-                        ></div>
-                    </form>
-                </section>
-            </main>
-
-            <div
-                class="student-layout"
-                id="studentWorkspace"
-                hidden
-            >
-                <aside class="student-sidebar">
-                    <h2 class="student-brand">Student Dietitian App</h2>
-                    <nav aria-label="Student navigation">
-                        <a
-                            href="#dashboard"
-                            data-student-link="dashboard"
-                            >Dashboard</a
-                        >
-                        <a
-                            href="#profile"
-                            data-student-link="profile"
-                            >My Profile</a
-                        >
-                        <a
-                            href="#progress"
-                            data-student-link="progress"
-                            >My Progress</a
-                        >
-                        <a
-                            href="#lactation"
-                            data-student-link="lactation"
-                            >Lactation</a
-                        >
-                        <a
-                            href="#login"
-                            data-student-link="login"
-                            >Log out</a
-                        >
-                    </nav>
-                </aside>
-                <main class="student-main">
-                    <div
-                        data-student-page="dashboard"
-                        hidden
-                    >
-                        <section class="student-card"
-                            ><h1>Dashboard</h1
-                            ><p>Welcome to the nutrition practice student project.</p
-                            ><div class="student-grid"
-                                ><div
-                                    ><h2>My profile</h2
-                                    ><p>Keep your identity and health information updated.</p
-                                    ><a
-                                        class="student-button secondary"
-                                        href="#profile"
-                                        >Open profile</a
-                                    ></div
-                                ><div
-                                    ><h2>My progress</h2
-                                    ><p>Record meals and review previous entries.</p
-                                    ><a
-                                        class="student-button secondary"
-                                        href="#progress"
-                                        >Open progress</a
-                                    ></div
-                                ><div
-                                    ><h2>AI Coach</h2
-                                    ><p>Ask nutrition questions and review recommendations.</p
-                                    ><button
-                                        class="student-button"
-                                        type="button"
-                                        data-student-message
-                                        >Open AI Coach</button
-                                    ><div
-                                        class="student-message"
-                                        aria-live="polite"
-                                    ></div></div></div
-                        ></section>
-                    </div>
-
-                    <div
-                        data-student-page="profile"
-                        hidden
-                    >
-                        <section class="student-card"
-                            ><h1>My Profile</h1>
-                            <form data-student-message
-                                ><div class="student-grid"
-                                    ><div class="student-field"
-                                        ><label for="name">Full name</label
-                                        ><input
-                                            id="name"
-                                            value="Student Patient" /></div
-                                    ><div class="student-field"
-                                        ><label for="idNumber">ID number</label
-                                        ><input
-                                            id="idNumber"
-                                            required /></div
-                                    ><div class="student-field"
-                                        ><label for="gender">Gender</label
-                                        ><select
-                                            id="gender"
-                                            required
-                                            ><option value="">Select gender</option
-                                            ><option>Female</option
-                                            ><option>Male</option
-                                            ><option>Other</option></select
-                                        ></div
-                                    ><div class="student-field"
-                                        ><label for="dob">Date of birth</label
-                                        ><input
-                                            id="dob"
-                                            type="date"
-                                            required /></div></div
-                                ><div class="student-actions"
-                                    ><button
-                                        class="student-button"
-                                        type="submit"
-                                        >Save profile</button
-                                    ></div
-                                ><div
-                                    class="student-message"
-                                    aria-live="polite"
-                                ></div
-                            ></form>
+                                    >You must confirm your decision to register as a patient.</small
+                                >
+                                <input
+                                    type="hidden"
+                                    name="privacy_notice_version"
+                                    value="2026-10-28-v1"
+                                    disabled
+                                />
+                            </div>
                         </section>
-                    </div>
-
-                    <div
-                        data-student-page="progress"
-                        hidden
-                    >
-                        <section class="student-card"
-                            ><h1>My Progress</h1
-                            ><p
-                                >Enter meals eaten during the day. Previous entries remain in the
-                                table below.</p
+                        <div
+                            id="patientSignupActions"
+                            class="signup-step-actions"
+                            hidden
+                        >
+                            <button
+                                class="button signup-back"
+                                id="patientSignupBack"
+                                type="button"
+                                hidden
+                                >Back</button
                             >
-                            <form data-student-message
-                                ><div class="student-grid"
-                                    ><div class="student-field"
-                                        ><label for="date">Date</label
-                                        ><input
-                                            id="date"
-                                            type="date"
-                                            required /></div
-                                    ><div class="student-field"
-                                        ><label for="mealType">Meal type</label
-                                        ><select id="mealType"
-                                            ><option>Breakfast</option
-                                            ><option>Lunch</option
-                                            ><option>Dinner</option
-                                            ><option>Snack</option></select
-                                        ></div
-                                    ><div class="student-field"
-                                        ><label for="meal">Meal eaten</label
-                                        ><input
-                                            id="meal"
-                                            placeholder="e.g. Oats and fruit"
-                                            required /></div
-                                    ><div class="student-field"
-                                        ><label for="calories">Calories</label
-                                        ><input
-                                            id="calories"
-                                            type="number"
-                                            min="0" /></div></div
-                                ><div class="student-actions"
-                                    ><button
-                                        class="student-button"
-                                        type="submit"
-                                        >Save meal</button
-                                    ></div
-                                ><div
-                                    class="student-message"
-                                    aria-live="polite"
-                                ></div
-                            ></form>
-                        </section>
-
-                        <section class="student-card"
-                            ><h2>Previous meals</h2
-                            ><table class="student-table"
-                                ><thead
-                                    ><tr><th>Date</th><th>Meal</th><th>Description</th></tr></thead
-                                ><tbody
-                                    ><tr
-                                        ><td>Example</td><td>Breakfast</td
-                                        ><td>Previous entries appear here</td></tr
-                                    ></tbody
-                                ></table
-                            ></section
+                            <button
+                                class="button button-primary signup-next"
+                                id="patientSignupNext"
+                                type="button"
+                                >Continue <span aria-hidden="true">&#8594;</span></button
+                            >
+                        </div>
+                        <div
+                            id="signupDraftActions"
+                            class="signup-draft-actions"
+                            hidden
                         >
-                    </div>
+                            <p
+                                >Your password, identity number, birth date, consent and documents
+                                will <strong>never</strong> be saved in a draft. Avoid saving drafts
+                                on shared computers.</p
+                            >
+                            <button
+                                id="signupSaveDraft"
+                                type="button"
+                                class="button quiet-button"
+                                >Save draft on this device</button
+                            >
+                            <button
+                                id="signupRestoreDraft"
+                                type="button"
+                                class="button quiet-button"
+                                >Resume saved draft</button
+                            >
+                            <button
+                                id="signupClearDraft"
+                                type="button"
+                                class="button quiet-button"
+                                >Discard draft</button
+                            >
+                            <span
+                                id="signupDraftMessage"
+                                role="status"
+                                aria-live="polite"
+                            ></span>
+                        </div>
+                        <button
+                            id="signupSubmit"
+                            class="button button-primary auth-submit"
+                            type="submit"
+                            ><span>Create account</span
+                            ><span
+                                class="button-arrow"
+                                aria-hidden="true"
+                                >&#8594;</span
+                            ></button
+                        >
+                    </form>
 
-                    <div
-                        data-student-page="lactation"
+                    <form
+                        id="adminSetupForm"
+                        class="auth-form"
                         hidden
                     >
-                        <section class="student-card"
-                            ><h1>Lactation</h1
-                            ><p>Record feeding information and notes for your care team.</p>
-                            <form data-student-message
-                                ><div class="student-grid"
-                                    ><div class="student-field"
-                                        ><label for="status">Current status</label
-                                        ><select id="status"
-                                            ><option>Breast feeding</option
-                                            ><option>Formula feeding</option
-                                            ><option>Combo feeding</option></select
-                                        ></div
-                                    ><div class="student-field"
-                                        ><label for="age">Infant age</label
-                                        ><input
-                                            id="age"
-                                            placeholder="e.g. 4 months" /></div
-                                    ><div class="student-field"
-                                        ><label for="feeding">Daily feeding</label
-                                        ><input
-                                            id="feeding"
-                                            placeholder="Number of feeds or notes" /></div
-                                    ><div class="student-field"
-                                        ><label for="comfort">Maternal discomfort</label
-                                        ><textarea
-                                            id="comfort"
-                                            placeholder="Mastitis, clogged ducts, or nipple symptoms"
-                                        ></textarea></div
-                                    ><div class="student-field"
-                                        ><label for="sensitivities">Infant sensitivities</label
-                                        ><textarea
-                                            id="sensitivities"
-                                            placeholder="Food reactions, allergies, gas, reflux, or colic"
-                                        ></textarea></div></div
-                                ><div class="student-actions"
-                                    ><button
-                                        class="student-button"
-                                        type="submit"
-                                        >Save lactation details</button
-                                    ></div
-                                ><div
-                                    class="student-message"
-                                    aria-live="polite"
-                                ></div
-                            ></form>
-                        </section>
-                    </div>
-                </main>
-            </div>
-        </template>
-
-        <!-- Traditional: admin-management -->
-        <template
-            id="combined-traditional-admin-management"
-            data-title="Admin Management"
-        >
-            <header>
-                <h1>Dietitian, Branch, and Administrator Management</h1>
-                <p>Signed in as <span data-user-name>Guest</span></p>
-            </header>
-            <div class="traditional-layout">
-                <nav>
-                    <a href="#traditional/menu">Menu Page</a>
-                    <a href="#traditional/dietitian-clients">Client Records</a>
-                    <a href="#traditional/admin-management">Admin Management</a>
-                    <a
-                        href="#"
-                        data-logout
-                        >Sign out</a
-                    >
-                </nav>
-                <main class="traditional-main">
-                    <div data-support-root></div>
-                    <section class="page-box">
-                        <h2>Create administrator</h2>
-                        <div
-                            data-message
-                            class="traditional-message hidden"
-                        ></div>
-                        <form
-                            class="traditional-form"
-                            data-json-form
-                            data-endpoint="/api/v1/admin/administrators"
-                            data-reload
+                        <p class="admin-setup-notice"
+                            >Create the first administrator for this installation. Setup is
+                            available only from this computer.</p
                         >
-                            <table>
-                                <tr>
-                                    <td>First name:</td>
-                                    <td
-                                        ><input
-                                            name="first_name"
-                                            required
-                                    /></td>
-                                </tr>
-                                <tr>
-                                    <td>Last name:</td>
-                                    <td
-                                        ><input
-                                            name="last_name"
-                                            required
-                                    /></td>
-                                </tr>
-                                <tr>
-                                    <td>Email:</td>
-                                    <td
-                                        ><input
-                                            name="email"
-                                            type="email"
-                                            required
-                                    /></td>
-                                </tr>
-                                <tr>
-                                    <td>Password:</td>
-                                    <td
-                                        ><input
-                                            name="password"
-                                            type="password"
-                                            minlength="8"
-                                            required
-                                    /></td>
-                                </tr>
-                                <tr>
-                                    <td></td>
-                                    <td
-                                        ><input
-                                            class="traditional-button"
-                                            type="submit"
-                                            value="CREATE ADMINISTRATOR"
-                                    /></td>
-                                </tr>
-                            </table>
-                        </form>
-                    </section>
-                    <section class="page-box">
-                        <h2>Administrators</h2>
-                        <table class="traditional-table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Name</th>
-                                    <th>Email</th>
-                                </tr>
-                            </thead>
-                            <tbody data-admin-table></tbody>
-                        </table>
-                    </section>
-                </main>
-            </div>
-        </template>
-
-        <!-- Traditional: client-profile -->
-        <template
-            id="combined-traditional-client-profile"
-            data-title="Client Profile"
-        >
-            <header
-                ><h1>Client Profile</h1
-                ><p>Client ID: <span data-client-id>Not signed in</span></p></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/client-profile">Profile</a
-                    ><a href="#traditional/progress">Progress</a
-                    ><a
-                        href="#traditional/index"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>Recorded client details</h2
-                        ><div
-                            data-message
-                            class="traditional-message hidden"
-                        ></div
-                        ><table class="traditional-table"
-                            ><thead
-                                ><tr><th>Field</th><th>Value</th></tr></thead
-                            ><tbody data-profile-table
-                                ><tr><td colspan="2">Loading...</td></tr></tbody
-                            ></table
-                        ></section
-                    ><section class="page-box"
-                        ><h2>Health profile data</h2
-                        ><pre
-                            data-profile-details
-                            class="small-note"
+                        <label
+                            class="field-label"
+                            for="adminSetupFirstName"
+                            >First name</label
                         >
-Loading...</pre>
-                    </section></main
-                ></div
-            >
-        </template>
+                        <input
+                            id="adminSetupFirstName"
+                            name="first_name"
+                            autocomplete="given-name"
+                            placeholder="First name"
+                            required
+                        />
+                        <label
+                            class="field-label"
+                            for="adminSetupLastName"
+                            >Last name</label
+                        >
+                        <input
+                            id="adminSetupLastName"
+                            name="last_name"
+                            autocomplete="family-name"
+                            placeholder="Last name"
+                            required
+                        />
+                        <label
+                            class="field-label"
+                            for="adminSetupEmail"
+                            >Email address</label
+                        >
+                        <input
+                            id="adminSetupEmail"
+                            name="email"
+                            type="email"
+                            autocomplete="email"
+                            placeholder="you@example.com"
+                            required
+                        />
+                        <label
+                            class="field-label"
+                            for="adminSetupPassword"
+                            >Create password</label
+                        >
+                        <input
+                            id="adminSetupPassword"
+                            name="password"
+                            type="password"
+                            autocomplete="new-password"
+                            minlength="8"
+                            placeholder="At least 8 characters"
+                            required
+                        />
+                        <label
+                            class="field-label"
+                            for="adminSetupConfirmPassword"
+                            >Confirm password</label
+                        >
+                        <input
+                            id="adminSetupConfirmPassword"
+                            name="confirm_password"
+                            type="password"
+                            autocomplete="new-password"
+                            placeholder="Re-enter your password"
+                            required
+                        />
+                        <button
+                            class="button button-primary auth-submit"
+                            type="submit"
+                            ><span>Create administrator</span
+                            ><span
+                                class="button-arrow"
+                                aria-hidden="true"
+                                >&#8594;</span
+                            ></button
+                        >
+                    </form>
 
-        <!-- Traditional: daily-feeding -->
-        <template
-            id="combined-traditional-daily-feeding"
-            data-title="Daily Feeding"
-        >
-            <header><h1>Daily Feeding</h1></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/lactation">Lactation</a
-                    ><a href="#traditional/progress">Progress</a
-                    ><a
-                        href="#traditional/index"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>Record daily feeding</h2
-                        ><div
-                            data-message
-                            class="traditional-message hidden"
-                        ></div
-                        ><form
-                            class="traditional-form"
-                            data-json-form
-                            data-endpoint="/api/v1/clients/CLIENT_ID/lactation/daily-feeding"
-                            data-reload
-                            ><table
-                                ><tr
-                                    ><td>Breastfeeding sessions:</td
-                                    ><td
-                                        ><input
-                                            name="breastfeeding_sessions"
-                                            type="number"
-                                            min="0"
-                                            value="0" /></td></tr
-                                ><tr
-                                    ><td>Pumping sessions:</td
-                                    ><td
-                                        ><input
-                                            name="pumping_sessions"
-                                            type="number"
-                                            min="0"
-                                            value="0" /></td></tr
-                                ><tr
-                                    ><td>Expressed milk (ml):</td
-                                    ><td
-                                        ><input
-                                            name="expressed_milk_ml"
-                                            type="number"
-                                            min="0"
-                                            value="0" /></td></tr
-                                ><tr
-                                    ><td>Formula feeds:</td
-                                    ><td
-                                        ><input
-                                            name="formula_feeds"
-                                            type="number"
-                                            min="0"
-                                            value="0" /></td></tr
-                                ><tr
-                                    ><td>Notes:</td><td><textarea name="notes"></textarea></td></tr
-                                ><tr
-                                    ><td></td
-                                    ><td
-                                        ><input
-                                            class="traditional-button"
-                                            type="submit"
-                                            value="SAVE FEEDING" /></td></tr></table></form></section></main
-            ></div>
-        </template>
-
-        <!-- Traditional: dietitian-clients -->
-        <template
-            id="combined-traditional-dietitian-clients"
-            data-title="Dietitian Client Records"
-        >
-            <header
-                ><h1>Dietitian Client Records</h1
-                ><p>Signed in as <span data-user-name>Guest</span></p></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/dietitian-clients">Client Records</a
-                    ><a href="#traditional/admin-management">Admin Management</a
-                    ><a
-                        href="#"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>All clients</h2
-                        ><div
-                            data-message
-                            class="traditional-message hidden"
-                        ></div
-                        ><table class="traditional-table"
-                            ><thead
-                                ><tr
-                                    ><th>Client ID</th><th>Name</th><th>Email</th><th>Dietitian</th
-                                    ><th>Status</th></tr
-                                ></thead
-                            ><tbody data-client-table
-                                ><tr><td colspan="5">Loading...</td></tr></tbody
-                            ></table
-                        ></section
-                    ></main
-                ></div
-            >
-        </template>
-
-        <!-- Traditional: index -->
-        <template
-            id="combined-traditional-index"
-            data-title="Nutrition Practice - Sign In"
-        >
-            <header><h1>Nutrition Practice</h1><p>Traditional multi-page frontend</p></header
-            ><main class="traditional-main login-box"
-                ><section class="page-box"
-                    ><h2>Sign In</h2><p>Enter your details to open the nutrition workspace.</p
-                    ><div
-                        data-message
-                        class="traditional-message hidden"
-                    ></div
-                    ><form
-                        id="traditionalLoginForm"
-                        class="traditional-form"
-                        ><table
-                            ><tr
-                                ><td><label for="email">Email address:</label></td
-                                ><td
-                                    ><input
-                                        id="email"
-                                        name="email"
-                                        type="email"
-                                        required /></td></tr
-                            ><tr
-                                ><td><label for="password">Password:</label></td
-                                ><td
-                                    ><input
-                                        id="password"
-                                        name="password"
-                                        type="password"
-                                        required /></td></tr
-                            ><tr
-                                ><td></td
-                                ><td
-                                    ><input
-                                        class="traditional-button"
-                                        type="submit"
-                                        value="SIGN IN" /></td></tr></table></form
-                    ><p><a href="#traditional/register">Create a new account</a></p
-                    ><details class="login-support">
+                    <details class="login-support">
                         <summary>Need help signing in? Contact support</summary>
                         <p
                             >Send a support ticket without signing in. Do not include passwords or
@@ -1735,7 +691,7 @@ Loading...</pre>
                         >
                         <form
                             data-guest-support
-                            class="auth-form traditional-form"
+                            class="auth-form"
                         >
                             <label
                                 class="field-label"
@@ -1773,7 +729,7 @@ Loading...</pre>
                                 required
                             ></textarea>
                             <button
-                                class="button button-primary traditional-button"
+                                class="button button-primary"
                                 type="submit"
                                 >Submit support ticket</button
                             >
@@ -1782,794 +738,362 @@ Loading...</pre>
                                 role="status"
                                 aria-live="polite"
                             ></p>
-                        </form> </details></section
-            ></main>
-        </template>
+                        </form>
+                    </details>
+                    <p class="auth-note"
+                        ><span class="note-dot"></span> A thoughtful workspace for everyday
+                        nutrition care.</p
+                    >
+                </div>
+                <footer class="auth-footer"><span>&copy; 2026 Nutrition Practice</span></footer>
+            </section>
+        </main>
 
-        <!-- Traditional: infant-sensitivities -->
-        <template
-            id="combined-traditional-infant-sensitivities"
-            data-title="Infant Sensitivities"
+        <main
+            id="workspace"
+            class="workspace"
+            hidden
         >
-            <header
-                ><h1>Infant Sensitivities</h1
-                ><p>Log food reactions, allergies, gas, reflux, or colic.</p></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/lactation">Lactation</a
-                    ><a
-                        href="#traditional/index"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>Record infant issue</h2
-                        ><div
-                            data-message
-                            class="traditional-message hidden"
-                        ></div
-                        ><form
-                            class="traditional-form"
-                            data-json-form
-                            data-endpoint="/api/v1/clients/CLIENT_ID/lactation/infant-sensitivities"
-                            data-reload
-                            ><table
-                                ><tr
-                                    ><td>Category:</td
-                                    ><td
-                                        ><select name="category"
-                                            ><option value="food_reaction">Food reaction</option
-                                            ><option value="allergy">Allergy</option
-                                            ><option value="excessive_gas">Excessive gas</option
-                                            ><option value="reflux">Reflux</option
-                                            ><option value="colic">Colic</option
-                                            ><option value="other">Other</option></select
-                                        ></td
-                                    ></tr
-                                ><tr
-                                    ><td>Severity (1-10):</td
-                                    ><td
-                                        ><input
-                                            name="severity"
-                                            type="number"
-                                            min="1"
-                                            max="10"
-                                            required /></td></tr
-                                ><tr
-                                    ><td>Suspected trigger:</td
-                                    ><td><input name="suspected_trigger" /></td></tr
-                                ><tr
-                                    ><td>Symptoms:</td
-                                    ><td><textarea name="symptoms"></textarea></td></tr
-                                ><tr
-                                    ><td></td
-                                    ><td
-                                        ><input
-                                            class="traditional-button"
-                                            type="submit"
-                                            value="SAVE INFANT ISSUE" /></td></tr></table></form></section></main
-            ></div>
-        </template>
-
-        <!-- Traditional: lactation -->
-        <template
-            id="combined-traditional-lactation"
-            data-title="Lactation"
-        >
-            <header
-                ><h1>Lactation Details</h1
-                ><p>Client ID: <span data-client-id>Not signed in</span></p></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/client-profile">Profile</a
-                    ><a href="#traditional/progress">Progress</a
-                    ><a
-                        href="#traditional/index"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>Current lactation status</h2
-                        ><div
-                            data-message
-                            class="traditional-message hidden"
-                        ></div
-                        ><form
-                            class="traditional-form"
-                            data-json-form
-                            data-endpoint="/api/v1/clients/CLIENT_ID/lactation/status"
-                            data-reload
-                            ><table
-                                ><tr
-                                    ><td>Feeding status:</td
-                                    ><td
-                                        ><select name="feeding_status"
-                                            ><option value="breastfeeding">Breast feeding</option
-                                            ><option value="formula_feeding">Formula feeding</option
-                                            ><option value="combo">Combo feeding</option></select
-                                        ></td
-                                    ></tr
-                                ><tr
-                                    ><td>Infant age (months):</td
-                                    ><td
-                                        ><input
-                                            name="infant_age_months"
-                                            type="number"
-                                            min="0" /></td></tr
-                                ><tr
-                                    ><td>Notes:</td><td><textarea name="notes"></textarea></td></tr
-                                ><tr
-                                    ><td></td
-                                    ><td
-                                        ><input
-                                            class="traditional-button"
-                                            type="submit"
-                                            value="SAVE STATUS" /></td></tr></table></form></section
-                    ><section class="page-box"
-                        ><h2>Saved lactation records</h2
-                        ><table class="traditional-table"
-                            ><thead
-                                ><tr><th>Section</th><th>Details</th></tr></thead
-                            ><tbody data-lactation-table></tbody></table></section
-                    ><section class="page-box"
-                        ><h2>Additional sections</h2
-                        ><ul
-                            ><li>Daily feeding</li
-                            ><li>Increase milk production</li
-                            ><li>Manage over-supply</li
-                            ><li>Weaning nutrition</li
-                            ><li>Maternal discomfort</li
-                            ><li>Infant sensitivities</li></ul
-                        ><p class="small-note"
-                            >These sections are available in the main workspace and can be expanded
-                            into their own traditional pages using the same form pattern.</p
-                        ></section
-                    ></main
-                ></div
-            >
-        </template>
-
-        <!-- Traditional: maternal-discomfort -->
-        <template
-            id="combined-traditional-maternal-discomfort"
-            data-title="Maternal Discomfort"
-        >
-            <header
-                ><h1>Maternal Discomfort</h1
-                ><p>Log mastitis symptoms, clogged ducts, or sore and cracked nipples.</p></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/lactation">Lactation</a
-                    ><a
-                        href="#traditional/index"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>Record symptoms</h2
-                        ><div
-                            data-message
-                            class="traditional-message hidden"
-                        ></div
-                        ><form
-                            class="traditional-form"
-                            data-json-form
-                            data-endpoint="/api/v1/clients/CLIENT_ID/lactation/maternal-discomfort"
-                            data-reload
-                            ><table
-                                ><tr
-                                    ><td>Symptom:</td
-                                    ><td
-                                        ><select name="symptom_type"
-                                            ><option value="mastitis">Mastitis</option
-                                            ><option value="clogged_duct">Clogged duct</option
-                                            ><option value="sore_nipples">Sore nipples</option
-                                            ><option value="cracked_nipples">Cracked nipples</option
-                                            ><option value="engorgement">Engorgement</option
-                                            ><option value="other">Other</option></select
-                                        ></td
-                                    ></tr
-                                ><tr
-                                    ><td>Severity (1-10):</td
-                                    ><td
-                                        ><input
-                                            name="severity"
-                                            type="number"
-                                            min="1"
-                                            max="10"
-                                            required /></td></tr
-                                ><tr
-                                    ><td>Breast side:</td
-                                    ><td
-                                        ><select name="breast_side"
-                                            ><option value="">Not specified</option
-                                            ><option value="left">Left</option
-                                            ><option value="right">Right</option
-                                            ><option value="both">Both</option></select
-                                        ></td
-                                    ></tr
-                                ><tr
-                                    ><td>Fever:</td
-                                    ><td
-                                        ><label
-                                            ><input
-                                                name="has_fever"
-                                                value="true"
-                                                type="checkbox"
-                                            />
-                                            Yes</label
-                                        ></td
-                                    ></tr
-                                ><tr
-                                    ><td>Notes:</td><td><textarea name="notes"></textarea></td></tr
-                                ><tr
-                                    ><td></td
-                                    ><td
-                                        ><input
-                                            class="traditional-button"
-                                            type="submit"
-                                            value="SAVE SYMPTOMS" /></td></tr></table></form></section></main
-            ></div>
-        </template>
-
-        <!-- Traditional: medical-conditions -->
-        <template
-            id="combined-traditional-medical-conditions"
-            data-title="Medical Conditions"
-        >
-            <header><h1>Medical Conditions</h1></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/client-profile">Profile</a
-                    ><a href="#traditional/progress">Progress</a
-                    ><a
-                        href="#traditional/index"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>Add a medical condition</h2
-                        ><div
-                            data-message
-                            class="traditional-message hidden"
-                        ></div
-                        ><form
-                            class="traditional-form"
-                            data-json-form
-                            data-endpoint="/api/v1/clients/CLIENT_ID/medical-conditions"
-                            ><table
-                                ><tr
-                                    ><td>Condition:</td
-                                    ><td
-                                        ><input
-                                            name="condition_name"
-                                            required /></td></tr
-                                ><tr
-                                    ><td>ICD code:</td><td><input name="icd_code" /></td></tr
-                                ><tr
-                                    ><td></td
-                                    ><td
-                                        ><input
-                                            class="traditional-button"
-                                            type="submit"
-                                            value="SAVE CONDITION" /></td></tr></table></form></section></main
-            ></div>
-        </template>
-
-        <!-- Traditional: menu -->
-        <template
-            id="combined-traditional-menu"
-            data-title="Menu Page"
-        >
-            <header
-                ><h1>Nutrition Practice Menu</h1
-                ><p>Signed in as <span data-user-name>Guest</span></p></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/client-profile">My Profile</a
-                    ><a href="#traditional/progress">My Progress and Meals</a
-                    ><a href="#traditional/lactation">Lactation</a
-                    ><a href="#traditional/daily-feeding">Daily Feeding</a
-                    ><a href="#traditional/milk-supply">Milk Supply</a
-                    ><a href="#traditional/weaning">Weaning Nutrition</a
-                    ><a href="#traditional/maternal-discomfort">Maternal Discomfort</a
-                    ><a href="#traditional/infant-sensitivities">Infant Sensitivities</a
-                    ><a href="#traditional/medical-conditions">Medical Conditions</a
-                    ><a href="#traditional/recommendations">Recommendations</a
-                    ><a href="#traditional/dietitian-clients">Client Records</a
-                    ><a href="#traditional/admin-management">Admin Management</a
-                    ><a href="#traditional/support">Support &amp; Tickets</a
-                    ><a
-                        href="#"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>Welcome to the workspace</h2
-                        ><p>This traditional frontend uses one HTML page for each major function.</p
-                        ><ul class="link-list"
-                            ><li><a href="#traditional/client-profile">View client profile</a></li
-                            ><li><a href="#traditional/progress">Record progress and meals</a></li
-                            ><li><a href="#traditional/lactation">Record lactation details</a></li
-                            ><li
-                                ><a href="#traditional/dietitian-clients"
-                                    >Dietitian: view clients</a
-                                ></li
-                            ><li
-                                ><a href="#traditional/admin-management"
-                                    >Admin: manage accounts and branches</a
-                                ></li
-                            ></ul
-                        ></section
-                    ></main
-                ></div
-            >
-        </template>
-
-        <!-- Traditional: milk-supply -->
-        <template
-            id="combined-traditional-milk-supply"
-            data-title="Milk Supply"
-        >
-            <header><h1>Milk Production and Supply</h1></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/lactation">Lactation</a
-                    ><a
-                        href="#traditional/index"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>Increase production or manage over-supply</h2
-                        ><div
-                            data-message
-                            class="traditional-message hidden"
-                        ></div
-                        ><form
-                            class="traditional-form"
-                            data-json-form
-                            data-endpoint="/api/v1/clients/CLIENT_ID/lactation/milk-supply"
-                            data-reload
-                            ><table
-                                ><tr
-                                    ><td>Concern:</td
-                                    ><td
-                                        ><select name="concern"
-                                            ><option value="low_supply"
-                                                >Increase milk production</option
-                                            ><option value="over_supply"
-                                                >Manage over-supply</option
-                                            ></select
-                                        ></td
-                                    ></tr
-                                ><tr
-                                    ><td>Pumped milk in 24 hours (ml):</td
-                                    ><td
-                                        ><input
-                                            name="pumped_ml_24h"
-                                            type="number"
-                                            min="0" /></td></tr
-                                ><tr
-                                    ><td>Strategies tried:</td
-                                    ><td><textarea name="strategies_tried"></textarea></td></tr
-                                ><tr
-                                    ><td>Notes:</td><td><textarea name="notes"></textarea></td></tr
-                                ><tr
-                                    ><td></td
-                                    ><td
-                                        ><input
-                                            class="traditional-button"
-                                            type="submit"
-                                            value="SAVE SUPPLY ENTRY" /></td></tr></table></form></section></main
-            ></div>
-        </template>
-
-        <!-- Traditional: progress -->
-        <template
-            id="combined-traditional-progress"
-            data-title="Progress and Meals"
-        >
-            <header
-                ><h1>My Progress and Meals</h1
-                ><p>Client ID: <span data-client-id>Not signed in</span></p></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/client-profile">Profile</a
-                    ><a href="#traditional/lactation">Lactation</a
-                    ><a
-                        href="#traditional/index"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>Add progress</h2
-                        ><div
-                            data-message
-                            class="traditional-message hidden"
-                        ></div
-                        ><form
-                            class="traditional-form"
-                            data-json-form
-                            data-endpoint="/api/v1/clients/CLIENT_ID/progress"
-                            data-reload
-                            ><table
-                                ><tr
-                                    ><td>Weight (kg):</td
-                                    ><td
-                                        ><input
-                                            name="weight_kg"
-                                            type="number"
-                                            step="0.1" /></td></tr
-                                ><tr
-                                    ><td>Calories:</td
-                                    ><td
-                                        ><input
-                                            name="calories"
-                                            type="number" /></td></tr
-                                ><tr
-                                    ><td>Water (ml):</td
-                                    ><td
-                                        ><input
-                                            name="water_ml"
-                                            type="number" /></td></tr
-                                ><tr
-                                    ><td>Steps:</td
-                                    ><td
-                                        ><input
-                                            name="steps"
-                                            type="number" /></td></tr
-                                ><tr
-                                    ><td>Sleep (hours):</td
-                                    ><td
-                                        ><input
-                                            name="sleep_hours"
-                                            type="number"
-                                            step="0.1" /></td></tr
-                                ><tr
-                                    ><td></td
-                                    ><td
-                                        ><input
-                                            class="traditional-button"
-                                            type="submit"
-                                            value="SAVE PROGRESS" /></td></tr></table></form></section
-                    ><section class="page-box"
-                        ><h2>Previous progress</h2
-                        ><table class="traditional-table"
-                            ><thead
-                                ><tr
-                                    ><th>Date</th><th>Weight</th><th>Calories</th><th>Water</th
-                                    ><th>Steps</th><th>Sleep</th></tr
-                                ></thead
-                            ><tbody data-progress-table></tbody></table></section
-                    ><section class="page-box"
-                        ><h2>Add a meal</h2
-                        ><form
-                            class="traditional-form"
-                            data-json-form
-                            data-endpoint="/api/v1/clients/CLIENT_ID/meals"
-                            data-reload
-                            ><table
-                                ><tr
-                                    ><td>Meal type:</td
-                                    ><td
-                                        ><select name="meal_type"
-                                            ><option>breakfast</option
-                                            ><option>lunch</option
-                                            ><option>dinner</option
-                                            ><option>snack</option
-                                            ><option>other</option></select
-                                        ></td
-                                    ></tr
-                                ><tr
-                                    ><td>Description:</td
-                                    ><td>
-                                        <textarea
-                                            name="description"
-                                            required
-                                        ></textarea></td></tr
-                                ><tr
-                                    ><td>Calories:</td
-                                    ><td
-                                        ><input
-                                            name="calories"
-                                            type="number" /></td></tr
-                                ><tr
-                                    ><td></td
-                                    ><td
-                                        ><input
-                                            class="traditional-button"
-                                            type="submit"
-                                            value="SAVE MEAL" /></td></tr></table></form></section
-                    ><section class="page-box"
-                        ><h2>Previous meals</h2
-                        ><table class="traditional-table"
-                            ><thead
-                                ><tr
-                                    ><th>Date</th><th>Time</th><th>Type</th><th>Description</th
-                                    ><th>Calories</th></tr
-                                ></thead
-                            ><tbody data-meals-table></tbody></table></section></main
-            ></div>
-        </template>
-
-        <!-- Traditional: recommendations -->
-        <template
-            id="combined-traditional-recommendations"
-            data-title="Recommendations"
-        >
-            <header><h1>Recommendations</h1></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/client-profile">Profile</a
-                    ><a href="#traditional/progress">Progress</a
-                    ><a
-                        href="#traditional/index"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>Nutrition recommendations</h2
-                        ><p>Recommendations reviewed by a dietitian appear here.</p
-                        ><p class="small-note"
-                            >Use the main workspace AI Coach for drafting and dietitian review. This
-                            page is the traditional HTML destination for shared recommendations.</p
-                        ></section
-                    ></main
-                ></div
-            >
-        </template>
-
-        <!-- Traditional: register -->
-        <template
-            id="combined-traditional-register"
-            data-title="Create Account"
-        >
-            <header><h1>Create Account</h1></header
-            ><main class="traditional-main"
-                ><section class="page-box"
-                    ><div
-                        data-message
-                        class="traditional-message hidden"
-                    ></div
-                    ><form
-                        id="traditionalRegisterForm"
-                        class="traditional-form"
-                        ><table
-                            ><tr
-                                ><td>Account type:</td
-                                ><td
-                                    ><label
-                                        ><input
-                                            type="radio"
-                                            name="role"
-                                            value="client"
-                                            checked
-                                        />
-                                        Patient</label
-                                    >
-                                    <label
-                                        ><input
-                                            type="radio"
-                                            name="role"
-                                            value="dietitian"
-                                        />
-                                        Dietitian</label
-                                    ></td
-                                ></tr
-                            ><tr
-                                ><td>First name:</td
-                                ><td
-                                    ><input
-                                        name="first_name"
-                                        required /></td></tr
-                            ><tr
-                                ><td>Last name:</td
-                                ><td
-                                    ><input
-                                        name="last_name"
-                                        required /></td></tr
-                            ><tr
-                                ><td>Email:</td
-                                ><td
-                                    ><input
-                                        name="email"
-                                        type="email"
-                                        required /></td></tr
-                            ><tbody id="traditionalClientFields"
-                                ><tr
-                                    ><td>ID number:</td
-                                    ><td
-                                        ><input
-                                            name="id_number"
-                                            required /></td></tr
-                                ><tr
-                                    ><td>Phone number:</td
-                                    ><td
-                                        ><input
-                                            name="phone_number"
-                                            required /></td></tr
-                                ><tr
-                                    ><td>Gender:</td
-                                    ><td
-                                        ><select
-                                            name="gender"
-                                            required
-                                            ><option value="">Select gender</option
-                                            ><option value="female">Female</option
-                                            ><option value="male">Male</option
-                                            ><option value="other">Other</option></select
-                                        ></td
-                                    ></tr
-                                ><tr
-                                    ><td>Date of birth:</td
-                                    ><td
-                                        ><input
-                                            name="date_of_birth"
-                                            type="date"
-                                            required /></td></tr
-                                ><tr
-                                    ><td>Dietitian ID:</td
-                                    ><td><input name="dietitian_id" /></td></tr
-                                ><tr
-                                    ><td>Consent:</td
-                                    ><td
-                                        ><label
-                                            ><input
-                                                name="consent_accepted"
-                                                value="true"
-                                                type="checkbox"
-                                            />
-                                            I consent to processing of my information.</label
-                                        ></td
-                                    ></tr
-                                ></tbody
-                            ><tbody
-                                id="traditionalDietitianFields"
-                                class="hidden"
-                                ><tr
-                                    ><td>License number:</td
-                                    ><td><input name="license_number" /></td></tr></tbody
-                            ><tr
-                                ><td>Password:</td
-                                ><td
-                                    ><input
-                                        name="password"
-                                        type="password"
-                                        minlength="8"
-                                        required /></td></tr
-                            ><tr
-                                ><td>Confirm password:</td
-                                ><td
-                                    ><input
-                                        name="confirm_password"
-                                        type="password"
-                                        minlength="8"
-                                        required /></td></tr
-                            ><tr
-                                ><td></td
-                                ><td
-                                    ><input
-                                        class="traditional-button"
-                                        type="submit"
-                                        value="CREATE ACCOUNT" /></td></tr></table></form
-                    ><p><a href="#traditional/index">Home Page</a></p></section
-                ></main
-            >
-        </template>
-
-        <!-- Traditional: support -->
-        <template
-            id="combined-traditional-support"
-            data-title="Support &amp; Tickets"
-        >
-            <header>
-                <h1>Support &amp; Tickets</h1>
-                <p>Signed in as <span data-user-name>Guest</span></p>
-            </header>
-            <div class="traditional-layout">
-                <nav>
-                    <a href="#traditional/menu">Menu Page</a>
-                    <a href="#traditional/admin-management">Admin Management</a>
-                    <a
-                        href="#"
-                        data-logout
-                        >Sign out</a
+            <aside class="workspace-sidebar">
+                <div class="sidebar-label">WORKSPACE</div>
+                <nav
+                    class="side-nav"
+                    aria-label="Main navigation"
+                >
+                    <button
+                        class="nav-item is-current"
+                        data-view="overview"
+                        type="button"
+                        ><span class="nav-glyph">&#9633;</span>Dashboard</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="support"
+                        type="button"
+                        ><span class="nav-glyph">&#9993;</span>Support &amp; Tickets</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="admin-staff"
+                        data-admin-only
+                        type="button"
+                        ><span class="nav-glyph">&#9787;</span>Staff &amp; Roles</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="admin-access-events"
+                        data-admin-only
+                        type="button"
+                        ><span class="nav-glyph">&#9776;</span>Access Events</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="admin-dietitians"
+                        data-admin-only
+                        type="button"
+                        ><span class="nav-glyph">&#9787;</span>Dietitians</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="admin-branches"
+                        data-admin-only
+                        type="button"
+                        ><span class="nav-glyph">&#9636;</span>Branches</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="admin-businesses"
+                        data-admin-only
+                        type="button"
+                        ><span class="nav-glyph">&#9633;</span>Businesses</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="admin-clients"
+                        data-admin-only
+                        type="button"
+                        ><span class="nav-glyph">&#9787;</span>Patients</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="admin-approvals"
+                        data-admin-only
+                        type="button"
+                        ><span class="nav-glyph">&#9678;</span>Approvals<span
+                            id="adminApprovalCount"
+                            class="nav-count"
+                            >0</span
+                        ></button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="admin-reports"
+                        data-admin-only
+                        type="button"
+                        ><span class="nav-glyph">&#9636;</span>Reports</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="admin-audit-logs"
+                        data-admin-only
+                        type="button"
+                        ><span class="nav-glyph">&#9776;</span>Audit Logs</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="admin-settings"
+                        data-admin-only
+                        type="button"
+                        ><span class="nav-glyph">&#9881;</span>Settings</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="reception-onboarding"
+                        data-reception-only
+                        type="button"
+                        ><span class="nav-glyph">&#9787;</span>Register Patient</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="reception-checkin"
+                        data-reception-only
+                        type="button"
+                        ><span class="nav-glyph">&#9636;</span>Patient Check-In</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="staff-profile"
+                        data-staff-only
+                        type="button"
+                        ><span class="nav-glyph">&#9787;</span>My Staff Profile</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="staff-access-events"
+                        data-compliance-only
+                        type="button"
+                        ><span class="nav-glyph">&#9776;</span>Access Events</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="client-checkin"
+                        data-client-only
+                        type="button"
+                        ><span class="nav-glyph">&#9636;</span>My QR Check-In</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="my-profile"
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9787;</span>My Profile</button
+                    >
+                    <div
+                        class="nav-section-label"
+                        data-client-only
+                        >HEALTH INFORMATION</div
+                    >
+                    <button
+                        class="nav-item nav-subitem"
+                        data-view="health-conditions"
+                        data-client-only
+                        data-standard-only
+                        type="button"
+                        >Medical Conditions</button
+                    >
+                    <button
+                        class="nav-item nav-subitem"
+                        data-view="health-allergies"
+                        data-client-only
+                        data-standard-only
+                        type="button"
+                        >Allergies</button
+                    >
+                    <button
+                        class="nav-item nav-subitem"
+                        data-view="health-pregnancy"
+                        data-client-only
+                        data-standard-only
+                        data-maternal-only
+                        type="button"
+                        >Pregnancy</button
+                    >
+                    <button
+                        class="nav-item nav-subitem"
+                        data-view="health-lactation"
+                        data-client-only
+                        data-standard-only
+                        data-maternal-only
+                        type="button"
+                        >Lactation</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="client-progress"
+                        data-client-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9636;</span>My Progress</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="client-goals"
+                        data-client-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9673;</span>My Goals</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="client-meal-plan"
+                        data-client-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9776;</span>My Meal Plan</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="client-appointments"
+                        data-client-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9635;</span>Appointments</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="client-recommendations"
+                        data-client-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#10022;</span>Recommendations</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="ai-workspace"
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#10022;</span>AI Coach</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="appointment-requests"
+                        data-dietitian-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9635;</span>Appointment Requests</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="reviews"
+                        data-dietitian-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9678;</span>Review queue<span
+                            id="reviewCount"
+                            class="nav-count"
+                            >0</span
+                        ></button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="verification-documents"
+                        data-dietitian-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9636;</span>Verification documents</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="dietitian-branches"
+                        data-dietitian-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9636;</span>My branches</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="clients"
+                        data-dietitian-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9787;</span>My Patients</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="foods"
+                        data-admin-only
+                        data-dietitian-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#10047;</span>Food library</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="recipes"
+                        data-dietitian-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#10047;</span>Recipes</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="meal-plans"
+                        data-dietitian-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9776;</span>Meal plans</button
                     >
                 </nav>
-                <main class="traditional-main">
+                <div class="sidebar-bottom">
                     <div
-                        data-message
-                        class="traditional-message hidden"
+                        id="connectionStatus"
+                        class="connection-status"
+                        data-state="checking"
+                        role="status"
+                        aria-live="polite"
+                        ><span
+                            class="status-dot"
+                            aria-hidden="true"
+                        ></span
+                        ><span id="connectionStatusText">Checking connection…</span></div
+                    >
+                    <button
+                        id="signOutButton"
+                        class="signout-button"
+                        type="button"
+                        ><span class="nav-glyph">&#8592;</span>Sign out</button
+                    >
+                </div>
+            </aside>
+            <section class="workspace-main">
+                <header class="workspace-header">
+                    <div class="header-context"
+                        ><span class="eyebrow eyebrow-green">NUTRICARE</span
+                        ><span
+                            id="headerDate"
+                            class="header-date"
+                        ></span
                     ></div>
-                    <div data-support-root></div>
-                </main>
-            </div>
-        </template>
-
-        <!-- Traditional: weaning -->
-        <template
-            id="combined-traditional-weaning"
-            data-title="Weaning Nutrition"
-        >
-            <header
-                ><h1>Weaning Nutrition</h1
-                ><p>Nutritional guidance for safely lowering milk production</p></header
-            ><div class="traditional-layout"
-                ><nav
-                    ><a href="#traditional/menu">Menu Page</a
-                    ><a href="#traditional/lactation">Lactation</a
-                    ><a
-                        href="#traditional/index"
-                        data-logout
-                        >Sign out</a
-                    ></nav
-                ><main class="traditional-main"
-                    ><section class="page-box"
-                        ><h2>Weaning plan</h2
-                        ><div
-                            data-message
-                            class="traditional-message hidden"
-                        ></div
-                        ><form
-                            class="traditional-form"
-                            data-json-form
-                            data-endpoint="/api/v1/clients/CLIENT_ID/lactation/weaning"
-                            data-reload
-                            ><table
-                                ><tr
-                                    ><td>Approach:</td
-                                    ><td
-                                        ><select name="approach"
-                                            ><option value="gradual">Gradual</option
-                                            ><option value="partial">Partial</option
-                                            ><option value="abrupt_medical"
-                                                >Abrupt - medical guidance</option
-                                            ></select
-                                        ></td
-                                    ></tr
-                                ><tr
-                                    ><td>Current feeds per day:</td
-                                    ><td
-                                        ><input
-                                            name="feeds_per_day_current"
-                                            type="number"
-                                            min="0"
-                                            required /></td></tr
-                                ><tr
-                                    ><td>Target feeds per day:</td
-                                    ><td
-                                        ><input
-                                            name="feeds_per_day_target"
-                                            type="number"
-                                            min="0"
-                                            value="0" /></td></tr
-                                ><tr
-                                    ><td>Notes:</td><td><textarea name="notes"></textarea></td></tr
-                                ><tr
-                                    ><td></td
-                                    ><td
-                                        ><input
-                                            class="traditional-button"
-                                            type="submit"
-                                            value="SAVE WEANING PLAN" /></td></tr></table></form></section></main
-            ></div>
-        </template>
+                    <div class="profile-chip"
+                        ><span
+                            id="profileInitials"
+                            class="profile-avatar"
+                            >FN</span
+                        ><span id="profileName">Your account</span></div
+                    >
+                    <button
+                        id="mobileSignOutButton"
+                        class="mobile-signout"
+                        type="button"
+                        >Sign out</button
+                    >
+                </header>
+                <div
+                    id="workspaceContent"
+                    class="workspace-content"
+                    aria-live="polite"
+                ></div>
+            </section>
+        </main>
     </body>
 </html>

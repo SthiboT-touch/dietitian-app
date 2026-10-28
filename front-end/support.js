@@ -1,37 +1,37 @@
-/* Shared support and account recovery screens, styled by the active portal. */
+/* Support tickets and account recovery for the main app. */
 window.mountSupport = async function (root, { request, isAdmin, escapeHtml }) {
     const esc = escapeHtml;
-    root.innerHTML = `<section class="content-panel page-box">
+    root.innerHTML = `<section class="content-panel">
     <h2>${isAdmin ? "User support tickets" : "Support & tickets"}</h2>
     <p>Get help with your account or the app. Do not include passwords or medical information in a ticket.</p>
     <p data-support-message role="status" aria-live="polite"></p>
     ${
         !isAdmin
-            ? `<form data-new-ticket class="form-grid traditional-form">
+            ? `<form data-new-ticket class="form-grid">
       <label class="form-field">Subject<input class="text-input" name="subject" maxlength="160" required></label>
       <label class="form-field full-width">How can we help?<textarea class="text-input" name="body" maxlength="5000" required></textarea></label>
-      <button class="button button-primary traditional-button" type="submit">Submit ticket</button>
+      <button class="button button-primary" type="submit">Submit ticket</button>
     </form>`
             : ""
     }
-    <button class="button quiet-button traditional-button" type="button" data-refresh-tickets>Refresh tickets</button>
+    <button class="button quiet-button" type="button" data-refresh-tickets>Refresh tickets</button>
     <label>Filter by status <select data-ticket-filter><option value="">All tickets</option><option>OPEN</option><option>IN_PROGRESS</option><option>RESOLVED</option></select></label>
     <div data-ticket-list></div><div data-ticket-detail></div>
   </section>
   ${
       isAdmin
-          ? `<section class="content-panel page-box">
+          ? `<section class="content-panel">
     <h2>Change a user's password</h2>
-    <form data-account-search class="form-grid traditional-form">
+    <form data-account-search class="form-grid">
       <label class="form-field">Find an account by name or email<input class="text-input" name="q" minlength="2" maxlength="150" required></label>
-      <button class="button traditional-button" type="submit">Search accounts</button>
+      <button class="button" type="submit">Search accounts</button>
     </form>
-    <form data-password-change class="form-grid traditional-form" hidden>
+    <form data-password-change class="form-grid" hidden>
       <label class="form-field full-width">Account<select class="text-input" name="account" required></select></label>
       <label class="form-field">New password<input class="text-input" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
       <label class="form-field">Confirm new password<input class="text-input" name="confirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
       <p>Changing the password signs this user out. Share the new password with them securely.</p>
-      <button class="button button-primary traditional-button" type="submit">Change password</button>
+      <button class="button button-primary" type="submit">Change password</button>
     </form>
     <p data-account-message role="status" aria-live="polite"></p>
   </section>`
@@ -63,7 +63,7 @@ window.mountSupport = async function (root, { request, isAdmin, escapeHtml }) {
         const status = root.querySelector("[data-ticket-filter]").value;
         const rows = tickets.filter((ticket) => !status || ticket.status === status);
         root.querySelector("[data-ticket-list]").innerHTML = rows.length
-            ? `<ul class="result-list">${rows.map((ticket) => `<li class="result-item"><button class="button quiet-button traditional-button" data-ticket-id="${esc(ticket.ticket_id)}" type="button">${esc(ticket.subject)}</button> <strong>${esc(ticket.status.replaceAll("_", " "))}</strong> <small>${esc(new Date(ticket.updated_at).toLocaleString())}${isAdmin ? ` · ${esc(ticket.owner_role)} ${esc(ticket.owner_id)}` : ""}</small></li>`).join("")}</ul>`
+            ? `<ul class="result-list">${rows.map((ticket) => `<li class="result-item"><button class="button quiet-button" data-ticket-id="${esc(ticket.ticket_id)}" type="button">${esc(ticket.subject)}</button> <strong>${esc(ticket.status.replaceAll("_", " "))}</strong> <small>${esc(new Date(ticket.updated_at).toLocaleString())}${isAdmin ? ` · ${esc(ticket.owner_role)} ${esc(ticket.owner_id)}` : ""}</small></li>`).join("")}</ul>`
             : '<p class="empty-state">No tickets found.</p>';
     }
     async function refresh() {
@@ -76,8 +76,8 @@ window.mountSupport = async function (root, { request, isAdmin, escapeHtml }) {
         detail.innerHTML = `<h3>${esc(ticket.subject)}</h3>
       <p>${ticket.contact_email ? `Contact email: ${esc(ticket.contact_email)} ? ` : ""}Ticket ${esc(ticket.ticket_id)} · ${esc(ticket.status.replaceAll("_", " "))}</p>
       ${ticket.messages.map((item) => `<article class="result-item"><strong>${esc(item.author_role === "admin" ? "Administrator" : "User")}</strong> <small>${esc(new Date(item.created_at).toLocaleString())}</small><p style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(item.body)}</p></article>`).join("")}
-      <form data-ticket-reply class="form-grid traditional-form"><label class="form-field full-width">Reply<textarea class="text-input" name="body" maxlength="5000" required></textarea></label><button class="button button-primary traditional-button" type="submit">Send reply</button></form>
-      ${isAdmin ? `<form data-ticket-status class="form-grid traditional-form"><label class="form-field">Ticket status<select class="text-input" name="status">${["OPEN", "IN_PROGRESS", "RESOLVED"].map((status) => `<option value="${status}" ${ticket.status === status ? "selected" : ""}>${status.replaceAll("_", " ")}</option>`).join("")}</select></label><button class="button traditional-button" type="submit">Update status</button></form>` : ""}`;
+      <form data-ticket-reply class="form-grid"><label class="form-field full-width">Reply<textarea class="text-input" name="body" maxlength="5000" required></textarea></label><button class="button button-primary" type="submit">Send reply</button></form>
+      ${isAdmin ? `<form data-ticket-status class="form-grid"><label class="form-field">Ticket status<select class="text-input" name="status">${["OPEN", "IN_PROGRESS", "RESOLVED"].map((status) => `<option value="${status}" ${ticket.status === status ? "selected" : ""}>${status.replaceAll("_", " ")}</option>`).join("")}</select></label><button class="button" type="submit">Update status</button></form>` : ""}`;
         bindForm(detail.querySelector("[data-ticket-reply]"), async (form) => {
             await request(`/api/v1/support/tickets/${encodeURIComponent(id)}/messages`, {
                 method: "POST",
