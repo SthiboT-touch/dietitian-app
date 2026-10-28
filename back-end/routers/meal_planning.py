@@ -1,13 +1,13 @@
-"""5. Foods, recipes and meal plans."""
+"""Food catalog, recipes, and dietitian-reviewed meal plans."""
 import json
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 import database
 import config
-from state import users_db, meal_plans_db, recipes_db, foods_db
-from schemas import FoodItem, FoodItemCreate, RecipeCreate, MealPlanRequest, MealPlanResponse
-from security import require_admin, require_dietitian, require_client
+from state import users_db, meal_plans_db, recipes_db
+from schemas import MealPlanRequest, MealPlanResponse
+from security import require_dietitian, require_client
 from clinical_screening import screen_meal_plan_context
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,7 @@ class MealPlanScreeningRequest(BaseModel):
 
 
 def _verify_client_assignment(client_id: str, dietitian_id: str) -> None:
+    """Only the assigned dietitian can draft or screen a client's plan."""
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute("SELECT dietitian_id FROM client WHERE client_id = %s", (client_id,))
@@ -271,123 +272,6 @@ def client_approved_meal_plan(plan_id: str, client_id: str = Depends(require_cli
         raise HTTPException(status_code=404, detail="Approved meal plan not found")
     return {"plan_id": plan_id, "status": record["status"], "plan": record["approved_json"]}
 
-
-# --- 5. FOODS, RECIPES & MEAL PLANNING ---
-
-@router.get("/api/v1/foods", response_model=List[FoodItem], tags=["5. Foods & Meal Planning"])
-def get_foods():
-    if config.DATABASE_ENABLED:
-        with database.cursor() as cursor:
-            cursor.execute(
-                "SELECT food_item_id AS food_id, name, calories, protein AS protein_g, "
-                "carbs AS carbs_g, fat AS fat_g, glycemic_index FROM food_item ORDER BY name"
-            )
-            return [
-                {
-                    **dict(row),
-                    "calories": round(row["calories"]),
-                    "protein_g": float(row["protein_g"] or 0),
-                    "carbs_g": float(row["carbs_g"] or 0),
-                    "fat_g": float(row["fat_g"] or 0),
-                }
-                for row in cursor.fetchall()
-            ]
-    return foods_db
-
-
-@router.post(
-    "/api/v1/foods",
-    response_model=FoodItem,
-    status_code=status.HTTP_201_CREATED,
-    tags=["5. Foods & Meal Planning"],
-)
-def create_food(data: FoodItemCreate, admin_id: str = Depends(require_admin)):
-    name = data.name.strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="Food name is required")
-    food_id = str(uuid.uuid4())
-    food = {
-        "food_id": food_id,
-        "name": name,
-        "calories": data.calories,
-        "protein_g": data.protein_g,
-        "carbs_g": data.carbs_g,
-        "fat_g": data.fat_g,
-        "glycemic_index": data.glycemic_index,
-    }
-    if config.DATABASE_ENABLED:
-        with database.cursor() as cursor:
-            cursor.execute(
-                "SELECT 1 FROM food_item WHERE LOWER(name) = LOWER(%s) LIMIT 1",
-                (name,),
-            )
-            if cursor.fetchone():
-                raise HTTPException(status_code=409, detail="A food with this name already exists")
-            cursor.execute(
-                "INSERT INTO food_item "
-                "(food_item_id, name, calories, protein, carbs, fat, glycemic_index) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (
-                    food_id,
-                    name,
-                    data.calories,
-                    data.protein_g,
-                    data.carbs_g,
-                    data.fat_g,
-                    data.glycemic_index,
-                ),
-            )
-    else:
-        if any(existing["name"].casefold() == name.casefold() for existing in foods_db):
-            raise HTTPException(status_code=409, detail="A food with this name already exists")
-        foods_db.append(food)
-    return food
-
-
-@router.post("/api/v1/recipes", tags=["5. Foods & Meal Planning"])
-def create_recipe(data: RecipeCreate):
-    recipe_id = f"rec_{uuid.uuid4().hex[:8]}"
-    if config.DATABASE_ENABLED:
-        stored_instructions = json.dumps({
-            "instructions": data.instructions,
-            "ingredients": data.ingredients,
-        })
-        with database.cursor() as cursor:
-            cursor.execute(
-                "INSERT INTO recipe (recipe_id, name, instructions) VALUES (%s, %s, %s)",
-                (recipe_id, data.title, stored_instructions),
-            )
-    else:
-        recipes_db[recipe_id] = {"recipe_id": recipe_id, **data.model_dump()}
-    return {"message": "Recipe created", "recipe_id": recipe_id, "details": data.model_dump()}
-
-
-@router.get("/api/v1/recipes", tags=["5. Foods & Meal Planning"])
-def list_recipes():
-    if config.DATABASE_ENABLED:
-        with database.cursor() as cursor:
-            cursor.execute("SELECT recipe_id, name, instructions FROM recipe ORDER BY LOWER(name)")
-            recipes = []
-            for row in cursor.fetchall():
-                try:
-                    stored = json.loads(row["instructions"])
-                except (TypeError, json.JSONDecodeError):
-                    stored = {"instructions": row["instructions"], "ingredients": []}
-                recipes.append({
-                    "recipe_id": row["recipe_id"],
-                    "title": row["name"],
-                    "ingredients": stored.get("ingredients", []),
-                    "instructions": stored.get("instructions", ""),
-                })
-            return recipes
-    return sorted(
-        [
-            {"recipe_id": recipe["recipe_id"], "title": recipe["title"],
-             "ingredients": recipe["ingredients"], "instructions": recipe["instructions"]}
-            for recipe in recipes_db.values()
-        ],
-        key=lambda recipe: recipe["title"].casefold(),
-    )
 
 @router.post("/api/v1/meal-plans", response_model=MealPlanResponse, status_code=status.HTTP_201_CREATED, tags=["5. Foods & Meal Planning"])
 def create_meal_plan(request: MealPlanRequest, dietitian_id: str = Depends(require_dietitian)):

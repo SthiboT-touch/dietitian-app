@@ -4,9 +4,12 @@ import uuid
 from fastapi import APIRouter, Depends, File, HTTPException, Request as FastAPIRequest, status, UploadFile
 from fastapi.responses import Response
 from datetime import date
+from onboarding_services import validate_attachment, new_checkin_credential
+from role_management import require_roles
+from registration_consent import consent_details
 import database
 import config
-from state import users_db, admins_db, businesses_db, branches_db, admin_sessions_db, dietitian_sessions_db, client_sessions_db, dietitian_documents_db, approval_log_db, appointments_db, meal_plans_db
+from state import users_db, admins_db, businesses_db, branches_db, admin_sessions_db, dietitian_sessions_db, client_sessions_db, client_registration_consents_db, staff_sessions_db, staff_accounts_db, dietitian_documents_db, approval_log_db, appointments_db, meal_plans_db, welcome_outbox_db, profile_photos_db, client_documents_db, checkin_credentials_db
 from schemas import DietitianRegister, ClientRegister, LoginRequest, AdminSetup, AdminApproval, BranchCreate, DietitianBranchCreate
 from security import hash_password, verify_password, public_user, request_is_loopback, require_admin, require_dietitian
 from helpers import email_is_registered, build_full_name
@@ -88,37 +91,115 @@ def register_dietitian(data: DietitianRegister):
     return {"message": "Dietitian registered successfully", "user": public_user(user)}
 
 @router.post("/api/v1/auth/register/client", tags=["1. Auth & Admin"])
-def register_client(data: ClientRegister):
+def register_client(data: ClientRegister, request: FastAPIRequest):
+    """Self-service patient signup, atomic across all optional onboarding data."""
+    return _create_client(data, request, registration_mode="SELF")
+
+
+@router.post("/api/v1/auth/register/client/assisted", tags=["1. Auth & Admin"])
+def register_client_assisted(
+    data: ClientRegister, request: FastAPIRequest,
+    identity=Depends(require_roles("reception")),
+):
+    """FR-1.8: branch-linked reception staff can help a consenting patient.
+
+    The recorded IP is the reception terminal's IP. It must not be presented
+    as proof that the patient was physically using that terminal.
+    """
+    return _create_client(data, request, registration_mode="ASSISTED", staff_id=identity[1])
+
+
+def _create_client(data: ClientRegister, request: FastAPIRequest, registration_mode="SELF", staff_id=None):
+    # FR-1.9: validate both unique identifiers before taking any writes.
     if email_is_registered(data.email):
         raise HTTPException(status_code=409, detail="An account with this email already exists")
+    photo = validate_attachment(data.profile_photo, photo=True)
+    document = validate_attachment(data.initial_document, photo=False)
     full_name = build_full_name(data.first_name, data.last_name)
-    registration = {**data.model_dump(exclude={"password"}), "full_name": full_name}
+    # Never echo submitted sensitive attachments, consent, or password.
+    registration = data.model_dump(exclude={
+        "password", "consent_to_care", "privacy_notice_version", "profile_photo", "initial_document"
+    })
+    registration["full_name"] = full_name
+    consent = consent_details(request)
+    consent["registration_mode"] = registration_mode
+    consent["registered_by_staff_id"] = staff_id
+    client_id = str(uuid.uuid4())  # FR-1.4, FR-1.7: full UUID, legacy IDs still valid.
+
     if config.DATABASE_ENABLED:
-        with database.cursor() as cursor:
-            if data.dietitian_id:
-                cursor.execute("SELECT 1 FROM dietitian WHERE dietitian_id = %s", (data.dietitian_id,))
-                if not cursor.fetchone():
-                    raise HTTPException(status_code=404, detail="Dietitian not found")
-            user_id = f"cli_{uuid.uuid4().hex[:8]}"
-            cursor.execute(
-                "INSERT INTO client (client_id, dietitian_id, name, email, password, id_number, date_of_birth, gender) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (user_id, data.dietitian_id, full_name, data.email, hash_password(data.password), data.id_number, data.date_of_birth, data.gender),
-            )
-        user = {"id": user_id, "type": "client", **registration}
-        return {"message": "Patient registered successfully", "user": user}
-    dietitian = users_db.get(data.dietitian_id) if data.dietitian_id else None
-    if data.dietitian_id and (not dietitian or dietitian.get("type") != "dietitian"):
-        raise HTTPException(status_code=404, detail="Dietitian not found")
-    user_id = f"cli_{uuid.uuid4().hex[:8]}"
-    user = {
-        "id": user_id,
-        "type": "client",
-        **registration,
-        "password_hash": hash_password(data.password),
-    }
-    users_db[user_id] = user
-    return {"message": "Patient registered successfully", "user": public_user(user)}
+        try:
+            with database.cursor() as cursor:
+                cursor.execute("SELECT 1 FROM client WHERE id_number = %s", (data.id_number,))
+                if cursor.fetchone():
+                    raise HTTPException(409, "An account with this identity number already exists")
+                if data.dietitian_id:
+                    cursor.execute("SELECT 1 FROM dietitian WHERE dietitian_id = %s", (data.dietitian_id,))
+                    if not cursor.fetchone():
+                        raise HTTPException(404, "Dietitian not found")
+                if staff_id:
+                    cursor.execute("SELECT branch_id, is_active FROM staff_account WHERE staff_id = %s", (staff_id,))
+                    staff = cursor.fetchone()
+                    if not staff or not staff["is_active"] or not staff["branch_id"]:
+                        raise HTTPException(403, "Receptionist requires an active branch assignment")
+                cursor.execute(
+                    "INSERT INTO client (client_id, dietitian_id, name, email, password, id_number, "
+                    "date_of_birth, gender, phone) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (client_id, data.dietitian_id, full_name, data.email, hash_password(data.password),
+                     data.id_number, data.date_of_birth, data.gender, data.phone),
+                )
+                cursor.execute(
+                    "INSERT INTO client_registration_consent "
+                    "(client_id, privacy_notice_version, consented_at, ip_address, registration_mode, registered_by_staff_id) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (client_id, consent["privacy_notice_version"], consent["consented_at"],
+                     consent["ip_address"], registration_mode, staff_id),
+                )
+                if photo:
+                    cursor.execute(
+                        "INSERT INTO client_profile_photo (client_id, file_name, content_type, file_data) "
+                        "VALUES (%s, %s, %s, %s)",
+                        (client_id, photo["filename"], photo["content_type"], photo["bytes"]),
+                    )
+                if document:
+                    cursor.execute(
+                        "INSERT INTO client_medical_document "
+                        "(document_id, client_id, file_name, content_type, file_data) VALUES (%s, %s, %s, %s, %s)",
+                        (str(uuid.uuid4()), client_id, document["filename"],
+                         document["content_type"], document["bytes"]),
+                    )
+                # Queued transactionally: a failed insert means no partial signup.
+                cursor.execute(
+                    "INSERT INTO registration_welcome_outbox "
+                    "(message_id, client_id, recipient_email, recipient_name) VALUES (%s, %s, %s, %s)",
+                    (str(uuid.uuid4()), client_id, data.email, full_name),
+                )
+        except Exception as error:
+            if isinstance(error, HTTPException):
+                raise
+            if getattr(error, "pgcode", None) == "23505":
+                raise HTTPException(409, "Email or identity number already registered") from None
+            raise
+        return {"message": "Patient registered successfully", "user": {"id": client_id, "type": "client", **registration},
+                "welcome_email": "queued"}
+
+    # Nonproduction in-memory mode: preserve the same contract for isolated tests.
+    if any(u.get("type") == "client" and u.get("id_number") == data.id_number for u in users_db.values()):
+        raise HTTPException(409, "An account with this identity number already exists")
+    if data.dietitian_id and (data.dietitian_id not in users_db or users_db[data.dietitian_id].get("type") != "dietitian"):
+        raise HTTPException(404, "Dietitian not found")
+    if staff_id:
+        staff = staff_accounts_db.get(staff_id)
+        if not staff or not staff.get("is_active") or not staff.get("branch_id"):
+            raise HTTPException(403, "Receptionist requires an active branch assignment")
+    user = {"id": client_id, "type": "client", **registration, "password_hash": hash_password(data.password)}
+    users_db[client_id] = user
+    client_registration_consents_db[client_id] = consent
+    if photo:
+        profile_photos_db[client_id] = photo
+    if document:
+        client_documents_db[str(uuid.uuid4())] = {"client_id": client_id, "file_name": document["filename"], "content_type": document["content_type"], "file_data": document["bytes"]}
+    welcome_outbox_db[client_id] = {"email": data.email, "name": full_name, "status": "PENDING"}
+    return {"message": "Patient registered successfully", "user": public_user(user), "welcome_email": "queued"}
 
 
 def admin_setup_available() -> bool:
@@ -195,10 +276,28 @@ def login(data: LoginRequest):
                     (data.email,),
                 )
                 user = cursor.fetchone()
+            if not user:
+                # Staff role storage is introduced by migration 008. Existing
+                # logins must continue working even before the local migration.
+                cursor.execute("SELECT to_regclass('public.staff_account') AS relation")
+                if cursor.fetchone()["relation"]:
+                    cursor.execute(
+                        "SELECT staff_id AS id, role AS type, full_name, email, "
+                        "role, branch_id, is_active, password_hash "
+                        "FROM staff_account WHERE LOWER(email) = LOWER(%s)",
+                        (data.email,),
+                    )
+                    user = cursor.fetchone()
     else:
         user = next((user for user in users_db.values() if user["email"].casefold() == data.email.casefold()), None)
         if not user:
             user = next((user for user in admins_db.values() if user["email"].casefold() == data.email.casefold()), None)
+        if not user:
+            user = next((u for u in staff_accounts_db.values() if u["email"].casefold() == data.email.casefold()), None)
+    if user and "role" in user and "type" not in user:
+        user = {**user, "id": user["staff_id"], "type": user["role"]}
+    if user and user.get("type", user.get("role")) in {"reception", "branch_manager", "compliance_officer", "executive", "content_manager"} and not user.get("is_active", False):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user or not verify_password(data.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     access_token = f"mock_jwt_token_{uuid.uuid4().hex[:12]}"
@@ -211,6 +310,9 @@ def login(data: LoginRequest):
     elif user["type"] == "client":
         access_token = secrets.token_urlsafe(32)
         client_sessions_db[access_token] = user["id"]
+    elif user["type"] in {"reception", "branch_manager", "compliance_officer", "executive", "content_manager"}:
+        access_token = secrets.token_urlsafe(32)
+        staff_sessions_db[access_token] = user.get("id") or user["staff_id"]
     return {
         "access_token": access_token,
         "token_type": "bearer",

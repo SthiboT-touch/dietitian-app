@@ -9,13 +9,26 @@ from state import users_db
 def email_is_registered(email: str) -> bool:
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+            # Older local databases may not have migration 008 yet. Preserve
+            # the original registration path until the additive migration runs.
             cursor.execute(
                 "SELECT 1 FROM dietitian WHERE LOWER(email) = LOWER(%s) "
-                "UNION ALL SELECT 1 FROM client WHERE LOWER(email) = LOWER(%s) LIMIT 1",
-                (email, email),
+                "UNION ALL SELECT 1 FROM client WHERE LOWER(email) = LOWER(%s) "
+                "UNION ALL SELECT 1 FROM admin WHERE LOWER(email) = LOWER(%s) LIMIT 1",
+                (email, email, email),
             )
+            if cursor.fetchone():
+                return True
+            cursor.execute("SELECT to_regclass('public.staff_account') AS relation")
+            if not cursor.fetchone()["relation"]:
+                return False
+            cursor.execute("SELECT 1 FROM staff_account WHERE LOWER(email) = LOWER(%s)", (email,))
             return cursor.fetchone() is not None
-    return any(user["email"].casefold() == email.casefold() for user in users_db.values())
+    from state import admins_db, staff_accounts_db
+    return any(
+        user.get("email", "").casefold() == email.casefold()
+        for user in list(users_db.values()) + list(admins_db.values()) + list(staff_accounts_db.values())
+    )
 
 
 def fetch_client_profile(cursor, client_id: str) -> dict:

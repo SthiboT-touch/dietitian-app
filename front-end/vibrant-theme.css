@@ -167,3 +167,8 @@ body{background:radial-gradient(circle at 96% 8%,#fbe5ff 0,transparent 30%),radi
 .workspace-sidebar .sidebar-docs:hover {
     color: #c7ff89 !important;
 }
+
+/* Ensure the sidebar status color communicates degradation, even with theme overrides. */
+.workspace-sidebar .connection-status[data-state="checking"] .status-dot { background:#c8b274 !important; }
+.workspace-sidebar .connection-status[data-state="degraded"] .status-dot { background:#f4b64b !important; }
+.workspace-sidebar .connection-status[data-state="offline"] .status-dot { background:#f27869 !important; }

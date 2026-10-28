@@ -1,8 +1,8 @@
 """Pydantic request/response models shared by all API areas."""
-from fastapi import status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, ValidationInfo
 from typing import List, Literal, Optional
 from datetime import date
+from registration_validation import validate_email, validate_sa_phone, validate_sa_id, validate_sa_id_number
 
 
 class DietitianRegister(BaseModel):
@@ -12,15 +12,57 @@ class DietitianRegister(BaseModel):
     license_number: str
     password: str = Field(..., min_length=8)
 
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, value: str) -> str:
+        return validate_email(value)
+
+class RegistrationAttachment(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=120)
+    content_type: Literal["image/jpeg", "image/png", "application/pdf"]
+    data_base64: str = Field(..., min_length=4, max_length=4_200_000)
+
+
 class ClientRegister(BaseModel):
     first_name: str = Field(..., min_length=1)
     last_name: str = Field(..., min_length=1)
     email: str
     dietitian_id: Optional[str] = None
     id_number: str = Field(..., min_length=1, max_length=30)
+    phone: str = Field(..., min_length=1, max_length=35)
     date_of_birth: date
     gender: Literal["male", "female", "other"]
     password: str = Field(..., min_length=8)
+    # A clear, versioned decision is required for new patient registrations.
+    # Literal[True] prevents false, missing, or arbitrary consent values.
+    profile_photo: Optional[RegistrationAttachment] = None
+    initial_document: Optional[RegistrationAttachment] = None
+    consent_to_care: Literal[True]
+    privacy_notice_version: Literal["2026-10-28-v1"]
+
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, value: str) -> str:
+        return validate_email(value)
+
+    @field_validator("phone")
+    @classmethod
+    def phone_format(cls, value: str) -> str:
+        return validate_sa_phone(value)
+
+    @field_validator("id_number")
+    @classmethod
+    def id_format(cls, value: str) -> str:
+        return validate_sa_id_number(value)
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def identity_consistency(cls, value: date, info: ValidationInfo) -> date:
+        # Field-level validation avoids echoing the entire registration body,
+        # including password, when a date/identity mismatch is rejected.
+        if info.data.get("id_number"):
+            validate_sa_id(info.data["id_number"], value)
+        return value
 
 class LoginRequest(BaseModel):
     email: str
@@ -66,10 +108,6 @@ class AllergyEntry(BaseModel):
 class MedicalConditionEntry(BaseModel):
     condition_name: str
     icd_code: Optional[str] = None
-
-class LactationLog(BaseModel):
-    is_lactating: bool
-    notes: Optional[str] = None
 
 class LactationStatusEntry(BaseModel):
     feeding_status: Literal["breastfeeding", "formula_feeding", "combo"]

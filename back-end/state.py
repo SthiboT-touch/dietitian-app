@@ -9,6 +9,16 @@ branches_db: Dict[str, dict] = {}
 admin_sessions_db: Dict[str, str] = {}
 dietitian_sessions_db: Dict[str, str] = {}
 client_sessions_db: Dict[str, str] = {}
+# Development-only analogue of client_registration_consent table.
+client_registration_consents_db: Dict[str, dict] = {}
+welcome_outbox_db: Dict[str, dict] = {}
+profile_photos_db: Dict[str, dict] = {}
+checkin_credentials_db: Dict[str, dict] = {}
+checkin_events_db: List[dict] = []
+# BRS staff roles are distinct from full system administrators.
+staff_accounts_db: Dict[str, dict] = {}
+staff_sessions_db: Dict[str, str] = {}
+access_audit_events_db: List[dict] = []
 dietitian_documents_db: Dict[str, dict] = {}
 approval_log_db: List[dict] = []
 clients_db: Dict[str, dict] = {}

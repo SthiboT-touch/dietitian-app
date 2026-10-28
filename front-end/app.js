@@ -9,6 +9,12 @@ const sessionKey = "nutrition-practice-session";
 const adminTokenKey = "nutrition-practice-admin-token";
 const dietitianTokenKey = "nutrition-practice-dietitian-token";
 const clientTokenKey = "nutrition-practice-client-token";
+const staffTokenKey = "nutrition-practice-staff-token";
+const staffRoleNames = {
+  reception: "Reception Staff", branch_manager: "Branch Manager",
+  compliance_officer: "Compliance Officer", executive: "Executive",
+  content_manager: "Content Manager",
+};
 
 let currentUser = null;
 
@@ -18,18 +24,113 @@ async function request(url, options = {}) {
     headers.set("Content-Type", "application/json");
   }
 
-  const token = sessionStorage.getItem(adminTokenKey) || sessionStorage.getItem(dietitianTokenKey) || sessionStorage.getItem(clientTokenKey);
+  const token = sessionStorage.getItem(adminTokenKey) || sessionStorage.getItem(dietitianTokenKey) || sessionStorage.getItem(clientTokenKey) || sessionStorage.getItem(staffTokenKey);
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  const response = await fetch(url, { ...options, headers });
+  let response;
+  try {
+    response = await fetch(url, { ...options, headers });
+  } catch (error) {
+    markConnectionUnavailable();
+    // Never expose fetch internals or user-supplied URLs in the UI.
+    throw new Error("Cannot reach NutriCare right now. Check your connection and try again.");
+  }
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     const detail = payload && (payload.detail || payload.message);
-    throw new Error(typeof detail === "string" ? detail : `Request failed with status ${response.status}`);
+    const message = typeof detail === "string" ? detail
+      : Array.isArray(detail) ? "Please review the highlighted form details."
+      : `Request failed (${response.status}).`;
+    const requestId = response.headers.get("X-Request-ID") || (payload && payload.request_id);
+    // Include the reference only when a server error occurs; 4xx validation
+    // messages remain concise for patients and staff.
+    const reference = response.status >= 500 && requestId ? ` Reference: ${requestId}.` : "";
+    throw new Error(message + reference);
   }
   return payload;
 }
+
+// The health indicator reflects the real API/database result, not a hardcoded
+// "connected" badge. It doesn't display connection strings or patient details.
+function setConnectionState(state, label) {
+  const container = document.querySelector("#connectionStatus");
+  const text = document.querySelector("#connectionStatusText");
+  if (!container || !text) return;
+  container.dataset.state = state;
+  text.textContent = label;
+}
+
+function markConnectionUnavailable() {
+  setConnectionState("offline", "Connection unavailable");
+}
+
+async function refreshConnectionStatus() {
+  setConnectionState("checking", "Checking connection…");
+  try {
+    const response = await fetch("/health", { cache: "no-store" });
+    if (!response.ok) throw new Error("Health check failed");
+    const status = await response.json();
+    if (status.database === "offline" || status.status === "degraded") {
+      setConnectionState("degraded", "Database unavailable");
+    } else {
+      setConnectionState("online", "Workspace connected");
+    }
+  } catch (_) {
+    markConnectionUnavailable();
+  }
+}
+
+window.addEventListener("online", refreshConnectionStatus);
+window.addEventListener("offline", markConnectionUnavailable);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && !document.querySelector("#workspace")?.hidden) {
+    refreshConnectionStatus();
+  }
+});
+
+// Medical documents are protected API resources, not public file links.
+// A regular <a href> navigation does not send the bearer token.
+async function openPrivateMedicalDocument(url) {
+  const token = sessionStorage.getItem(adminTokenKey)
+    || sessionStorage.getItem(dietitianTokenKey)
+    || sessionStorage.getItem(clientTokenKey)
+    || sessionStorage.getItem(staffTokenKey);
+  if (!token) throw new Error("Please sign in before opening medical documents.");
+
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(response.status === 403 ? "You do not have access to this document."
+      : `Could not open document (${response.status}).`);
+  }
+  const file = await response.blob();
+  const blobUrl = URL.createObjectURL(file);
+  const temporaryLink = document.createElement("a");
+  temporaryLink.href = blobUrl;
+  temporaryLink.download = "medical-document";
+  document.body.appendChild(temporaryLink);
+  temporaryLink.click();
+  temporaryLink.remove();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+}
+
+workspaceContent.addEventListener("click", async (event) => {
+  const link = event.target.closest("[data-private-medical-document]");
+  if (!link || !workspaceContent.contains(link)) return;
+  event.preventDefault();
+  const originalLabel = link.textContent;
+  link.setAttribute("aria-busy", "true");
+  try {
+    await openPrivateMedicalDocument(link.dataset.privateMedicalDocument);
+  } catch (error) {
+    window.alert(error.message);
+  } finally {
+    link.removeAttribute("aria-busy");
+    link.textContent = originalLabel;
+  }
+});
 
 function showAuthMessage(message, kind = "error") {
   authMessage.textContent = message;
@@ -39,6 +140,7 @@ function showAuthMessage(message, kind = "error") {
 
 function showWorkspace(user, initialView = "overview") {
   currentUser = user;
+  refreshConnectionStatus();
   sessionStorage.setItem(sessionKey, JSON.stringify(user));
   authScreen.hidden = true;
   workspace.hidden = false;
@@ -58,7 +160,11 @@ function showWorkspace(user, initialView = "overview") {
   const isClient = user.type === "client";
   const isAdmin = user.type === "admin";
   const isDietitian = user.type === "dietitian";
-  document.querySelectorAll("[data-standard-only]").forEach((item) => { item.hidden = isAdmin; });
+  const isStaff = Object.hasOwn(staffRoleNames, user.type);
+  document.querySelectorAll("[data-staff-only]").forEach((item) => { item.hidden = !isStaff; });
+  document.querySelectorAll("[data-reception-only]").forEach((item) => { item.hidden = !["reception", "branch_manager"].includes(user.type); });
+  document.querySelectorAll("[data-compliance-only]").forEach((item) => { item.hidden = user.type !== "compliance_officer"; });
+  document.querySelectorAll("[data-standard-only]").forEach((item) => { item.hidden = isAdmin || isStaff; });
   document.querySelectorAll("[data-client-only]").forEach((item) => { item.hidden = !isClient; });
   const isMaleClient = isClient && String(user.gender || "").toLowerCase() === "male";
   document.querySelectorAll("[data-maternal-only]").forEach((item) => { item.hidden = !isClient || isMaleClient; });
@@ -72,7 +178,7 @@ function showWorkspace(user, initialView = "overview") {
   if (isAdmin) {
     document.querySelector("#reviewCount").textContent = "0";
     refreshAdminApprovalCount();
-  } else if (isClient) {
+  } else if (isClient || isStaff) {
     document.querySelector("#reviewCount").textContent = "0";
   } else {
     refreshReviewCount();
@@ -84,6 +190,7 @@ function signOut() {
   sessionStorage.removeItem(adminTokenKey);
   sessionStorage.removeItem(dietitianTokenKey);
   sessionStorage.removeItem(clientTokenKey);
+  sessionStorage.removeItem(staffTokenKey);
   currentUser = null;
   workspace.hidden = true;
   authScreen.hidden = false;
@@ -108,17 +215,188 @@ function selectedRole() {
   return signupForm.elements.role.value;
 }
 
+// FR-1.1: show only the current section for patient onboarding.
+// The original request payload and dietitian registration flow are preserved.
+const signupSteps = Array.from(signupForm.querySelectorAll("[data-signup-step]"));
+const patientSignupProgress = document.querySelector("#patientSignupProgress");
+const patientSignupActions = document.querySelector("#patientSignupActions");
+const patientSignupBack = document.querySelector("#patientSignupBack");
+const patientSignupNext = document.querySelector("#patientSignupNext");
+const signupSubmit = document.querySelector("#signupSubmit");
+let patientSignupStep = 1;
+const signupStepNames = ["Your details", "Patient details", "Account security"];
+
+function setPatientSignupStep(nextStep, { focus = false } = {}) {
+  patientSignupStep = Math.max(1, Math.min(signupSteps.length, nextStep));
+  const isClient = selectedRole() === "client";
+  signupSteps.forEach((section, index) => {
+    section.hidden = isClient && index + 1 !== patientSignupStep;
+  });
+  patientSignupProgress.hidden = !isClient;
+  patientSignupActions.hidden = !isClient;
+  patientSignupBack.hidden = !isClient || patientSignupStep === 1;
+  patientSignupNext.hidden = !isClient || patientSignupStep === signupSteps.length;
+  signupSubmit.hidden = isClient && patientSignupStep !== signupSteps.length;
+  if (isClient) {
+    document.querySelector("#patientSignupStepLabel").textContent =
+      `Step ${patientSignupStep} of ${signupSteps.length} · ${signupStepNames[patientSignupStep - 1]}`;
+    document.querySelector("#patientSignupProgressBar").style.width =
+      `${(patientSignupStep / signupSteps.length) * 100}%`;
+    patientSignupProgress.querySelector("[role=progressbar]")
+      .setAttribute("aria-valuenow", String(patientSignupStep));
+  }
+  if (focus && isClient) {
+    signupSteps[patientSignupStep - 1].querySelector("h3, input, select")?.focus({ preventScroll: true });
+  }
+}
+
+// FR-1.2: Validate locally for immediate feedback; the API validates again.
+const registrationFields = {
+  email: document.querySelector("#signupEmail"),
+  id: document.querySelector("#idNumber"),
+  phone: document.querySelector("#signupPhone"),
+  dob: document.querySelector("#dateOfBirth"),
+};
+
+function saIdHasValidChecksum(value) {
+  let total = 0;
+  [...value].reverse().forEach((character, index) => {
+    let digit = Number(character);
+    if (index % 2 === 1) {
+      digit *= 2;
+      digit = Math.floor(digit / 10) + (digit % 10);
+    }
+    total += digit;
+  });
+  return total % 10 === 0;
+}
+
+function registrationFieldError(field) {
+  const { email, id, phone, dob } = registrationFields;
+  const isClient = selectedRole() === "client";
+  const value = field.value.trim();
+  if (field === email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value) && value.length <= 150
+      ? "" : "Enter a valid email address (for example, name@example.com).";
+  }
+  if (!isClient) return "";
+  if (field === phone) {
+    if (!/^\+?[0-9 ()-]+$/.test(value)) return "Enter a valid South African phone number.";
+    const digits = value.replace(/[ ()-]/g, "");
+    return /^(?:0[1-8][0-9]{8}|(?:\+27|27)[1-8][0-9]{8})$/.test(digits)
+      ? "" : "Use a 10-digit South African number, for example 082 123 4567.";
+  }
+  if (field === id) {
+    if (!/^[0-9]{13}$/.test(value)) return "South African ID must contain exactly 13 digits.";
+    if (!saIdHasValidChecksum(value)) return "The ID number's check digit is incorrect.";
+    if (dob.value && value.slice(0, 6) !== dob.value.slice(2).replaceAll("-", "")) {
+      return "Your ID number and date of birth do not match.";
+    }
+    return "";
+  }
+  if (field === dob) {
+    if (!value) return "Choose your date of birth.";
+    const now = new Date();
+    const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    if (value > localToday) return "Date of birth cannot be in the future.";
+    if (Number(value.slice(0, 4)) < 1900) return "Check your date of birth.";
+    if (/^[0-9]{13}$/.test(id.value) && id.value.slice(0, 6) !== value.slice(2).replaceAll("-", "")) {
+      return "Your date of birth must match your ID number.";
+    }
+    return "";
+  }
+  return "";
+}
+
+function updateRegistrationValidation(field) {
+  const isClient = selectedRole() === "client";
+  const applicable = field === registrationFields.email || isClient;
+  const error = applicable ? registrationFieldError(field) : "";
+  field.setCustomValidity(error);
+  field.setAttribute("aria-invalid", error ? "true" : "false");
+  const help = document.getElementById(`${field.id}Help`);
+  if (help) {
+    help.classList.toggle("is-invalid", Boolean(error));
+    help.classList.toggle("is-valid", !error && Boolean(field.value.trim()) && applicable);
+    if (error) help.textContent = error;
+    else if (field === registrationFields.email) help.textContent = "Email address looks valid.";
+    else if (field === registrationFields.phone) help.textContent = "Phone number looks valid.";
+    else if (field === registrationFields.id) help.textContent = "ID number looks valid.";
+    else help.textContent = "Date of birth looks valid.";
+  }
+  return !error;
+}
+
+Object.values(registrationFields).forEach((field) => {
+  for (const eventName of ["input", "change", "blur"]) {
+    field.addEventListener(eventName, () => {
+      updateRegistrationValidation(field);
+      if (field === registrationFields.dob) updateRegistrationValidation(registrationFields.id);
+      if (field === registrationFields.id && registrationFields.dob.value) {
+        updateRegistrationValidation(registrationFields.dob);
+      }
+    });
+  }
+});
+
+function validateSignupStep(stepNumber) {
+  const section = signupSteps[stepNumber - 1];
+  const controls = Array.from(section.querySelectorAll("input, select"))
+    // Ignore inactive role-specific fields, but validate earlier wizard steps
+    // even while their step containers are temporarily hidden.
+    .filter((control) => !control.disabled && !control.closest("#clientFields[hidden], #dietitianFields[hidden]"));
+  // Refresh each field before native validation, including previously hidden steps.
+  controls.forEach((control) => {
+    if (Object.values(registrationFields).includes(control)) updateRegistrationValidation(control);
+  });
+  const invalid = controls.find((control) => !control.checkValidity());
+  if (invalid) {
+    invalid.reportValidity();
+    return false;
+  }
+  return true;
+}
+
+patientSignupNext.addEventListener("click", () => {
+  if (validateSignupStep(patientSignupStep)) {
+    setPatientSignupStep(patientSignupStep + 1, { focus: true });
+  }
+});
+patientSignupBack.addEventListener("click", () => {
+  setPatientSignupStep(patientSignupStep - 1, { focus: true });
+});
+
 function updateSignupRole() {
   const isClient = selectedRole() === "client";
   document.querySelector("#dietitianFields").hidden = isClient;
   document.querySelector("#clientFields").hidden = !isClient;
   signupForm.elements.license_number.required = !isClient;
   signupForm.elements.id_number.required = isClient;
+  signupForm.elements.phone.required = isClient;
+  Object.values(registrationFields).forEach((field) => {
+    if (field !== registrationFields.email && !isClient) {
+      field.setCustomValidity("");
+      field.removeAttribute("aria-invalid");
+    }
+  });
+  document.querySelector("#signupDraftActions").hidden = !isClient;
+  const consentArea = document.querySelector("#clientPrivacyConsent");
+  consentArea.hidden = !isClient;
+  signupForm.elements.consent_to_care.required = isClient;
+  signupForm.elements.consent_to_care.disabled = !isClient;
+  signupForm.elements.privacy_notice_version.disabled = !isClient;
   signupForm.elements.gender.required = isClient;
   signupForm.elements.date_of_birth.required = isClient;
   signupForm.querySelectorAll(".role-option").forEach((option) => {
     option.classList.toggle("is-selected", option.querySelector("input").checked);
   });
+  signupForm.querySelectorAll("[data-patient-signup-only]").forEach((element) => {
+    element.hidden = !isClient;
+  });
+  // Hide the patient-only details entirely for dietitians, not merely their inputs.
+  if (!isClient) signupSteps[1].hidden = true;
+  setPatientSignupStep(1);
+  if (!isClient) signupSteps[1].hidden = true;
 }
 
 function setAuthMode(mode) {
@@ -195,7 +473,7 @@ function patientContextMarkup(client, profile, lactation = {}, documents = []) {
     ? lactationGroups.map(([label, entries]) => `<div class="form-field"><label>${escapeHtml(label)}</label><div class="text-input">${entries.map((entry) => escapeHtml(Object.entries(entry).filter(([key, value]) => !["log_id", "client_id", "logged_at"].includes(key) && value !== null && value !== "").map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`).join(" · "))).join("<br>")}</div></div>`).join("")
     : '<p class="empty-state">No lactation records recorded.</p>';
   const documentsMarkup = documents.length
-    ? documents.map((document) => `<li class="result-item"><a href="/api/v1/clients/${encodeURIComponent(client.id)}/medical-documents/${encodeURIComponent(document.document_id)}" target="_blank" rel="noreferrer">${escapeHtml(document.file_name)}</a> · ${escapeHtml(document.condition_name || "Medical condition")} · Dr ${escapeHtml(document.doctor_name || "not provided")}<br>${escapeHtml(document.doctor_information || "")}</li>`).join("")
+    ? documents.map((document) => `<li class="result-item"><a href="/api/v1/clients/${encodeURIComponent(client.id)}/medical-documents/${encodeURIComponent(document.document_id)}" data-private-medical-document="/api/v1/clients/${encodeURIComponent(client.id)}/medical-documents/${encodeURIComponent(document.document_id)}">${escapeHtml(document.file_name)}</a> · ${escapeHtml(document.condition_name || "Medical condition")} · Dr ${escapeHtml(document.doctor_name || "not provided")}<br>${escapeHtml(document.doctor_information || "")}</li>`).join("")
     : '<li class="result-item">No supporting medical documents uploaded.</li>';
   return `
     <section class="content-panel patient-context-preview">
@@ -672,7 +950,7 @@ async function renderClientHealth(clientId, section) {
           <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Upload medical document</button></div>
         </form>
         <div class="section-heading"><h2>Previous documents</h2><span>${documents.length} SAVED</span></div>
-        <div class="document-list">${documents.length ? documents.map((document) => `<article class="document-row"><div class="document-details"><h3><a href="/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}" target="_blank" rel="noreferrer">${escapeHtml(document.file_name)}</a></h3><p>${escapeHtml(document.condition_name || "Medical condition")} · ${escapeHtml(document.doctor_name || "Doctor not provided")}</p><p>${escapeHtml(document.doctor_information || "")}</p></div></article>`).join("") : '<p class="empty-state">No supporting medical documents uploaded yet.</p>'}</div>
+        <div class="document-list">${documents.length ? documents.map((document) => `<article class="document-row"><div class="document-details"><h3><a href="/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}" data-private-medical-document="/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}">${escapeHtml(document.file_name)}</a></h3><p>${escapeHtml(document.condition_name || "Medical condition")} · ${escapeHtml(document.doctor_name || "Doctor not provided")}</p><p>${escapeHtml(document.doctor_information || "")}</p></div></article>`).join("") : '<p class="empty-state">No supporting medical documents uploaded yet.</p>'}</div>
       </section>`);
     document.querySelector("#medicalDocumentForm").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -1238,6 +1516,10 @@ async function loadView(view, initialAIPanel = "coach") {
         await renderDietitianDashboard();
         return;
       }
+      if (Object.hasOwn(staffRoleNames, currentUser.type)) {
+        await renderStaffDashboard();
+        return;
+      }
       const pending = await request("/api/v1/ai/recommendations/pending");
       workspaceContent.innerHTML = `
         ${pageHeading("YOUR PRACTICE", `Good to see you, ${escapeHtml(firstName)}.`, "A clear view of the care happening today.")}
@@ -1265,6 +1547,12 @@ async function loadView(view, initialAIPanel = "coach") {
     } else if (view === "ai-workspace" || view === "ai" || view === "ai-chat") {
       const panel = view === "ai" ? "plan" : view === "ai-chat" ? "coach" : initialAIPanel;
       await renderAIWorkspace(panel, clientId);
+    } else if (view === "client-checkin") {
+      await renderClientCheckin(clientId);
+    } else if (view === "reception-onboarding") {
+      await renderReceptionOnboarding();
+    } else if (view === "reception-checkin") {
+      await renderReceptionCheckin();
     } else if (view === "my-profile") {
       await renderMyProfile();
     } else if (view === "health-lactation") {
@@ -1283,6 +1571,12 @@ async function loadView(view, initialAIPanel = "coach") {
       await renderClientAppointments(clientId, selectedDietitianId ? "book" : "upcoming", selectedDietitianId);
     } else if (view === "appointment-requests") {
       await renderAppointmentRequests();
+    } else if (view === "admin-staff") {
+      await renderAdminStaff();
+    } else if (view === "admin-access-events" || view === "staff-access-events") {
+      await renderAccessEvents();
+    } else if (view === "staff-profile") {
+      await renderStaffProfile();
     } else if (view === "admin-dietitians") {
       await renderAdminDietitians();
     } else if (view === "admin-businesses") {
@@ -1703,17 +1997,29 @@ async function createRecipe(event) {
 
 async function renderMealPlans() {
   const query = new URLSearchParams({ dietitian_id: currentUser.id });
-  const [clients, recipes, drafts, legacyPlans] = await Promise.all([
-    request(`/api/v1/clients?${query}`),
-    request('/api/v1/recipes'),
-    request('/api/v1/meal-plans/review-queue'),
-    request(`/api/v1/meal-plans?${query}`),
-  ]);
+  // Keep usable sections visible when one endpoint (especially the optional
+  // legacy-plan endpoint) fails. Do not silently treat authorization errors
+  // as an empty result; show the affected service and its actual error.
+  const sources = [
+    ['Patients', `/api/v1/clients?${query}`],
+    ['Recipes', '/api/v1/recipes'],
+    ['Review queue', '/api/v1/meal-plans/review-queue'],
+    ['Legacy plans', `/api/v1/meal-plans?${query}`],
+  ];
+  const responses = await Promise.allSettled(sources.map(([, url]) => request(url)));
+  const problems = responses.flatMap((result, index) => result.status === 'rejected'
+    ? [`${sources[index][0]}: ${result.reason?.message || 'Unable to load'}`] : []);
+  const [clients, recipes, drafts, legacyPlans] = responses.map(result =>
+    result.status === 'fulfilled' && Array.isArray(result.value) ? result.value : []);
+  const problemsHtml = problems.length
+    ? `<div class="workspace-message error" role="alert">Some meal-planning information could not be loaded: <ul>${problems.map(message => `<li>${escapeHtml(message)}</li>`).join('')}</ul>Check your local API and database connection before saving or approving plans.</div>`
+    : '';
   const clientOptions = clients.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
   const recipeOptions = recipes.filter(r => Array.isArray(r.ingredients) && r.ingredients.length).map(r =>
     `<label class="meal-review-option"><input type="checkbox" name="recipe_id" value="${escapeHtml(r.recipe_id)}"> ${escapeHtml(r.title)}</label>`).join('');
   workspaceContent.innerHTML = `
     ${pageHeading('MEAL PLANNING', 'Review meal plans.', 'Prepare screened drafts and approve them before client delivery.')}
+    ${problemsHtml}
     <div data-message class="workspace-message" hidden></div>
     <section class="content-panel"><div class="section-heading"><h2>New draft</h2><span>DIETITIAN ONLY</span></div>
       <p class="notice">Enter clinically reviewed context. The system cannot certify nutritional adequacy or allergy safety.</p>
@@ -1742,7 +2048,7 @@ async function renderMealPlans() {
             <div class="form-field"><label>Revised schedule JSON (only when modifying; include each day)</label><textarea class="text-input" name="revised_schedule" placeholder='[{"day":1,"candidate_recipe":{"title":"..."}}]'></textarea></div>
             <button class="button button-primary" type="submit">Submit review</button></form>` : `<p>Review note: ${escapeHtml(d.review_note || '—')}</p>`}
         </article>`;
-      }).join('') : '<p class="empty-state">No saved drafts yet.</p>'}
+      }).join('') : '<p class="empty-state">No saved drafts available. If the review queue failed to load, see the warning above.</p>'}
     </section>
     <section class="content-panel"><h2>Existing legacy plans</h2><p>${legacyPlans.length} plans from the previous meal-planning system. These are separate from the new approval queue.</p></section>`;
   const form = document.querySelector('#mealDraftForm');
@@ -1827,7 +2133,7 @@ async function renderAdminDashboard() {
     ["Dietitians", summary.dietitians], ["Patients", summary.clients],
     ["Branches", summary.branches], ["Businesses", summary.businesses],
     ["Pending approvals", summary.pending_approvals], ["Appointments", summary.appointments],
-    ["Meal plans", summary.meal_plans], ["Audit events", summary.audit_events],
+    ["Meal plans", summary.meal_plans], ["Approval actions", summary.audit_events],
   ];
   workspaceContent.innerHTML = `
     ${pageHeading("ADMIN DASHBOARD", "Practice overview.", "Monitor registrations, care activity, and organization records.")}
@@ -1840,6 +2146,113 @@ async function renderAdminDashboard() {
       <button class="quick-link" data-go="admin-reports" type="button"><strong>View reports</strong><span aria-hidden="true">&#8599;</span></button>
     </div>`;
   bindGoButtons();
+}
+
+async function renderStaffDashboard() {
+  const profile = await request("/api/v1/staff/me");
+  const role = staffRoleNames[profile.role] || profile.role;
+  workspaceContent.innerHTML = `
+    ${pageHeading("TEAM WORKSPACE", `Welcome, ${escapeHtml(profile.full_name)}.`, "Your access is controlled by your assigned practice role.")}
+    <div class="admin-stat-grid"><section class="admin-stat"><span>Assigned role</span><strong class="staff-role-card">${escapeHtml(role)}</strong></section>
+    <section class="admin-stat"><span>Account</span><strong class="staff-role-card">${profile.is_active ? "Active" : "Inactive"}</strong></section></div>
+    <section class="content-panel"><h2 class="compact-heading">Secure staff access</h2>
+    <p>Staff roles have been introduced, with least-privilege permissions. Branch operations and additional tools will become available after they pass authorization testing.</p>
+    <div class="quick-grid"><button class="quick-link" type="button" data-go="staff-profile"><strong>View my staff profile</strong><span aria-hidden="true">&#8599;</span></button>
+    ${["reception", "branch_manager"].includes(profile.role) ? '<button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong></button><button class="quick-link" data-go="reception-checkin" type="button"><strong>Check in a patient</strong></button>' : ""}
+    ${profile.role === "compliance_officer" ? '<button class="quick-link" type="button" data-go="staff-access-events"><strong>View access audit</strong><span aria-hidden="true">&#8599;</span></button>' : ""}</div></section>`;
+  bindGoButtons();
+}
+
+async function renderStaffProfile() {
+  const profile = await request("/api/v1/staff/me");
+  workspaceContent.innerHTML = `
+    ${pageHeading("STAFF PROFILE", "My staff profile.", "Review your assigned role and branch.")}
+    <section class="content-panel"><dl class="profile-details">
+      <div><dt>Name</dt><dd>${escapeHtml(profile.full_name)}</dd></div>
+      <div><dt>Email</dt><dd>${escapeHtml(profile.email)}</dd></div>
+      <div><dt>Role</dt><dd>${escapeHtml(staffRoleNames[profile.role] || profile.role)}</dd></div>
+      <div><dt>Branch ID</dt><dd>${escapeHtml(profile.branch_id || "Organization-wide")}</dd></div>
+      <div><dt>Status</dt><dd>${profile.is_active ? "Active" : "Inactive"}</dd></div>
+    </dl></section>`;
+}
+
+async function renderAccessEvents() {
+  const events = await request("/api/v1/admin/access-events?limit=100");
+  workspaceContent.innerHTML = `
+    ${pageHeading("SECURITY", "Access events.", "Recent protected-API requests, including denied access attempts. Patient information and credentials are not displayed.")}
+    <p class="notice">Shows recent access events, not the complete POPIA compliance audit. Logs may be incomplete until database migration and production-grade audit controls are implemented.</p>
+    ${renderAdminTable(["Timestamp", "Actor role", "Account ID", "Action", "Resource", "HTTP status"], events.map((event) => [
+      event.occurred_at ? new Date(event.occurred_at).toLocaleString() : "—", event.actor_role,
+      event.actor_id || "Anonymous", event.http_method, event.resource_path, event.status_code,
+    ]), "No access events recorded yet.")}`;
+}
+
+async function renderAdminStaff() {
+  const [staff, branches] = await Promise.all([
+    request("/api/v1/admin/staff"), request("/api/v1/admin/branches"),
+  ]);
+  const staffRoles = Object.entries(staffRoleNames);
+  const roleChoices = (selected) => staffRoles.map(([value, label]) =>
+    `<option value="${escapeHtml(value)}" ${selected === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("");
+  const branchChoices = (selected) => `<option value="">Organization-wide / not assigned</option>` +
+    branches.map((branch) => `<option value="${escapeHtml(branch.branch_id)}" ${selected === branch.branch_id ? "selected" : ""}>${escapeHtml(branch.name)} (${escapeHtml(branch.business_name || "Practice")})</option>`).join("");
+  workspaceContent.innerHTML = `
+    ${pageHeading("ADMINISTRATION", "Staff & roles.", "Provision reception, branch management, compliance, executive, and content accounts.")}
+    <div data-message class="workspace-message" role="status" aria-live="polite" hidden></div>
+    <section class="content-panel"><h2 class="compact-heading">Add a staff account</h2>
+      <p class="notice">The account password must be shared securely. New roles do not automatically have access to medical records or administrator settings.</p>
+      <form id="staffCreateForm" class="form-grid">
+        <div class="form-field"><label for="staffFullName">Full name</label><input class="text-input" id="staffFullName" name="full_name" maxlength="200" required></div>
+        <div class="form-field"><label for="staffEmail">Email</label><input class="text-input" id="staffEmail" name="email" type="email" maxlength="150" required></div>
+        <div class="form-field"><label for="staffRole">Role</label><select class="text-input" id="staffRole" name="role" required>${roleChoices("reception")}</select></div>
+        <div class="form-field"><label for="staffBranch">Assigned branch</label><select class="text-input" id="staffBranch" name="branch_id">${branchChoices(null)}</select></div>
+        <div class="form-field full-width"><label for="staffPassword">Initial password (at least 12 characters)</label><input class="text-input" id="staffPassword" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></div>
+        <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Create staff account</button></div>
+      </form>
+    </section>
+    <div class="section-heading"><h2>Staff directory</h2><span>${staff.length} ACCOUNTS</span></div>
+    ${staff.length ? `<div class="admin-table-wrap"><table class="admin-data-table"><thead><tr>
+      <th scope="col">Name</th><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Branch</th><th scope="col">Status</th><th scope="col">Actions</th>
+    </tr></thead><tbody>${staff.map((user) => `<tr data-staff-row="${escapeHtml(user.staff_id)}">
+      <td>${escapeHtml(user.full_name)}</td><td>${escapeHtml(user.email)}</td>
+      <td><select class="text-input" data-staff-role aria-label="Role for ${escapeHtml(user.full_name)}">${roleChoices(user.role)}</select></td>
+      <td><select class="text-input" data-staff-branch aria-label="Branch for ${escapeHtml(user.full_name)}">${branchChoices(user.branch_id)}</select></td>
+      <td>${user.is_active ? "Active" : "Inactive"}</td>
+      <td><button class="button" type="button" data-staff-save>Save</button>
+      <button class="button" type="button" data-staff-toggle="${user.is_active ? "off" : "on"}">${user.is_active ? "Disable" : "Enable"}</button></td>
+    </tr>`).join("")}</tbody></table></div>` : '<p class="empty-state">No staff accounts added yet.</p>'}`;
+  workspaceContent.querySelector("#staffCreateForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = Object.fromEntries(new FormData(form));
+    if (!payload.branch_id) payload.branch_id = null;
+    try {
+      await request("/api/v1/admin/staff", { method: "POST", body: JSON.stringify(payload) });
+      await renderAdminStaff();
+      showWorkspaceMessage("Staff account created. Share its initial password securely.");
+    } catch (error) { showWorkspaceMessage(error.message, true); }
+  });
+  workspaceContent.querySelectorAll("[data-staff-save], [data-staff-toggle]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("[data-staff-row]");
+      const turningOff = button.dataset.staffToggle === "off";
+      if (turningOff && !window.confirm("Disable this staff account and revoke its current session?")) return;
+      const payload = {
+        role: row.querySelector("[data-staff-role]").value,
+        branch_id: row.querySelector("[data-staff-branch]").value || null,
+        is_active: button.hasAttribute("data-staff-toggle") ? !turningOff :
+          !row.querySelector('[data-staff-toggle="on"]'),
+      };
+      button.disabled = true;
+      try {
+        await request(`/api/v1/admin/staff/${encodeURIComponent(row.dataset.staffRow)}`, {
+          method: "PUT", body: JSON.stringify(payload),
+        });
+        await renderAdminStaff();
+        showWorkspaceMessage("Staff permissions updated. Existing sessions were revoked.");
+      } catch (error) { button.disabled = false; showWorkspaceMessage(error.message, true); }
+    });
+  });
 }
 
 async function renderAdminDietitians() {
@@ -1901,7 +2314,7 @@ async function renderAdminReports() {
       ["Businesses", summary.businesses], ["Branches", summary.branches],
       ["Dietitians", summary.dietitians], ["Patients", summary.clients],
       ["Pending approvals", summary.pending_approvals], ["Appointments", summary.appointments],
-      ["Meal plans", summary.meal_plans], ["Audit events", summary.audit_events],
+      ["Meal plans", summary.meal_plans], ["Approval actions", summary.audit_events],
     ], "No report data is available yet.")}`;
 }
 
@@ -2054,14 +2467,23 @@ loginForm.addEventListener("submit", async (event) => {
       body: JSON.stringify(Object.fromEntries(new FormData(loginForm))),
     });
     if (result.user.type === "admin") {
+      sessionStorage.removeItem(staffTokenKey);
       sessionStorage.setItem(adminTokenKey, result.access_token);
       sessionStorage.removeItem(dietitianTokenKey);
       showWorkspace(result.user, "overview");
     } else if (result.user.type === "dietitian") {
       sessionStorage.setItem(dietitianTokenKey, result.access_token);
       sessionStorage.removeItem(adminTokenKey);
+      sessionStorage.removeItem(staffTokenKey);
+      showWorkspace(result.user);
+    } else if (Object.hasOwn(staffRoleNames, result.user.type)) {
+      sessionStorage.removeItem(adminTokenKey);
+      sessionStorage.removeItem(dietitianTokenKey);
+      sessionStorage.removeItem(clientTokenKey);
+      sessionStorage.setItem(staffTokenKey, result.access_token);
       showWorkspace(result.user);
     } else {
+      sessionStorage.removeItem(staffTokenKey);
       sessionStorage.removeItem(adminTokenKey);
       sessionStorage.removeItem(dietitianTokenKey);
       sessionStorage.setItem(clientTokenKey, result.access_token);
@@ -2074,17 +2496,109 @@ loginForm.addEventListener("submit", async (event) => {
   }
 });
 
+// FR-1.6: JSON-encode optional attachments in bounded base64 without uploading
+// anything to an external service. The API checks signatures and limits again.
+async function registrationFileAttachment(input, maxBytes, allowedTypes) {
+  const file = input.files?.[0];
+  if (!file) return null;
+  if (file.size > maxBytes || file.size === 0 || !allowedTypes.includes(file.type)) {
+    throw new Error(`Check ${input.id}: please select an accepted file within its size limit.`);
+  }
+  const buffer = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < buffer.length; i += 8192) {
+    binary += String.fromCharCode(...buffer.subarray(i, i + 8192));
+  }
+  return { filename: file.name, content_type: file.type, data_base64: btoa(binary) };
+}
+
+// FR-1.10: explicit, short-lived device-only draft. Sensitive fields are NEVER
+// stored. Registration works normally if storage is disabled.
+const registrationDraftKey = "nutricare-patient-onboarding-draft-v1";
+const registrationDraftTTL = 24 * 60 * 60 * 1000;
+const registrationDraftFields = ["first_name", "last_name", "email", "phone", "gender"];
+function clearRegistrationDraft() {
+  try { localStorage.removeItem(registrationDraftKey); } catch { /* storage may be blocked */ }
+}
+function registrationDraftMessage(message) {
+  document.querySelector("#signupDraftMessage").textContent = message;
+}
+document.querySelector("#signupSaveDraft").addEventListener("click", () => {
+  if (selectedRole() !== "client") return;
+  try {
+    const data = Object.fromEntries(registrationDraftFields.map(name => [name, signupForm.elements[name].value]));
+    localStorage.setItem(registrationDraftKey, JSON.stringify({ saved_at: Date.now(), data }));
+    registrationDraftMessage("Draft saved here for up to 24 hours. Sensitive fields were not saved.");
+  } catch { registrationDraftMessage("Your browser does not allow saving a draft on this device."); }
+});
+document.querySelector("#signupRestoreDraft").addEventListener("click", () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(registrationDraftKey) || "null");
+    if (!saved || !saved.saved_at || Date.now() - saved.saved_at > registrationDraftTTL || Date.now() < saved.saved_at) {
+      clearRegistrationDraft();
+      registrationDraftMessage("No valid draft found. Drafts expire after 24 hours.");
+      return;
+    }
+    registrationDraftFields.forEach(name => { signupForm.elements[name].value = saved.data?.[name] || ""; });
+    for (const field of Object.values(registrationFields)) { if (field.value) updateRegistrationValidation(field); }
+    setPatientSignupStep(1);
+    registrationDraftMessage("Draft restored. Re-enter your identity number, birth date, password and consent.");
+  } catch { registrationDraftMessage("Could not restore a draft on this device."); }
+});
+document.querySelector("#signupClearDraft").addEventListener("click", () => {
+  clearRegistrationDraft();
+  registrationDraftMessage("Saved draft discarded.");
+});
+
 signupForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = signupForm.querySelector("button[type=submit]");
   const role = selectedRole();
+  if (role === "client") {
+    // Recheck previous steps before sending anything to the API.
+    for (const step of [1, 2]) {
+      if (!validateSignupStep(step)) {
+        setPatientSignupStep(step);
+        validateSignupStep(step);
+        return;
+      }
+    }
+  }
+  if (role === "client" && !signupForm.elements.consent_to_care.checked) {
+    setPatientSignupStep(3);
+    showAuthMessage("Please review the privacy notice and confirm your consent before creating an account.");
+    signupForm.elements.consent_to_care.reportValidity();
+    return;
+  }
   if (!passwordsMatch("signupPassword", "signupConfirmPassword")) {
     showAuthMessage("Passwords do not match.");
+    signupForm.elements.confirm_password.reportValidity();
     return;
   }
   const values = Object.fromEntries(new FormData(signupForm));
+  values.email = values.email.trim().toLowerCase();
+  if (role === "client") {
+    values.phone = values.phone.trim();
+    // Never infer consent: send an explicit boolean only when checked.
+    values.consent_to_care = signupForm.elements.consent_to_care.checked;
+  } else {
+    delete values.consent_to_care;
+    delete values.privacy_notice_version;
+  }
   delete values.role;
   delete values.confirm_password;
+  delete values.profile_photo_file;
+  delete values.initial_document_file;
+  if (role === "client") {
+    try {
+      values.profile_photo = await registrationFileAttachment(signupForm.elements.profile_photo_file, 1024 * 1024, ["image/jpeg", "image/png"]);
+      values.initial_document = await registrationFileAttachment(signupForm.elements.initial_document_file, 3 * 1024 * 1024,
+        ["application/pdf", "image/jpeg", "image/png"]);
+    } catch (error) {
+      showAuthMessage(error.message);
+      return;
+    }
+  }
   button.disabled = true;
   try {
     const path = role === "dietitian" ? "dietitian" : "client";
@@ -2104,6 +2618,7 @@ signupForm.addEventListener("submit", async (event) => {
       sessionStorage.removeItem(dietitianTokenKey);
       sessionStorage.setItem(clientTokenKey, result.access_token);
     }
+    if (role === "client") clearRegistrationDraft();
     showWorkspace(result.user, "overview");
   } catch (error) {
     showAuthMessage(error.message);
@@ -2137,6 +2652,78 @@ adminSetupForm.addEventListener("submit", async (event) => {
   }
 });
 
+// FR-1.7: authenticated patient QR view; the code is never the patient's ID.
+async function renderClientCheckin(clientId) {
+  workspaceContent.innerHTML = `${pageHeading("CHECK-IN", "Your QR check-in.", "Show your private code to reception when you arrive.")}
+    <section class="content-panel" aria-label="Check-in QR"><p>Generate a fresh QR code for your visit. The previous code will stop working.</p>
+    <button class="button button-primary" id="generateCheckinQR" type="button">Generate my check-in QR</button>
+    <div id="clientQRDisplay" class="qr-display" role="status"></div></section>`;
+  document.querySelector("#generateCheckinQR").addEventListener("click", async event => {
+    event.currentTarget.disabled = true;
+    try {
+      const result = await request(`/api/v1/clients/${encodeURIComponent(clientId)}/checkin-code`, {method:"POST"});
+      const svgBlob = new Blob([result.qr_svg], {type:"image/svg+xml"});
+      const url = URL.createObjectURL(svgBlob);
+      const target = document.querySelector("#clientQRDisplay");
+      target.innerHTML = `<img alt="Your private check-in QR code" src="${url}" width="260" height="260"><p>Show this QR to authorized reception staff.</p>`;
+      target.querySelector("img").addEventListener("load", () => URL.revokeObjectURL(url), {once:true});
+    } catch (error) { document.querySelector("#clientQRDisplay").textContent = error.message; }
+    finally { event.currentTarget.disabled = false; }
+  });
+}
+
+// FR-1.8: patient personally enters their own private password and checks
+// the consent box. Reception never sees that password in a dashboard.
+async function renderReceptionOnboarding() {
+  workspaceContent.innerHTML = `${pageHeading("RECEPTION", "Assisted patient registration.", "Let the patient enter their password and review consent themselves.")}
+  <div data-message class="workspace-message" hidden></div>
+  <section class="content-panel"><form id="assistedRegistration" class="form-grid">
+  <div class="form-field"><label for="assistedFirst">First name</label><input id="assistedFirst" class="text-input" name="first_name" required></div>
+  <div class="form-field"><label for="assistedLast">Last name</label><input id="assistedLast" class="text-input" name="last_name" required></div>
+  <div class="form-field"><label for="assistedEmail">Email</label><input id="assistedEmail" class="text-input" name="email" type="email" required></div>
+  <div class="form-field"><label for="assistedID">South African ID number</label><input id="assistedID" class="text-input" name="id_number" inputmode="numeric" minlength="13" maxlength="13" required></div>
+  <div class="form-field"><label for="assistedPhone">Phone</label><input id="assistedPhone" class="text-input" name="phone" type="tel" required></div>
+  <div class="form-field"><label for="assistedDOB">Date of birth</label><input id="assistedDOB" class="text-input" name="date_of_birth" type="date" required></div>
+  <div class="form-field"><label for="assistedGender">Gender</label><select id="assistedGender" class="text-input" name="gender" required><option value="">Choose</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></div>
+  <div class="form-field"><label for="assistedPassword">Patient creates a private password</label><input id="assistedPassword" class="text-input" name="password" type="password" autocomplete="new-password" minlength="8" required></div>
+  <div class="form-field full-width"><details aria-label="Patient privacy notice">${document.querySelector("#registrationPrivacyNotice").innerHTML}</details>
+  <label><input name="consent_to_care" type="checkbox" required> The patient has read the notice and personally agrees to this registration and care processing.</label>
+  <p class="notice">The recorded IP belongs to this reception terminal. Do not press Register until the patient confirms consent.</p></div>
+  <div class="form-field full-width"><button class="button button-primary" type="submit">Register patient</button></div>
+  </form></section>`;
+  const form = document.querySelector("#assistedRegistration");
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const button = form.querySelector('[type="submit"]'); button.disabled = true;
+    const data = Object.fromEntries(new FormData(form));
+    data.consent_to_care = form.elements.consent_to_care.checked;
+    data.privacy_notice_version = "2026-10-28-v1";
+    try {
+      const result = await request("/api/v1/auth/register/client/assisted", {method:"POST", body:JSON.stringify(data)});
+      form.reset(); showWorkspaceMessage(`Registration created: ${result.user.id}. Welcome email queued.`, false);
+    } catch (error) { showWorkspaceMessage(error.message, true); }
+    finally {button.disabled = false;}
+  });
+}
+
+async function renderReceptionCheckin() {
+  workspaceContent.innerHTML = `${pageHeading("RECEPTION", "Patient check-in.", "Scan the patient's QR with a keyboard-type scanner or paste the code.")}
+  <div data-message class="workspace-message" hidden></div>
+  <section class="content-panel"><form id="receptionCheckinForm" class="form-grid">
+  <div class="form-field full-width"><label for="receptionQRValue">Check-in code</label><input id="receptionQRValue" class="text-input" name="checkin_code" autocomplete="off" required placeholder="Scan the QR code"></div>
+  <div class="form-field full-width"><button class="button button-primary" type="submit">Check in patient</button></div>
+  </form></section>`;
+  const form = document.querySelector("#receptionCheckinForm");
+  form.addEventListener("submit", async event => {
+    event.preventDefault(); const button = form.querySelector("button"); button.disabled = true;
+    try {
+      const result = await request("/api/v1/reception/check-in", {method:"POST", body:JSON.stringify({checkin_code:form.elements.checkin_code.value})});
+      form.reset(); showWorkspaceMessage(`Check-in recorded for patient ${result.client_id}.`, false);
+    } catch (error) { showWorkspaceMessage(error.message, true); }
+    finally {button.disabled = false;}
+  });
+}
+
 bindPasswordConfirmation("signupPassword", "signupConfirmPassword");
 bindPasswordConfirmation("adminSetupPassword", "adminSetupConfirmPassword");
 document.querySelector("#signupPassword").addEventListener("input", (event) => {
@@ -2151,6 +2738,8 @@ try {
   if (savedUser && savedUser.id && savedUser.full_name) {
     if (savedUser.type === "admin" && hasAdminToken) {
       showWorkspace(savedUser, "overview");
+    } else if (Object.hasOwn(staffRoleNames, savedUser.type)) {
+      if (sessionStorage.getItem(staffTokenKey)) showWorkspace(savedUser);
     } else if (savedUser.type !== "admin") {
       showWorkspace(savedUser);
     }

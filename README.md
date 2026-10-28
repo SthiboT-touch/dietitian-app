@@ -1,6 +1,6 @@
 # Dietitian & Nutrition Management
 
-The browser app is served by the API at `http://localhost:8000` when running with Docker Compose. The interactive API documentation is at `http://localhost:8000/docs`.
+The browser app is served by the API at `http://localhost:8000` when running with Docker Compose.
 
 ## Project layout
 
@@ -44,15 +44,15 @@ The model download is several gigabytes and is stored in the `ollama_data` volum
 
 The API container connects to Ollama at `http://ollama:11434` over the Compose network and waits for the Ollama service to become healthy. If the AI still cannot reply, confirm the model is installed with `docker compose exec ollama ollama list`, then pull it if needed with `docker compose exec ollama ollama pull llama3.2`. Rebuild and restart the API after changing its configuration with `docker compose up --build -d api`.
 
-LangSmith tracing is optional. Add these settings alongside `DB_PASSWORD` in the root `.env` file:
+LangSmith tracing is optional. The root `.env.example` has a blank `LANGSMITH_API_KEY` slot. Copy it to `.env` if you do not already have a `.env`, keep your existing database password, paste your LangSmith key into that slot, and set tracing to `true`:
 
 ```dotenv
 LANGSMITH_TRACING=true
-LANGSMITH_API_KEY=your-langsmith-api-key
+LANGSMITH_API_KEY=
 LANGSMITH_PROJECT=dietitian-app
 ```
 
-Then start the app with the optional Compose override; the main `docker-compose.yml` is unchanged:
+Keep the real key in `.env` only; `.env` is ignored by Git. Never paste the key into source files, commits, or chat. After saving `.env`, start or recreate the API with the optional Compose override; the main `docker-compose.yml` is unchanged:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.langsmith.yml up --build -d

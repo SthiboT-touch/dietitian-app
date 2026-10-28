@@ -131,6 +131,8 @@ def test_login_rejects_invalid_credentials():
             "email": "jordan@example.com",
             "dietitian_id": "dietitian-1",
             "id_number": "9005140012345",
+            "phone": "082 123 4567",
+            "consent_to_care": True, "privacy_notice_version": "2026-10-28-v1",
             "date_of_birth": "1990-05-14",
             "gender": "female",
             "password": "nutrition-safe-pass",
@@ -168,7 +170,9 @@ def test_client_signup_requires_an_existing_dietitian():
             "last_name": "Lee",
             "email": "jordan@example.com",
             "dietitian_id": "missing-dietitian",
-            "id_number": "9005140012346",
+            "id_number": "9005140012345",
+            "phone": "082 123 4567",
+            "consent_to_care": True, "privacy_notice_version": "2026-10-28-v1",
             "date_of_birth": "1990-05-14",
             "gender": "female",
             "password": "nutrition-safe-pass",
@@ -185,7 +189,9 @@ def test_patient_signup_can_skip_dietitian_selection():
             "first_name": "Jordan",
             "last_name": "Lee",
             "email": "jordan@example.com",
-            "id_number": "9005140012347",
+            "id_number": "9005140012345",
+            "phone": "082 123 4567",
+            "consent_to_care": True, "privacy_notice_version": "2026-10-28-v1",
             "date_of_birth": "1990-05-14",
             "gender": "female",
             "password": "nutrition-safe-pass",
@@ -215,7 +221,9 @@ def test_patient_without_assigned_dietitian_can_book_with_directory_dietitian():
             "first_name": "Jordan",
             "last_name": "Lee",
             "email": "jordan@example.com",
-            "id_number": "9005140012348",
+            "id_number": "9005140012345",
+            "phone": "082 123 4567",
+            "consent_to_care": True, "privacy_notice_version": "2026-10-28-v1",
             "date_of_birth": "1990-05-14",
             "gender": "female",
             "password": "nutrition-safe-pass",
@@ -230,6 +238,7 @@ def test_patient_without_assigned_dietitian_can_book_with_directory_dietitian():
             "dietitian_id": directory.json()[0]["id"],
             "appointment_date": (datetime.now() + timedelta(days=5)).replace(microsecond=0).isoformat(),
         },
+        headers=authenticated_client_headers(patient["id"]),
     )
 
     assert patient["dietitian_id"] is None
@@ -255,7 +264,9 @@ def test_approved_appointment_links_patient_to_dietitian_for_dashboard():
             "first_name": "Jordan",
             "last_name": "Lee",
             "email": "jordan@example.com",
-            "id_number": "9005140012349",
+            "id_number": "9005140012345",
+            "phone": "082 123 4567",
+            "consent_to_care": True, "privacy_notice_version": "2026-10-28-v1",
             "date_of_birth": "1990-05-14",
             "gender": "female",
             "password": "nutrition-safe-pass",
@@ -268,16 +279,18 @@ def test_approved_appointment_links_patient_to_dietitian_for_dashboard():
             "dietitian_id": dietitian["id"],
             "appointment_date": (datetime.now() + timedelta(days=5)).replace(microsecond=0).isoformat(),
         },
+        headers=authenticated_client_headers(patient["id"]),
     ).json()["appointment"]
 
     response = client.patch(
         f"/api/v1/appointments/{appointment['appointment_id']}",
         json={"action": "APPROVED"},
+        headers=authenticated_dietitian_headers(dietitian["id"]),
     )
 
     assert response.status_code == 200
     assert response.json()["appointment"]["status"] == "CONFIRMED"
-    my_patients = client.get(f"/api/v1/clients?dietitian_id={dietitian['id']}")
+    my_patients = client.get(f"/api/v1/clients?dietitian_id={dietitian['id']}", headers=authenticated_dietitian_headers(dietitian["id"]))
     assert my_patients.status_code == 200
     assert any(item["id"] == patient["id"] for item in my_patients.json())
 
@@ -302,7 +315,9 @@ def test_client_signup_joins_registered_dietitian():
             "last_name": "Lee",
             "email": "jordan@example.com",
             "dietitian_id": dietitian_id,
-            "id_number": "9005140012350",
+            "id_number": "9005140012352",
+            "phone": "082 123 4567",
+            "consent_to_care": True, "privacy_notice_version": "2026-10-28-v1",
             "date_of_birth": "1990-05-14",
             "gender": "female",
             "password": "client-safe-pass",
@@ -332,14 +347,16 @@ def test_client_list_is_scoped_to_dietitian():
             "last_name": "Lee",
             "email": "jordan@example.com",
             "dietitian_id": dietitian["id"],
-            "id_number": "9005140012351",
+            "id_number": "9005140012352",
+            "phone": "082 123 4567",
+            "consent_to_care": True, "privacy_notice_version": "2026-10-28-v1",
             "date_of_birth": "1990-05-14",
             "gender": "female",
             "password": "client-safe-pass",
         },
     ).json()["user"]
 
-    response = client.get("/api/v1/clients", params={"dietitian_id": dietitian["id"]})
+    response = client.get("/api/v1/clients", params={"dietitian_id": dietitian["id"]}, headers=authenticated_dietitian_headers(dietitian["id"]))
 
     assert response.status_code == 200
     assert response.json() == [{
@@ -369,6 +386,8 @@ def test_admin_workspace_data_routes_require_admin_and_return_practice_data():
             "email": "jordan@example.com",
             "dietitian_id": dietitian["id"],
             "id_number": "9005140012352",
+            "phone": "082 123 4567",
+            "consent_to_care": True, "privacy_notice_version": "2026-10-28-v1",
             "date_of_birth": "1990-05-14",
             "gender": "female",
             "password": "client-safe-pass",
@@ -937,7 +956,10 @@ def test_recipe_create_and_list():
         "instructions": "Cook oats, then add berries.",
     }
 
-    created = client.post("/api/v1/recipes", json=recipe)
+    # Read-only recipe catalogue is public, but modifications require a dietitian.
+    assert client.post("/api/v1/recipes", json=recipe).status_code == 401
+    headers = authenticated_dietitian_headers("recipe-dietitian")
+    created = client.post("/api/v1/recipes", json=recipe, headers=headers)
     listing = client.get("/api/v1/recipes")
 
     assert created.status_code == 200
@@ -986,10 +1008,11 @@ def test_appointments_can_be_filtered_by_client():
         response = client.post(
             "/api/v1/appointments",
             json={"client_id": client_id, "dietitian_id": "dietitian-1", "appointment_date": appointment_date},
+            headers=authenticated_client_headers(client_id),
         )
         assert response.status_code == 200
 
-    response = client.get("/api/v1/appointments", params={"client_id": "client-a"})
+    response = client.get("/api/v1/appointments", params={"client_id": "client-a"}, headers=authenticated_client_headers("client-a"))
 
     assert response.status_code == 200
     assert len(response.json()) == 1
@@ -1005,6 +1028,7 @@ def test_goals_can_be_created_and_listed_by_client():
             "target_metric": "Weight",
             "target_value": 72.5,
         },
+        headers=authenticated_client_headers("client-goal-test"),
     )
 
     assert created.status_code == 200, created.text
@@ -1012,6 +1036,7 @@ def test_goals_can_be_created_and_listed_by_client():
     listing = client.get(
         "/api/v1/goals",
         params={"client_id": "client-goal-test"},
+        headers=authenticated_client_headers("client-goal-test"),
     )
 
     assert listing.status_code == 200, listing.text
@@ -1030,14 +1055,16 @@ def test_patient_progress_saves_and_preserves_partial_metric_updates():
             "steps": 8500,
             "sleep_hours": 7.33,
         },
+        headers=authenticated_client_headers("patient-progress-test"),
     )
     assert first_entry.status_code == 200
 
     partial_update = client.post(
         "/api/v1/clients/patient-progress-test/progress",
         json={"weight_kg": 72.2},
+        headers=authenticated_client_headers("patient-progress-test"),
     )
-    history = client.get("/api/v1/clients/patient-progress-test/progress")
+    history = client.get("/api/v1/clients/patient-progress-test/progress", headers=authenticated_client_headers("patient-progress-test"))
 
     assert partial_update.status_code == 200
     assert len(history.json()) == 1
@@ -1056,6 +1083,7 @@ def test_appointment_lifecycle_supports_approval_rejection_and_cancellation():
     created = client.post(
         "/api/v1/appointments",
         json={"client_id": "client-a", "dietitian_id": "dietitian-1", "appointment_date": appointment_date},
+        headers=authenticated_client_headers("client-a"),
     )
     appointment = created.json()["appointment"]
     assert created.status_code == 200
@@ -1064,15 +1092,17 @@ def test_appointment_lifecycle_supports_approval_rejection_and_cancellation():
     approved = client.patch(
         f"/api/v1/appointments/{appointment['appointment_id']}",
         json={"action": "APPROVED"},
+        headers=authenticated_dietitian_headers("dietitian-1"),
     )
     assert approved.status_code == 200
     assert approved.json()["appointment"]["status"] == "CONFIRMED"
-    patient_appointments = client.get("/api/v1/appointments", params={"client_id": "client-a"})
+    patient_appointments = client.get("/api/v1/appointments", params={"client_id": "client-a"}, headers=authenticated_client_headers("client-a"))
     assert patient_appointments.json()[0]["status"] == "CONFIRMED"
 
     cancelled = client.patch(
         f"/api/v1/appointments/{appointment['appointment_id']}",
         json={"action": "CANCELLED"},
+        headers=authenticated_client_headers("client-a"),
     )
     assert cancelled.status_code == 200
     assert cancelled.json()["appointment"]["status"] == "CANCELLED"
@@ -1080,10 +1110,12 @@ def test_appointment_lifecycle_supports_approval_rejection_and_cancellation():
     rejected_request = client.post(
         "/api/v1/appointments",
         json={"client_id": "client-b", "dietitian_id": "dietitian-1", "appointment_date": appointment_date},
+        headers=authenticated_client_headers("client-b"),
     ).json()["appointment"]
     rejected = client.patch(
         f"/api/v1/appointments/{rejected_request['appointment_id']}",
         json={"action": "REJECTED"},
+        headers=authenticated_dietitian_headers("dietitian-1"),
     )
     assert rejected.status_code == 200
     assert rejected.json()["appointment"]["status"] == "REJECTED"
@@ -1097,12 +1129,14 @@ def test_appointment_decisions_only_apply_to_pending_requests():
             "dietitian_id": "dietitian-1",
             "appointment_date": (datetime.now() + timedelta(days=3)).replace(microsecond=0).isoformat(),
         },
+        headers=authenticated_client_headers("client-a"),
     ).json()["appointment"]
-    client.patch(f"/api/v1/appointments/{appointment['appointment_id']}", json={"action": "REJECTED"})
+    client.patch(f"/api/v1/appointments/{appointment['appointment_id']}", json={"action": "REJECTED"}, headers=authenticated_dietitian_headers("dietitian-1"))
 
     response = client.patch(
         f"/api/v1/appointments/{appointment['appointment_id']}",
         json={"action": "APPROVED"},
+        headers=authenticated_dietitian_headers("dietitian-1"),
     )
 
     assert response.status_code == 409
@@ -1185,7 +1219,7 @@ def test_client_health_profile_loads_conditions_allergies_and_pregnancy():
         "progress": [],
     }
 
-    response = client.get("/api/v1/clients/client-health/profile")
+    response = client.get("/api/v1/clients/client-health/profile", headers=authenticated_client_headers("client-health"))
 
     assert response.status_code == 200
     assert response.json()["allergies"] == state.clients_db["client-health"]["allergies"]
@@ -1204,20 +1238,23 @@ def test_health_history_entries_save_for_a_client():
     allergy = client.post(
         "/api/v1/clients/client-health/allergies",
         json={"allergen": "Peanuts", "severity": "severe"},
+        headers=authenticated_client_headers("client-health"),
     )
     condition = client.post(
         "/api/v1/clients/client-health/medical-conditions",
         json={"condition_name": "Asthma"},
+        headers=authenticated_client_headers("client-health"),
     )
     pregnancy = client.post(
         "/api/v1/clients/client-health/pregnancy",
         json={"trimester": 2, "due_date": "2027-03-01"},
+        headers=authenticated_client_headers("client-health"),
     )
 
     assert allergy.status_code == 200
     assert condition.status_code == 200
     assert pregnancy.status_code == 200
-    profile = client.get("/api/v1/clients/client-health/profile").json()
+    profile = client.get("/api/v1/clients/client-health/profile", headers=authenticated_client_headers("client-health")).json()
     assert profile["allergies"] == [{"allergen": "Peanuts", "severity": "severe"}]
     assert profile["conditions"] == [{"condition_name": "Asthma", "icd_code": None}]
     assert profile["pregnancy"] == {"trimester": 2, "due_date": "2027-03-01"}

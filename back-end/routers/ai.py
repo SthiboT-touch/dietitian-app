@@ -1,4 +1,7 @@
-"""6. AI engine and human-in-the-loop review workflow (Llama via Ollama)."""
+"""NutriCare AI workflows built with LangGraph and local Ollama models.
+
+AI suggestions support dietitian review; they are not clinical approval.
+"""
 import json
 import logging
 import os
@@ -38,7 +41,7 @@ def _langsmith_trace_config(workflow: str) -> dict[str, Any]:
     }
 
 
-# --- AI ENGINE & HUMAN-IN-THE-LOOP WORKFLOW ---
+# Workflow states keep chat, plan generation, and dietitian review separate.
 
 class ChatWorkflowState(TypedDict, total=False):
     user_id: str
@@ -69,6 +72,7 @@ class ReviewWorkflowState(TypedDict, total=False):
 
 
 def _create_chat_model(output_format: Optional[str] = None) -> ChatOllama:
+    """Use the same Ollama settings for chat and structured plan requests."""
     model_options = {
         "model": os.getenv("OLLAMA_MODEL", "llama3.2"),
         "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/"),
@@ -151,6 +155,24 @@ def _reply_to_greeting(state: ChatWorkflowState) -> dict:
     return {"reply": _greeting_reply(state["message"])}
 
 
+def _contains_unexecuted_tool_call(content: str) -> bool:
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(content):
+        if character != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(content[index:])
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(value, dict)
+            and isinstance(value.get("name"), str)
+            and any(key in value for key in ("parameters", "arguments", "input"))
+        ):
+            return True
+    return False
+
+
 def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
     messages = []
     for turn in state.get("conversation", [])[-8:]:
@@ -171,7 +193,11 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
             {"messages": messages},
             config=_langsmith_trace_config("chat-agent"),
         )
-        content = result["messages"][-1].content
+        final_message = result["messages"][-1]
+        if getattr(final_message, "tool_calls", None):
+            logger.warning("LangChain AI chat ended with an unexecuted tool call")
+            return {"reply": "I couldn't provide a clear nutrition response just now. Please ask again in plain language."}
+        content = final_message.content
         if isinstance(content, list):
             content = "".join(
                 block.get("text", "")
@@ -179,6 +205,9 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
                 if isinstance(block, dict) and isinstance(block.get("text"), str)
             )
         if isinstance(content, str) and content.strip():
+            if _contains_unexecuted_tool_call(content):
+                logger.warning("LangChain AI chat returned tool-call text instead of a response")
+                return {"reply": "I couldn't provide a clear nutrition response just now. Please ask again in plain language."}
             return {"reply": content.strip()}
     except (
         httpx.HTTPError,
@@ -190,8 +219,9 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
         KeyError,
         TypeError,
         ValueError,
-    ):
-        logger.exception("LangChain AI chat request failed")
+    ) as error:
+        # The upstream exception text may embed a prompt or health data.
+        logger.error("LangChain AI chat request failed (error_type=%s)", type(error).__name__)
         return {
             "reply": (
                 "I can't reach the AI model right now, so I don't want to guess at an answer. "

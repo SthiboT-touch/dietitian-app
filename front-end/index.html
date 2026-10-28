@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f5f5ef">
-    <title>Nutrition Practice | Dietitian Portal</title>
+    <title>NutriCare | Nutrition &amp; Dietitian Portal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css?v=12">
-    <link rel="stylesheet" href="/static/vibrant-theme.css?v=2">
-    <script src="/static/app.js?v=24" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=16">
+    <link rel="stylesheet" href="/static/vibrant-theme.css?v=3">
+    <script src="/static/app.js?v=29" defer></script>
   </head>
   <body>
     <main id="authScreen" class="auth-screen">
@@ -55,34 +55,100 @@
               <label class="role-option is-selected"><input type="radio" name="role" value="dietitian" checked><span>Dietitian</span></label>
               <label class="role-option"><input type="radio" name="role" value="client"><span>Patient</span></label>
             </fieldset>
-            <label class="field-label" for="signupFirstName">First name</label>
-            <input id="signupFirstName" name="first_name" autocomplete="given-name" placeholder="First name" required>
-            <label class="field-label" for="signupLastName">Last name</label>
-            <input id="signupLastName" name="last_name" autocomplete="family-name" placeholder="Last name" required>
-            <label class="field-label" for="signupEmail">Email address</label>
-            <input id="signupEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
-            <div id="dietitianFields">
-              <label class="field-label" for="licenseNumber">License number</label>
-              <input id="licenseNumber" name="license_number" placeholder="e.g. RD-2048" required>
+            <!-- FR-1.1: patient registration is progressive; dietitian registration stays compatible. -->
+            <div id="patientSignupProgress" class="signup-progress" hidden>
+              <div class="signup-progress-heading">
+                <span id="patientSignupStepLabel" aria-live="polite">Step 1 of 3 · Your details</span>
+                <span>Patient registration</span>
+              </div>
+              <div class="signup-progress-track" role="progressbar" aria-label="Registration progress" aria-valuemin="1" aria-valuemax="3" aria-valuenow="1">
+                <span id="patientSignupProgressBar"></span>
+              </div>
             </div>
-            <div id="clientFields" hidden>
-              <label class="field-label" for="idNumber">ID number</label>
-              <input id="idNumber" name="id_number" autocomplete="off" placeholder="National ID number">
-              <label class="field-label" for="gender">Gender</label>
-              <select id="gender" name="gender">
-                <option value="">Select gender</option>
-                <option value="female">Female</option>
-                <option value="male">Male</option>
-                <option value="other">Other / prefer not to say</option>
-              </select>
-              <label class="field-label" for="dateOfBirth">Date of birth</label>
-              <input id="dateOfBirth" name="date_of_birth" type="date" autocomplete="bday">
+            <section class="signup-step" data-signup-step="1" aria-label="Personal details">
+              <h3 class="signup-step-title" tabindex="-1" data-patient-signup-only hidden>Your details</h3>
+              <p class="signup-step-help" data-patient-signup-only hidden>Let's start with the information you'll use to sign in.</p>
+              <label class="field-label" for="signupFirstName">First name</label>
+              <input id="signupFirstName" name="first_name" autocomplete="given-name" placeholder="First name" required>
+              <label class="field-label" for="signupLastName">Last name</label>
+              <input id="signupLastName" name="last_name" autocomplete="family-name" placeholder="Last name" required>
+              <label class="field-label" for="signupEmail">Email address</label>
+              <input id="signupEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signupEmailHelp" maxlength="150" required>
+              <small id="signupEmailHelp" class="registration-field-help" aria-live="polite">Use a valid email address.</small>
+              <div id="dietitianFields">
+                <label class="field-label" for="licenseNumber">License number</label>
+                <input id="licenseNumber" name="license_number" placeholder="e.g. RD-2048" required>
+              </div>
+            </section>
+            <section class="signup-step" data-signup-step="2" aria-label="Patient details">
+              <h3 class="signup-step-title" tabindex="-1">Patient details</h3>
+              <p class="signup-step-help">These details help create your clinical profile.</p>
+              <div id="clientFields" hidden>
+                <label class="field-label" for="idNumber">ID number</label>
+                <input id="idNumber" name="id_number" autocomplete="off" inputmode="numeric" maxlength="13" placeholder="13-digit South African ID" aria-describedby="idNumberHelp">
+                <small id="idNumberHelp" class="registration-field-help" aria-live="polite">Enter your 13-digit South African identity number.</small>
+                <label class="field-label" for="signupPhone">Contact phone number</label>
+                <input id="signupPhone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="35" placeholder="082 123 4567" aria-describedby="signupPhoneHelp">
+                <small id="signupPhoneHelp" class="registration-field-help" aria-live="polite">South African number, e.g. 082 123 4567 or +27 82 123 4567.</small>
+                <label class="field-label" for="gender">Gender</label>
+                <select id="gender" name="gender">
+                  <option value="">Select gender</option>
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
+                  <option value="other">Other / prefer not to say</option>
+                </select>
+                <label class="field-label" for="dateOfBirth">Date of birth</label>
+                <input id="dateOfBirth" name="date_of_birth" type="date" autocomplete="bday" aria-describedby="dateOfBirthHelp">
+                <small id="dateOfBirthHelp" class="registration-field-help" aria-live="polite">Must match the date encoded in your ID number.</small>
+                <div class="registration-uploads">
+                  <h4>Optional documents</h4>
+                  <p>Add a profile photo or an initial medical document now, or upload documents later.</p>
+                  <label class="field-label" for="signupPhoto">Profile photo (JPEG/PNG, max 1 MB)</label>
+                  <input id="signupPhoto" name="profile_photo_file" type="file" accept="image/png,image/jpeg">
+                  <label class="field-label" for="signupDocument">Initial medical document (PDF/JPEG/PNG, max 3 MB)</label>
+                  <input id="signupDocument" name="initial_document_file" type="file" accept="application/pdf,image/png,image/jpeg">
+                </div>
+              </div>
+            </section>
+            <section class="signup-step" data-signup-step="3" aria-label="Account security">
+              <h3 class="signup-step-title" tabindex="-1" data-patient-signup-only hidden>Secure your account</h3>
+              <p class="signup-step-help" data-patient-signup-only hidden>Create a password to protect your account.</p>
+              <label class="field-label" for="signupPassword">Create password</label>
+              <input id="signupPassword" name="password" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" required>
+              <label class="field-label" for="signupConfirmPassword">Confirm password</label>
+              <input id="signupConfirmPassword" name="confirm_password" type="password" autocomplete="new-password" placeholder="Re-enter your password" required>
+              <div id="clientPrivacyConsent" class="privacy-consent" hidden>
+                <h4>Privacy and consent</h4>
+                <p>Before creating your patient account, please review how your information will be handled.</p>
+                <details id="registrationPrivacyNotice" class="privacy-notice" aria-label="Privacy notice">
+                  <summary>Read the registration privacy notice</summary>
+                  <div class="privacy-notice-body">
+                    <p><strong>Version 2026-10-28-v1.</strong> NutriCare collects your contact details, identity details, dietary preferences and health information to register your account and support nutrition consultations and follow-up care.</p>
+                    <p>Authorized practice staff and your assigned dietitian may need access to the information relevant to their roles. Records are protected by access controls and kept for applicable healthcare record-keeping periods.</p>
+                    <p>You may contact the dietetic practice to ask about your information, request a correction or learn about your rights under South Africa's POPIA. Optional marketing communications are <strong>not</strong> included in this consent.</p>
+                    <p class="privacy-notice-warning">This is a project privacy notice draft that must be reviewed and approved by the practice before use with real patients.</p>
+                  </div>
+                </details>
+                <label class="privacy-consent-choice" for="signupConsentToCare">
+                  <input id="signupConsentToCare" name="consent_to_care" type="checkbox" value="true" aria-describedby="consentHelp">
+                  <span>I have read the privacy notice and consent to the processing of my personal and health information for patient registration and dietetic care.</span>
+                </label>
+                <small id="consentHelp" class="registration-field-help" aria-live="polite">You must confirm your decision to register as a patient.</small>
+                <input type="hidden" name="privacy_notice_version" value="2026-10-28-v1" disabled>
+              </div>
+            </section>
+            <div id="patientSignupActions" class="signup-step-actions" hidden>
+              <button class="button signup-back" id="patientSignupBack" type="button" hidden>Back</button>
+              <button class="button button-primary signup-next" id="patientSignupNext" type="button">Continue <span aria-hidden="true">&#8594;</span></button>
             </div>
-            <label class="field-label" for="signupPassword">Create password</label>
-            <input id="signupPassword" name="password" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" required>
-            <label class="field-label" for="signupConfirmPassword">Confirm password</label>
-            <input id="signupConfirmPassword" name="confirm_password" type="password" autocomplete="new-password" placeholder="Re-enter your password" required>
-            <button class="button button-primary auth-submit" type="submit"><span>Create account</span><span class="button-arrow" aria-hidden="true">&#8594;</span></button>
+            <div id="signupDraftActions" class="signup-draft-actions" hidden>
+              <p>Your password, identity number, birth date, consent and documents will <strong>never</strong> be saved in a draft. Avoid saving drafts on shared computers.</p>
+              <button id="signupSaveDraft" type="button" class="button quiet-button">Save draft on this device</button>
+              <button id="signupRestoreDraft" type="button" class="button quiet-button">Resume saved draft</button>
+              <button id="signupClearDraft" type="button" class="button quiet-button">Discard draft</button>
+              <span id="signupDraftMessage" role="status" aria-live="polite"></span>
+            </div>
+            <button id="signupSubmit" class="button button-primary auth-submit" type="submit"><span>Create account</span><span class="button-arrow" aria-hidden="true">&#8594;</span></button>
           </form>
 
           <form id="adminSetupForm" class="auth-form" hidden>
@@ -102,7 +168,7 @@
 
           <p class="auth-note"><span class="note-dot"></span> A thoughtful workspace for everyday nutrition care.</p>
         </div>
-        <footer class="auth-footer"><span>&copy; 2026 Nutrition Practice</span><a href="/docs">API documentation</a></footer>
+        <footer class="auth-footer"><span>&copy; 2026 Nutrition Practice</span></footer>
       </section>
     </main>
 
@@ -111,6 +177,8 @@
         <div class="sidebar-label">WORKSPACE</div>
         <nav class="side-nav" aria-label="Main navigation">
           <button class="nav-item is-current" data-view="overview" type="button"><span class="nav-glyph">&#9633;</span>Dashboard</button>
+          <button class="nav-item" data-view="admin-staff" data-admin-only type="button"><span class="nav-glyph">&#9787;</span>Staff &amp; Roles</button>
+          <button class="nav-item" data-view="admin-access-events" data-admin-only type="button"><span class="nav-glyph">&#9776;</span>Access Events</button>
           <button class="nav-item" data-view="admin-dietitians" data-admin-only type="button"><span class="nav-glyph">&#9787;</span>Dietitians</button>
           <button class="nav-item" data-view="admin-branches" data-admin-only type="button"><span class="nav-glyph">&#9636;</span>Branches</button>
           <button class="nav-item" data-view="admin-businesses" data-admin-only type="button"><span class="nav-glyph">&#9633;</span>Businesses</button>
@@ -119,6 +187,11 @@
           <button class="nav-item" data-view="admin-reports" data-admin-only type="button"><span class="nav-glyph">&#9636;</span>Reports</button>
           <button class="nav-item" data-view="admin-audit-logs" data-admin-only type="button"><span class="nav-glyph">&#9776;</span>Audit Logs</button>
           <button class="nav-item" data-view="admin-settings" data-admin-only type="button"><span class="nav-glyph">&#9881;</span>Settings</button>
+          <button class="nav-item" data-view="reception-onboarding" data-reception-only type="button"><span class="nav-glyph">&#9787;</span>Register Patient</button>
+          <button class="nav-item" data-view="reception-checkin" data-reception-only type="button"><span class="nav-glyph">&#9636;</span>Patient Check-In</button>
+          <button class="nav-item" data-view="staff-profile" data-staff-only type="button"><span class="nav-glyph">&#9787;</span>My Staff Profile</button>
+          <button class="nav-item" data-view="staff-access-events" data-compliance-only type="button"><span class="nav-glyph">&#9776;</span>Access Events</button>
+          <button class="nav-item" data-view="client-checkin" data-client-only type="button"><span class="nav-glyph">&#9636;</span>My QR Check-In</button>
           <button class="nav-item" data-view="my-profile" data-standard-only type="button"><span class="nav-glyph">&#9787;</span>My Profile</button>
           <div class="nav-section-label" data-client-only>HEALTH INFORMATION</div>
           <button class="nav-item nav-subitem" data-view="health-conditions" data-client-only data-standard-only type="button">Medical Conditions</button>
@@ -141,14 +214,13 @@
           <button class="nav-item" data-view="meal-plans" data-dietitian-only data-standard-only type="button"><span class="nav-glyph">&#9776;</span>Meal plans</button>
         </nav>
         <div class="sidebar-bottom">
-          <div class="connection-status"><span class="status-dot"></span><span>Workspace connected</span></div>
+          <div id="connectionStatus" class="connection-status" data-state="checking" role="status" aria-live="polite"><span class="status-dot" aria-hidden="true"></span><span id="connectionStatusText">Checking connection…</span></div>
           <button id="signOutButton" class="signout-button" type="button"><span class="nav-glyph">&#8592;</span>Sign out</button>
-          <a class="sidebar-docs" href="/docs">API documentation <span aria-hidden="true">&#8599;</span></a>
         </div>
       </aside>
       <section class="workspace-main">
         <header class="workspace-header">
-          <div class="header-context"><span class="eyebrow eyebrow-green">NUTRITION PRACTICE</span><span id="headerDate" class="header-date"></span></div>
+          <div class="header-context"><span class="eyebrow eyebrow-green">NUTRICARE</span><span id="headerDate" class="header-date"></span></div>
           <div class="profile-chip"><span id="profileInitials" class="profile-avatar">FN</span><span id="profileName">Your account</span></div>
           <button id="mobileSignOutButton" class="mobile-signout" type="button">Sign out</button>
         </header>

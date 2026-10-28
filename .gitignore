@@ -9,3 +9,6 @@ venv/
 .env
 .env.*
 !.env.example
+
+# Database backups (may contain real client health data)
+*.dump

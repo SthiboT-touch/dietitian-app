@@ -181,6 +181,8 @@ CREATE TABLE client (
 
     id_number            VARCHAR(30) UNIQUE NOT NULL,
 
+    phone                VARCHAR(16),   -- normalized +27; nullable for existing patients
+
     date_of_birth        DATE NOT NULL,
 
     gender               VARCHAR(20) NOT NULL CHECK (gender IN ('male','female','other')),
@@ -200,6 +202,17 @@ CREATE TABLE client (
 
 
 -- ============================================
+
+-- FR-1.3: immutable evidence of patient registration privacy consent.
+-- Timestamp and IP are supplied by the API, not the browser.
+CREATE TABLE client_registration_consent (
+    client_id VARCHAR(36) PRIMARY KEY REFERENCES client(client_id) ON DELETE RESTRICT,
+    privacy_notice_version VARCHAR(40) NOT NULL,
+    consented_at TIMESTAMPTZ NOT NULL,
+    ip_address VARCHAR(45) NOT NULL,
+    registration_mode VARCHAR(12) NOT NULL DEFAULT 'SELF' CHECK (registration_mode IN ('SELF','ASSISTED')),
+    registered_by_staff_id VARCHAR(36)
+);
 
 -- 6. PREGNANCY & LACTATION TRACKING
 
@@ -939,3 +952,83 @@ CREATE INDEX IF NOT EXISTS idx_milk_supply_client          ON milk_supply_log(cl
 CREATE INDEX IF NOT EXISTS idx_weaning_plan_client         ON weaning_plan_log(client_id);
 CREATE INDEX IF NOT EXISTS idx_maternal_discomfort_client  ON maternal_discomfort_log(client_id);
 CREATE INDEX IF NOT EXISTS idx_infant_sensitivity_client   ON infant_sensitivity_log(client_id);
+
+-- Security milestone 02: staff roles and access event audit.
+-- Kept in sync with migrations/008_staff_roles_and_access_audit.sql for NEW installs.
+CREATE TABLE IF NOT EXISTS staff_account (
+    staff_id VARCHAR(36) PRIMARY KEY,
+    full_name VARCHAR(200) NOT NULL,
+    email VARCHAR(150) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(32) NOT NULL CHECK (role IN (
+        'reception', 'branch_manager', 'compliance_officer', 'executive', 'content_manager'
+    )),
+    branch_id VARCHAR(36) REFERENCES branch(branch_id) ON DELETE RESTRICT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT staff_branch_required CHECK (
+        role NOT IN ('reception', 'branch_manager') OR branch_id IS NOT NULL
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_staff_email_lower ON staff_account (LOWER(email));
+CREATE INDEX IF NOT EXISTS idx_staff_branch ON staff_account (branch_id);
+
+CREATE TABLE IF NOT EXISTS access_audit_event (
+    event_id VARCHAR(36) PRIMARY KEY,
+    actor_id VARCHAR(36),
+    actor_role VARCHAR(32) NOT NULL,
+    http_method VARCHAR(10) NOT NULL,
+    resource_path TEXT NOT NULL,
+    status_code SMALLINT NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_access_audit_time ON access_audit_event (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_access_audit_actor ON access_audit_event (actor_role, actor_id);
+
+
+-- Onboarding: 011_registration_welcome_outbox.sql
+-- FR-1.5: durable email queue; no email is sent if SMTP is not configured.
+CREATE TABLE IF NOT EXISTS registration_welcome_outbox (
+    message_id VARCHAR(36) PRIMARY KEY,
+    client_id VARCHAR(36) NOT NULL UNIQUE REFERENCES client(client_id) ON DELETE CASCADE,
+    recipient_email VARCHAR(150) NOT NULL,
+    recipient_name VARCHAR(150) NOT NULL,
+    state VARCHAR(16) NOT NULL DEFAULT 'PENDING' CHECK (state IN ('PENDING','SENDING','SENT','RETRY')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    sent_at TIMESTAMPTZ,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_welcome_outbox_due ON registration_welcome_outbox(state, next_attempt_at);
+
+
+-- Onboarding: 012_registration_uploads.sql
+-- FR-1.6: uploaded portrait kept separately from medical documents.
+CREATE TABLE IF NOT EXISTS client_profile_photo (
+    client_id VARCHAR(36) PRIMARY KEY REFERENCES client(client_id) ON DELETE CASCADE,
+    file_name VARCHAR(120) NOT NULL,
+    content_type VARCHAR(30) NOT NULL,
+    file_data BYTEA NOT NULL,
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+-- Onboarding: 013_client_qr_checkin.sql
+-- FR-1.7: store only SHA256 of random check-in credential; never ID numbers.
+CREATE TABLE IF NOT EXISTS client_checkin_credential (
+    client_id VARCHAR(36) PRIMARY KEY REFERENCES client(client_id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) UNIQUE NOT NULL,
+    rotated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes')
+);
+CREATE TABLE IF NOT EXISTS client_checkin_event (
+    checkin_id VARCHAR(36) PRIMARY KEY,
+    client_id VARCHAR(36) NOT NULL REFERENCES client(client_id) ON DELETE RESTRICT,
+    staff_id VARCHAR(36) NOT NULL REFERENCES staff_account(staff_id) ON DELETE RESTRICT,
+    branch_id VARCHAR(36) NOT NULL REFERENCES branch(branch_id) ON DELETE RESTRICT,
+    checked_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_client_checkin_event_client ON client_checkin_event(client_id, checked_in_at DESC);
+
+ALTER TABLE client_registration_consent ADD CONSTRAINT fk_registration_staff FOREIGN KEY (registered_by_staff_id) REFERENCES staff_account(staff_id) ON DELETE SET NULL;
