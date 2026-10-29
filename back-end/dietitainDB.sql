@@ -1068,6 +1068,7 @@ CREATE TABLE IF NOT EXISTS support_ticket (
     ticket_id VARCHAR(36) PRIMARY KEY,
     owner_role VARCHAR(32) NOT NULL,
     owner_id VARCHAR(36) NOT NULL,
+    contact_email VARCHAR(150),
     subject VARCHAR(160) NOT NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','IN_PROGRESS','RESOLVED')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1084,5 +1085,4 @@ CREATE TABLE IF NOT EXISTS support_message (
 );
 CREATE INDEX IF NOT EXISTS idx_support_message_ticket ON support_message(ticket_id, created_at);
 
-ALTER TABLE support_ticket ADD COLUMN IF NOT EXISTS contact_email VARCHAR(150);
 CREATE INDEX IF NOT EXISTS idx_support_contact_time ON support_ticket(contact_email, created_at);

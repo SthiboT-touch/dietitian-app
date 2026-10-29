@@ -25,14 +25,11 @@ services:
       OLLAMA_MODEL: llama3.2
       OLLAMA_TIMEOUT_SECONDS: "240"
       REGISTRATION_TRUSTED_PROXY_CIDRS: ${REGISTRATION_TRUSTED_PROXY_CIDRS:-}
-<<<<<<< HEAD
       STYTCH_PROJECT_ID: ${STYTCH_PROJECT_ID:-}
       STYTCH_SECRET: ${STYTCH_SECRET:-}
       STYTCH_ENABLED: ${STYTCH_ENABLED:-1}
-=======
     volumes:
       - ./data:/data
->>>>>>> 29616db (Switch database from PostgreSQL to SQLite, add migration script)
     depends_on:
       - ollama
     restart: always

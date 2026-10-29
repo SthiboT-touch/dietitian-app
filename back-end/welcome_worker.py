@@ -48,13 +48,8 @@ def run_once():
             )
             cursor.execute(
                 "UPDATE registration_welcome_outbox SET state='RETRY', attempts=%s, "
-<<<<<<< HEAD
-                "next_attempt_at=NOW()+(%s * INTERVAL '1 second') WHERE message_id=%s",
-                (attempt, delay, row["message_id"]),
-=======
                 f"next_attempt_at={retry_expression} WHERE message_id=%s",
-                (attempt, delay, row['message_id']),
->>>>>>> 29616db (Switch database from PostgreSQL to SQLite, add migration script)
+                (attempt, delay, row["message_id"]),
             )
             logger.warning("Welcome email delivery failed; retry scheduled")
         else:

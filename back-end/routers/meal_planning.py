@@ -373,63 +373,6 @@ def create_meal_plan(request: MealPlanRequest, dietitian_id: str = Depends(requi
         status_code=409,
         detail="Sample-meal generation is disabled pending reviewed recipes, clinical context and dietitian approval. Use /api/v1/meal-plans/screen for preflight checks.",
     )
-<<<<<<< HEAD
-
-=======
-    plan_id = f"plan_{uuid.uuid4().hex[:8]}"
-    sample_meals = [
-        f"Breakfast: Oatmeal with chia seeds ({request.diet_type})",
-        "Lunch: Quinoa bowl with grilled chicken",
-        "Dinner: Salmon with steamed broccoli"
-    ]
-    if config.DATABASE_ENABLED:
-        with database.cursor() as cursor:
-            cursor.execute("SELECT dietitian_id FROM client WHERE client_id = %s", (request.client_id,))
-            client = cursor.fetchone()
-            if not client:
-                raise HTTPException(status_code=404, detail="Patient record not found")
-            if not client["dietitian_id"]:
-                raise HTTPException(status_code=422, detail="Patient must be linked to a dietitian")
-            cursor.execute(
-                "INSERT INTO diet_type (name) VALUES (%s) ON CONFLICT (name) DO UPDATE "
-                "SET name = EXCLUDED.name RETURNING diet_type_id",
-                (request.diet_type,),
-            )
-            diet_type_id = cursor.fetchone()["diet_type_id"]
-            end_date_expression = (
-                "DATE('now', '+' || (%s - 1) || ' days')"
-                if database.is_sqlite()
-                else "CURRENT_DATE + %s - 1"
-            )
-            cursor.execute(
-                "INSERT INTO meal_plan (meal_plan_id, client_id, dietitian_id, diet_type_id, start_date, end_date) "
-                f"VALUES (%s, %s, %s, %s, CURRENT_DATE, {end_date_expression})",
-                (plan_id, request.client_id, client["dietitian_id"], diet_type_id, request.days),
-            )
-            for day_number in range(1, request.days + 1):
-                cursor.execute(
-                    "INSERT INTO meal_plan_day (meal_plan_id, day_number, notes) VALUES (%s, %s, %s)",
-                    (plan_id, day_number, json.dumps(sample_meals)),
-                )
-        return {
-            "meal_plan_id": plan_id,
-            "client_id": request.client_id,
-            "diet_type": request.diet_type,
-            "days": request.days,
-            "meals": sample_meals,
-            "status": "GENERATED",
-        }
-    plan_data = {
-        "meal_plan_id": plan_id,
-        "client_id": request.client_id,
-        "diet_type": request.diet_type,
-        "days": request.days,
-        "meals": sample_meals,
-        "status": "GENERATED"
-    }
-    meal_plans_db[plan_id] = plan_data
-    return plan_data
->>>>>>> 29616db (Switch database from PostgreSQL to SQLite, add migration script)
 
 # Legacy meal-plan endpoints are retained for compatibility with dietitian screens,
 # but cannot be used as an unauthenticated client data lookup.

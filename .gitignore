@@ -12,7 +12,6 @@ venv/
 
 # Database backups (may contain real client health data)
 *.dump
-<<<<<<< HEAD
 .server.stdout.log
 .server.stderr.log
 server.stdout.log
@@ -20,9 +19,10 @@ server.stderr.log
 
 # Local source exports
 exports/
-=======
-   # SQLite database files (contain real client health data)
-   data/
-   *.sqlite
-   *.sqlite3
->>>>>>> 29616db (Switch database from PostgreSQL to SQLite, add migration script)
+
+# SQLite database files (contain real client health data)
+data/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
