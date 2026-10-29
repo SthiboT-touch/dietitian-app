@@ -1,0 +1,13 @@
+# Keep local secrets and machine-specific files out of Docker build contexts.
+.env
+.env.*
+!.env.example
+.git/
+.venv/
+**/__pycache__/
+**/.pytest_cache/
+*.pyc
+*.zip
+*.bak
+*.dump
+*.backup

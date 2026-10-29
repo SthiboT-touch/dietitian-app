@@ -26,18 +26,18 @@
         />
         <link
             rel="stylesheet"
-            href="/static/styles.css?v=16"
+            href="/static/styles.css?v=17"
         />
         <link
             rel="stylesheet"
-            href="/static/vibrant-theme.css?v=3"
+            href="/static/vibrant-theme.css?v=6"
         />
         <script
             src="/static/support.js?v=3"
             defer
         ></script>
         <script
-            src="/static/app.js?v=30"
+            src="/static/app.js?v=33"
             defer
         ></script>
     </head>
@@ -768,7 +768,7 @@
                     >
                     <button
                         class="nav-item"
-                        data-view="support"
+                        data-patient-hide data-view="support"
                         type="button"
                         ><span class="nav-glyph">&#9993;</span>Support &amp; Tickets</button
                     >
@@ -876,26 +876,20 @@
                     >
                     <button
                         class="nav-item"
-                        data-view="client-checkin"
-                        data-client-only
-                        type="button"
-                        ><span class="nav-glyph">&#9636;</span>My QR Check-In</button
-                    >
-                    <button
-                        class="nav-item"
-                        data-view="my-profile"
+                        data-patient-hide data-view="my-profile"
                         data-standard-only
                         type="button"
                         ><span class="nav-glyph">&#9787;</span>My Profile</button
                     >
                     <div
                         class="nav-section-label"
+                        data-patient-hide
                         data-client-only
                         >HEALTH INFORMATION</div
                     >
                     <button
                         class="nav-item nav-subitem"
-                        data-view="health-conditions"
+                        data-patient-hide data-view="health-conditions"
                         data-client-only
                         data-standard-only
                         type="button"
@@ -903,7 +897,7 @@
                     >
                     <button
                         class="nav-item nav-subitem"
-                        data-view="health-allergies"
+                        data-patient-hide data-view="health-allergies"
                         data-client-only
                         data-standard-only
                         type="button"
@@ -911,7 +905,7 @@
                     >
                     <button
                         class="nav-item nav-subitem"
-                        data-view="health-pregnancy"
+                        data-patient-hide data-view="health-pregnancy"
                         data-client-only
                         data-standard-only
                         data-maternal-only
@@ -920,7 +914,7 @@
                     >
                     <button
                         class="nav-item nav-subitem"
-                        data-view="health-lactation"
+                        data-patient-hide data-view="health-lactation"
                         data-client-only
                         data-standard-only
                         data-maternal-only
@@ -933,7 +927,7 @@
                         data-client-only
                         data-standard-only
                         type="button"
-                        ><span class="nav-glyph">&#9636;</span>My Progress</button
+                        ><span class="nav-glyph">&#9636;</span>Progress</button
                     >
                     <button
                         class="nav-item"
@@ -941,15 +935,7 @@
                         data-client-only
                         data-standard-only
                         type="button"
-                        ><span class="nav-glyph">&#9673;</span>My Goals</button
-                    >
-                    <button
-                        class="nav-item"
-                        data-view="client-meal-plan"
-                        data-client-only
-                        data-standard-only
-                        type="button"
-                        ><span class="nav-glyph">&#9776;</span>My Meal Plan</button
+                        ><span class="nav-glyph">&#9673;</span>Goals</button
                     >
                     <button
                         class="nav-item"
@@ -961,7 +947,7 @@
                     >
                     <button
                         class="nav-item"
-                        data-view="client-recommendations"
+                        data-patient-hide data-view="client-recommendations"
                         data-client-only
                         data-standard-only
                         type="button"
@@ -973,6 +959,14 @@
                         data-standard-only
                         type="button"
                         ><span class="nav-glyph">&#10022;</span>AI Coach</button
+                    >
+                    <button
+                        class="nav-item"
+                        data-view="client-settings"
+                        data-client-only
+                        data-standard-only
+                        type="button"
+                        ><span class="nav-glyph">&#9881;</span>Settings</button
                     >
                     <button
                         class="nav-item"
@@ -1074,13 +1068,34 @@
                             class="header-date"
                         ></span
                     ></div>
-                    <div class="profile-chip"
-                        ><span
-                            id="profileInitials"
-                            class="profile-avatar"
-                            >FN</span
+                    <div class="profile-chip" id="standardProfileChip"
+                        ><span id="profileInitials" class="profile-avatar">FN</span
                         ><span id="profileName">Your account</span></div
                     >
+                    <div id="patientAccount" class="patient-account" hidden>
+                        <button
+                            type="button"
+                            id="patientAccountButton"
+                            class="patient-account-button"
+                            aria-label="Open your profile and account menu"
+                            aria-haspopup="menu"
+                            aria-controls="patientAccountPanel"
+                            aria-expanded="false"
+                        >
+                            <span id="patientAccountInitials" class="profile-avatar" aria-hidden="true">FN</span>
+                            <span id="patientAccountName" class="patient-account-name">Your account</span>
+                            <span class="patient-account-caret" aria-hidden="true">&#8964;</span>
+                        </button>
+                        <div id="patientAccountPanel" class="patient-account-panel" role="menu" aria-label="Account" hidden>
+                            <div class="account-menu-identity"><span class="profile-avatar account-menu-avatar" id="accountMenuAvatar" aria-hidden="true">FN</span>
+                                <div><strong id="accountMenuFullName">My account</strong><small id="accountMenuEmail"></small><span id="accountMenuRole" class="account-menu-role">Account</span></div></div>
+                            <div class="patient-account-heading">MY ACCOUNT</div>
+                            <button type="button" role="menuitem" data-account-view="my-profile">My profile</button>
+                            <button type="button" role="menuitem" data-account-view="account-security">Security &amp; preferences</button>
+                            <div class="patient-account-divider" role="separator"></div>
+                            <button type="button" role="menuitem" id="patientAccountSignout" class="patient-account-signout">Sign out</button>
+                        </div>
+                    </div>
                     <button
                         id="mobileSignOutButton"
                         class="mobile-signout"

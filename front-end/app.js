@@ -151,6 +151,366 @@ function showAuthMessage(message, kind = "error") {
     authMessage.hidden = false;
 }
 
+// An authenticated blob URL avoids exposing profile photographs through public
+// static files. Revoke it on replacement and logout.
+let accountPhotoObjectUrl = null;
+let accountPhotoLoadGeneration = 0;
+const profileRoleLabel = (role) => ({
+    client: "Patient", dietitian: "Dietitian", admin: "System administrator",
+    ...staffRoleNames,
+})[role] || "Team member";
+const initialsForName = (name) => String(name || "U")
+    .trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("");
+
+function updateHeaderAccount(user) {
+    document.querySelector("#profileName").textContent = (user.full_name || "Account").split(" ")[0];
+    document.querySelector("#profileInitials").textContent = initialsForName(user.full_name);
+    document.querySelector("#patientAccountName").textContent = user.full_name || "My account";
+    document.querySelector("#patientAccountInitials").textContent = initialsForName(user.full_name);
+    document.querySelector("#accountMenuFullName").textContent = user.full_name || "My account";
+    document.querySelector("#accountMenuEmail").textContent = user.email || "";
+    document.querySelector("#accountMenuRole").textContent = profileRoleLabel(user.type);
+}
+
+function paintAvatar(element, photoUrl) {
+    if (!element) return;
+    element.style.backgroundImage = photoUrl ? `url("${photoUrl}")` : "";
+    element.classList.toggle("has-profile-photo", Boolean(photoUrl));
+}
+function refreshAllAccountAvatars() {
+    for (const avatar of document.querySelectorAll("#profileInitials, #patientAccountInitials, #accountMenuAvatar, #profileHeroAvatar")) {
+        paintAvatar(avatar, accountPhotoObjectUrl);
+    }
+}
+async function loadAccountPhoto() {
+    const thisLoad = ++accountPhotoLoadGeneration;
+    if (accountPhotoObjectUrl) URL.revokeObjectURL(accountPhotoObjectUrl);
+    accountPhotoObjectUrl = null;
+    refreshAllAccountAvatars();
+    const token = sessionStorage.getItem(adminTokenKey) || sessionStorage.getItem(dietitianTokenKey)
+        || sessionStorage.getItem(clientTokenKey) || sessionStorage.getItem(staffTokenKey);
+    if (!token) return;
+    try {
+        const response = await fetch("/api/v1/account/photo", {
+            headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+        });
+        if (response.status === 404) return;
+        if (!response.ok) throw new Error("Unable to load the profile photo");
+        const blob = await response.blob();
+        if (thisLoad !== accountPhotoLoadGeneration || !currentUser) return;
+        accountPhotoObjectUrl = URL.createObjectURL(blob);
+        refreshAllAccountAvatars();
+    } catch (_) { /* Keep a useful initials avatar when the photo is unavailable. */ }
+}
+
+function accountDetail(label, value) {
+    return `<div class="account-detail"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "Not provided")}</dd></div>`;
+}
+function profileMetric(title, value, hint) {
+    return `<div class="account-metric"><span>${escapeHtml(title)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(hint)}</small></div>`;
+}
+function profileFormField(label, name, value = "", type = "text", extra = "") {
+    return `<label class="account-field"><span>${escapeHtml(label)}</span><input name="${name}" type="${type}" value="${escapeHtml(value ?? "")}" ${extra}></label>`;
+}
+
+async function renderAdvancedAccountProfile() {
+    const profile = await request("/api/v1/account/me");
+    const isPatient = profile.role === "client";
+    const isDietitian = profile.role === "dietitian";
+    const id = encodeURIComponent(profile.id);
+    const [health, appointments, dietitians, approval] = await Promise.all([
+        isPatient ? request(`/api/v1/clients/${id}/profile`).catch(() => null) : Promise.resolve(null),
+        isPatient || isDietitian ? request(`/api/v1/appointments`).catch(() => []) : Promise.resolve([]),
+        isPatient ? request("/api/v1/dietitians").catch(() => []) : Promise.resolve([]),
+        isDietitian ? request("/api/v1/dietitians/me/approval").catch(() => null) : Promise.resolve(null),
+    ]);
+    const practitioner = isPatient && Array.isArray(dietitians)
+        ? dietitians.find((item) => String(item.id) === String(profile.dietitian_id)) : null;
+    const now = new Date();
+    const upcoming = Array.isArray(appointments) ? appointments.filter((item) =>
+        ["CONFIRMED", "PENDING"].includes(String(item.status).toUpperCase())
+        && new Date(item.appointment_date) >= now,
+    ).sort((a, b) => new Date(a.appointment_date) - new Date(b.appointment_date))[0] : null;
+    const activeGoals = isPatient ? "Dietitian managed" : "Care team managed";
+    const conditions = Array.isArray(health?.conditions) ? health.conditions.length : 0;
+    const allergies = Array.isArray(health?.allergies) ? health.allergies.length : 0;
+    const upcomingLabel = upcoming ? new Date(upcoming.appointment_date).toLocaleDateString() : "Not booked";
+    const nextType = upcoming ? (upcoming.consultation_type === "VIRTUAL" ? "Virtual consultation" : "In-person visit") : "No upcoming consultation";
+    const identityFields = [
+        accountDetail("Account role", profile.role_label),
+        accountDetail("Email address", profile.email),
+        accountDetail("Account ID", profile.id),
+        ...(profile.date_of_birth ? [accountDetail("Date of birth", profile.date_of_birth)] : []),
+        ...(profile.gender ? [accountDetail("Gender", profile.gender)] : []),
+        ...(profile.license_number ? [accountDetail("Registration number", profile.license_number)] : []),
+        ...(profile.branch_id ? [accountDetail("Branch ID", profile.branch_id)] : []),
+    ].join("");
+    workspaceContent.innerHTML = `
+      ${pageHeading("MY ACCOUNT", "Your profile.", "Manage your account, personal details, photo and care information in one secure space.")}
+      <div data-message class="workspace-message" role="status" aria-live="polite" hidden></div>
+      <section class="account-hero">
+        <div class="account-hero-main">
+          <span class="account-hero-avatar" id="profileHeroAvatar" aria-label="Your profile picture">${escapeHtml(initialsForName(profile.full_name))}</span>
+          <div class="account-hero-copy"><span class="account-kicker">NUTRICARE ACCOUNT</span>
+            <h2>${escapeHtml(profile.full_name)}</h2>
+            <p>${escapeHtml(profile.email)}</p>
+            <span class="account-role-pill">${escapeHtml(profile.role_label)}</span>
+          </div>
+        </div>
+        <div class="account-photo-tools"><label class="button button-primary account-upload-button" for="profilePhotoPicker">Change photo</label>
+          <input id="profilePhotoPicker" type="file" accept="image/jpeg,image/png,image/webp" class="account-file-input">
+          <button type="button" class="button quiet-button" id="removeProfilePhoto" ${profile.has_photo ? "" : "disabled"}>Remove photo</button>
+          <small>JPG, PNG or WebP · preview and crop · saved privately</small></div>
+      </section>
+      <div class="account-metrics">
+        ${profileMetric("Next appointment", upcomingLabel, nextType)}
+        ${profileMetric(isPatient ? "Medical conditions" : "Account status", isPatient ? String(conditions) : String(profile.status || (profile.is_active === false ? "Inactive" : "Active")), isPatient ? "Recorded in your health history" : "Current account state")}
+        ${profileMetric(isPatient ? "Allergies" : "Role", isPatient ? String(allergies) : profile.role_label, isPatient ? "Recorded allergies" : "Assigned access level")}
+      </div>
+      <div class="account-two-column">
+        <section class="content-panel account-panel"><div class="section-heading"><h2>Personal information</h2><span>EDITABLE</span></div>
+          <p class="document-hint">Your login email and verified identity information remain protected. Update contact information here.</p>
+          <form id="accountInfoForm" class="account-form">
+            ${profileFormField("Full name", "full_name", profile.full_name, "text", 'maxlength="150" required')}
+            ${profileFormField("Phone number", "phone_number", profile.phone_number, "tel", 'maxlength="30" autocomplete="tel"')}
+            ${profileFormField("Address", "address", profile.address, "text", 'maxlength="240" autocomplete="street-address"')}
+            ${isPatient ? profileFormField("Emergency contact", "emergency_contact", profile.emergency_contact, "text", 'maxlength="120"') : ""}
+            ${!isPatient ? `<label class="account-field account-field-wide"><span>Professional bio / About</span><textarea name="bio" rows="3" maxlength="500">${escapeHtml(profile.bio || "")}</textarea></label>` : ""}
+            <button class="button button-primary account-form-submit" type="submit">Save personal information</button>
+          </form>
+        </section>
+        <section class="content-panel account-panel"><div class="section-heading"><h2>Account information</h2><span>VERIFIED</span></div>
+          <dl class="account-details">${identityFields}</dl>
+          <div class="account-security-link"><strong>Privacy &amp; security</strong><p>Control your password and notification preferences.</p><button type="button" class="button quiet-button" data-go="account-security">Manage security</button></div>
+        </section>
+      </div>
+      ${isPatient ? `<section class="content-panel account-panel"><div class="section-heading"><h2>Health summary</h2><span>YOUR CARE</span></div>
+        <p class="document-hint">A summary of your own protected health history. Your dietitian manages prescribed goals and meal plans.</p>
+        <div class="account-info-grid">
+          <div><strong>Medical conditions</strong><span>${escapeHtml(String(conditions))} recorded</span><button data-go="health-conditions" type="button">View medical history →</button></div>
+          <div><strong>Allergies</strong><span>${escapeHtml(String(allergies))} recorded</span><button data-go="health-allergies" type="button">View allergies →</button></div>
+          <div><strong>Nutrition goals</strong><span>${activeGoals}</span><button data-go="client-goals" type="button">View goals →</button></div>
+          <div><strong>Meal plan</strong><span>Prescribed by your dietitian</span><button data-go="client-meal-plan" type="button">View plan →</button></div>
+        </div></section>
+        <section class="content-panel account-panel"><div class="section-heading"><h2>Care team &amp; appointments</h2><span>CARE COORDINATION</span></div>
+          <dl class="account-details">${accountDetail("Assigned dietitian", practitioner?.full_name || (profile.dietitian_id ? "Assigned dietitian" : "Not assigned"))}
+          ${accountDetail("Branch", practitioner?.branch_name || "Not provided")}
+          ${accountDetail("Next appointment", upcoming ? `${upcomingLabel} · ${nextType}` : "Not booked")}
+          ${accountDetail("Appointment status", upcoming?.status || "No upcoming appointment")}</dl>
+          <div class="account-actions"><button data-go="client-appointments" type="button" class="button button-primary">Book appointment</button><button data-go="client-progress" type="button" class="button quiet-button">View progress</button><button data-go="support" type="button" class="button quiet-button">Support</button></div>
+        </section>` : ""}
+      ${approval && approval.status !== "APPROVED" ? dietitianApprovalMarkup(approval) : ""}
+      <section class="content-panel account-panel"><div class="section-heading"><h2>Quick access</h2><span>YOUR WORKSPACE</span></div>
+        <div class="account-actions"><button class="button quiet-button" data-go="overview" type="button">Dashboard</button>
+        <button class="button quiet-button" data-go="account-security" type="button">Security &amp; preferences</button>
+        ${isPatient ? '<button class="button quiet-button" data-go="ai-workspace" type="button">AI Coach</button>' : ""}
+        </div></section>`;
+    refreshAllAccountAvatars();
+    bindGoButtons();
+    if (approval?.status !== "APPROVED" && approval) bindApprovalResubmission();
+    bindAccountInfoForm();
+    bindAccountPhotoControls();
+}
+
+function bindAccountInfoForm() {
+    const form = workspaceContent.querySelector("#accountInfoForm");
+    if (!form) return;
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const submit = form.querySelector('button[type="submit"]');
+        submit.disabled = true;
+        try {
+            const data = Object.fromEntries(new FormData(form));
+            const result = await request("/api/v1/account/me", { method: "PUT", body: JSON.stringify(data) });
+            currentUser = { ...currentUser, full_name: result.full_name, phone_number: result.phone_number };
+            sessionStorage.setItem(sessionKey, JSON.stringify(currentUser));
+            updateHeaderAccount(currentUser);
+            await renderAdvancedAccountProfile();
+            showWorkspaceMessage("Your personal information was saved.");
+        } catch (error) { showWorkspaceMessage(error.message, true); }
+        finally { submit.disabled = false; }
+    });
+}
+
+async function renderAccountSecurity() {
+    const profile = await request("/api/v1/account/me");
+    workspaceContent.innerHTML = `${pageHeading("ACCOUNT", "Security & preferences.", "Control how you sign in and how NutriCare may contact you.")}
+    <div data-message class="workspace-message" role="status" aria-live="polite" hidden></div>
+    <div class="account-two-column">
+      <section class="content-panel account-panel"><div class="section-heading"><h2>Communication preferences</h2><span>ACCOUNT</span></div>
+        <form id="accountPreferencesForm" class="account-form">
+          <label class="account-field account-field-wide"><span>Preferred contact method</span><select name="preferred_contact"><option value="email" ${profile.preferred_contact === "email" ? "selected" : ""}>Email</option><option value="phone" ${profile.preferred_contact === "phone" ? "selected" : ""}>Phone</option></select></label>
+          <label class="account-checkbox"><input type="checkbox" name="email_notifications" ${profile.email_notifications ? "checked" : ""}><span><strong>Email notification preference</strong><small>Save whether you want optional email updates.</small></span></label>
+          <label class="account-checkbox"><input type="checkbox" name="appointment_reminders" ${profile.appointment_reminders ? "checked" : ""}><span><strong>Appointment reminder preference</strong><small>Reminder delivery depends on the services enabled by your practice.</small></span></label>
+          <button class="button button-primary" type="submit">Save preferences</button>
+        </form>
+      </section>
+      <section class="content-panel account-panel"><div class="section-heading"><h2>Change password</h2><span>SECURITY</span></div>
+        <form id="accountPasswordForm" class="account-form">
+          ${profileFormField("Current password", "current_password", "", "password", 'autocomplete="current-password" required')}
+          ${profileFormField("New password", "new_password", "", "password", 'autocomplete="new-password" minlength="12" maxlength="128" required')}
+          ${profileFormField("Confirm new password", "confirm_password", "", "password", 'autocomplete="new-password" minlength="12" maxlength="128" required')}
+          <p class="document-hint">Use at least 12 characters. Changing your password signs out existing sessions; sign in again afterwards.</p>
+          <button class="button button-primary" type="submit">Change password</button>
+        </form>
+      </section></div>
+      <div class="account-actions"><button type="button" class="button quiet-button" data-go="my-profile">← Back to My Profile</button></div>`;
+    bindGoButtons();
+    const preferences = workspaceContent.querySelector("#accountPreferencesForm");
+    preferences.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const submit = preferences.querySelector('button[type="submit"]');
+        submit.disabled = true;
+        try {
+            await request("/api/v1/account/preferences", { method: "PUT", body: JSON.stringify({
+                preferred_contact: preferences.elements.preferred_contact.value,
+                email_notifications: preferences.elements.email_notifications.checked,
+                appointment_reminders: preferences.elements.appointment_reminders.checked,
+            }) });
+            showWorkspaceMessage("Communication preferences saved.");
+        } catch (error) { showWorkspaceMessage(error.message, true); }
+        finally { submit.disabled = false; }
+    });
+    const passwordForm = workspaceContent.querySelector("#accountPasswordForm");
+    passwordForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (passwordForm.elements.new_password.value !== passwordForm.elements.confirm_password.value) {
+            showWorkspaceMessage("New passwords do not match.", true); return;
+        }
+        const submit = passwordForm.querySelector('button[type="submit"]');
+        submit.disabled = true;
+        try {
+            const response = await request("/api/v1/account/password", { method: "POST", body: JSON.stringify({
+                current_password: passwordForm.elements.current_password.value,
+                new_password: passwordForm.elements.new_password.value,
+            }) });
+            signOut();
+            showAuthMessage(response.message, "success");
+        } catch (error) { showWorkspaceMessage(error.message, true); submit.disabled = false; }
+    });
+}
+
+function bindAccountPhotoControls() {
+    const picker = workspaceContent.querySelector("#profilePhotoPicker");
+    if (!picker) return;
+    picker.addEventListener("change", (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 8 * 1024 * 1024) {
+            showWorkspaceMessage("Select a JPG, PNG or WebP photo under 8 MB to crop.", true);
+            picker.value = "";
+            return;
+        }
+        openPhotoCropDialog(file);
+    });
+    workspaceContent.querySelector("#removeProfilePhoto")?.addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await request("/api/v1/account/photo", { method: "DELETE" });
+            await loadAccountPhoto();
+            await renderAdvancedAccountProfile();
+            showWorkspaceMessage("Profile photo removed.");
+        } catch (error) { showWorkspaceMessage(error.message, true); button.disabled = false; }
+    });
+}
+
+function openPhotoCropDialog(file) {
+    const imageUrl = URL.createObjectURL(file);
+    const dialog = document.createElement("dialog");
+    dialog.className = "account-crop-dialog";
+    dialog.innerHTML = `<form method="dialog" class="account-crop-content"><h2>Position your profile photo</h2>
+      <p>Move the picture inside the square to choose what appears on your profile.</p>
+      <canvas width="512" height="512" aria-label="Photo crop preview"></canvas>
+      <label class="account-zoom-control">Zoom <input type="range" min="1" max="2.8" step="0.05" value="1"></label>
+      <div data-crop-message class="workspace-message error" hidden></div>
+      <div class="account-actions"><button type="button" class="button quiet-button" data-crop-cancel>Cancel</button>
+      <button type="button" class="button button-primary" data-crop-save>Save photo</button></div></form>`;
+    document.body.appendChild(dialog);
+    const canvas = dialog.querySelector("canvas");
+    const context = canvas.getContext("2d");
+    const zoom = dialog.querySelector('input[type="range"]');
+    const image = new Image();
+    let offsetX = 0, offsetY = 0, dragging = false, lastX = 0, lastY = 0;
+    const cleanup = () => { URL.revokeObjectURL(imageUrl); dialog.remove(); };
+    dialog.addEventListener("close", cleanup, { once: true });
+    dialog.querySelector("[data-crop-cancel]").addEventListener("click", () => dialog.close());
+    image.onerror = () => {
+        dialog.querySelector("[data-crop-message]").textContent = "This picture cannot be opened.";
+        dialog.querySelector("[data-crop-message]").hidden = false;
+        dialog.querySelector("[data-crop-save]").disabled = true;
+    };
+    const draw = () => {
+        if (!image.complete || !image.naturalWidth) return;
+        const scale = Math.max(512 / image.naturalWidth, 512 / image.naturalHeight) * Number(zoom.value);
+        const width = image.naturalWidth * scale, height = image.naturalHeight * scale;
+        offsetX = Math.min(0, Math.max(512 - width, offsetX));
+        offsetY = Math.min(0, Math.max(512 - height, offsetY));
+        context.clearRect(0, 0, 512, 512);
+        context.drawImage(image, offsetX, offsetY, width, height);
+    };
+    image.onload = () => {
+        const scale = Math.max(512 / image.naturalWidth, 512 / image.naturalHeight);
+        offsetX = (512 - image.naturalWidth * scale) / 2;
+        offsetY = (512 - image.naturalHeight * scale) / 2;
+        draw();
+    };
+    zoom.addEventListener("input", draw);
+    canvas.addEventListener("pointerdown", (event) => { dragging = true; lastX = event.clientX; lastY = event.clientY; canvas.setPointerCapture(event.pointerId); });
+    canvas.addEventListener("pointermove", (event) => {
+        if (!dragging) return;
+        const scale = 512 / canvas.getBoundingClientRect().width;
+        offsetX += (event.clientX - lastX) * scale;
+        offsetY += (event.clientY - lastY) * scale;
+        lastX = event.clientX; lastY = event.clientY;
+        draw();
+    });
+    canvas.addEventListener("pointerup", () => { dragging = false; });
+    canvas.addEventListener("pointercancel", () => { dragging = false; });
+    dialog.querySelector("[data-crop-save]").addEventListener("click", () => {
+        const button = dialog.querySelector("[data-crop-save]");
+        button.disabled = true;
+        canvas.toBlob(async (blob) => {
+            if (!blob) { button.disabled = false; return; }
+            try {
+                const data = new FormData();
+                data.append("file", blob, "profile.webp");
+                await request("/api/v1/account/photo", { method: "PUT", body: data });
+                dialog.close();
+                await loadAccountPhoto();
+                await renderAdvancedAccountProfile();
+                showWorkspaceMessage("Profile picture saved successfully.");
+            } catch (error) {
+                const message = dialog.querySelector("[data-crop-message]");
+                message.textContent = error.message; message.hidden = false;
+                button.disabled = false;
+            }
+        }, "image/webp", 0.86);
+    });
+    dialog.showModal();
+    image.src = imageUrl;
+}
+
+function closePatientAccountMenu({ restoreFocus = false } = {}) {
+    const panel = document.querySelector("#patientAccountPanel");
+    const button = document.querySelector("#patientAccountButton");
+    if (!panel || !button) return;
+    const wasOpen = !panel.hidden;
+    panel.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    if (restoreFocus && wasOpen) button.focus();
+}
+
+function togglePatientAccountMenu() {
+    if (!currentUser) return;
+    const panel = document.querySelector("#patientAccountPanel");
+    const button = document.querySelector("#patientAccountButton");
+    const opening = panel.hidden;
+    panel.hidden = !opening;
+    button.setAttribute("aria-expanded", String(opening));
+    if (opening) panel.querySelector('[role="menuitem"]')?.focus();
+}
+
 function showWorkspace(user, initialView = "overview") {
     currentUser = user;
     refreshConnectionStatus();
@@ -164,6 +524,8 @@ function showWorkspace(user, initialView = "overview") {
         .slice(0, 2)
         .map((part) => part[0].toUpperCase())
         .join("");
+    updateHeaderAccount(user);
+    void loadAccountPhoto();
     document.querySelector("#headerDate").textContent = new Intl.DateTimeFormat(undefined, {
         weekday: "long",
         month: "long",
@@ -173,6 +535,11 @@ function showWorkspace(user, initialView = "overview") {
         item.classList.toggle("is-current", item.dataset.view === initialView);
     });
     const isClient = user.type === "client";
+    workspace.classList.toggle("patient-mode", isClient);
+    document.querySelector("#patientAccount").hidden = false;
+    document.querySelector("#standardProfileChip").hidden = true;
+    document.querySelector("#mobileSignOutButton").hidden = true;
+    closePatientAccountMenu();
     const isAdmin = user.type === "admin";
     const isDietitian = user.type === "dietitian";
     const isStaff = Object.hasOwn(staffRoleNames, user.type);
@@ -201,6 +568,13 @@ function showWorkspace(user, initialView = "overview") {
     document.querySelectorAll("[data-admin-only]").forEach((item) => {
         item.hidden = !isAdmin;
     });
+    document.querySelectorAll("[data-patient-hide]").forEach((item) => {
+        item.hidden = isClient;
+    });
+    document.querySelectorAll("[data-patient-only]").forEach((item) => {
+        item.hidden = !isClient;
+    });
+
     document.querySelector('[data-view="overview"]').innerHTML =
         '<span class="nav-glyph">&#9633;</span>Dashboard';
     document.querySelector('[data-view="clients"]').innerHTML =
@@ -221,6 +595,12 @@ function showWorkspace(user, initialView = "overview") {
 }
 
 function signOut() {
+    closePatientAccountMenu();
+    ++accountPhotoLoadGeneration;
+    if (accountPhotoObjectUrl) URL.revokeObjectURL(accountPhotoObjectUrl);
+    accountPhotoObjectUrl = null;
+    refreshAllAccountAvatars();
+    workspace.classList.remove("patient-mode");
     sessionStorage.removeItem(sessionKey);
     sessionStorage.removeItem(adminTokenKey);
     sessionStorage.removeItem(dietitianTokenKey);
@@ -691,7 +1071,7 @@ async function renderDietitianDashboard() {
           )}</div>
           <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} · ${escapeHtml(client.status)}</p></div>
           <div class="review-actions">
-            <button class="button button-small button-approve" data-open-client="${escapeHtml(client.id)}" type="button">View</button>
+            <button class="button button-small button-approve" data-open-client="${escapeHtml(client.id)}" type="button">View</button><button class="button button-small" data-care-review="${escapeHtml(client.id)}" type="button">Follow-up review</button>
           </div>
         </article>
       `,
@@ -706,6 +1086,9 @@ async function renderDietitianDashboard() {
         button.addEventListener("click", () =>
             renderClientManagementProfile(button.dataset.openClient),
         );
+    });
+    workspaceContent.querySelectorAll("[data-care-review]").forEach((button) => {
+        button.addEventListener("click", () => renderDietitianCareReview(button.dataset.careReview));
     });
     bindApprovalResubmission();
     bindGoButtons();
@@ -862,7 +1245,10 @@ async function renderClientManagementProfile(clientId) {
     workspaceContent.innerHTML = `
     ${pageHeading("PATIENT PROFILE", client.name, "Current information recorded for this patient.")}
     ${patientContextMarkup(client, profile, lactation, documents)}
+    <section class="content-panel clinician-footnote"><p>Nutrition goals are prescribed by the assigned dietitian.</p>
+      <button class="button button-primary" id="openDietitianGoals" type="button">Manage patient goals</button></section>
   `;
+    document.querySelector("#openDietitianGoals").addEventListener("click", () => renderDietitianGoals(clientId));
 }
 
 async function renderClientManagementList() {
@@ -891,6 +1277,7 @@ async function renderClientManagementList() {
           <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} · ${escapeHtml(client.status)}</p></div>
           <div class="review-actions">
             <button class="button button-small button-approve" data-open-client="${escapeHtml(client.id)}" type="button">View</button>
+            <button class="button button-small" data-prescribe-goals="${escapeHtml(client.id)}" type="button">Set goals</button><button class="button button-small" data-review-patient="${escapeHtml(client.id)}" type="button">Review progress</button>
             <button class="button button-small" data-draft-plan="${escapeHtml(client.id)}" type="button">Draft plan</button>
           </div>
         </article>
@@ -915,6 +1302,12 @@ async function renderClientManagementList() {
             renderClientManagementProfile(button.dataset.openClient),
         );
     });
+    workspaceContent.querySelectorAll("[data-review-patient]").forEach((button) => {
+        button.addEventListener("click", () => renderDietitianCareReview(button.dataset.reviewPatient));
+    });
+    workspaceContent.querySelectorAll("[data-prescribe-goals]").forEach((button) => {
+        button.addEventListener("click", () => renderDietitianGoals(button.dataset.prescribeGoals));
+    });
     workspaceContent.querySelectorAll("[data-draft-plan]").forEach((button) => {
         button.addEventListener("click", () => {
             sessionStorage.setItem("meal-plan-client", button.dataset.draftPlan);
@@ -924,8 +1317,11 @@ async function renderClientManagementList() {
 }
 
 function navTo(view, aiPanel = "coach") {
+    closePatientAccountMenu();
+    // Hidden care pages are reached through My Profile; do not highlight a removed sidebar item.
+    const activeView = view;
     document.querySelectorAll(".nav-item").forEach((item) => {
-        item.classList.toggle("is-current", item.dataset.view === view);
+        item.classList.toggle("is-current", item.dataset.view === activeView);
     });
     loadView(view, aiPanel);
 }
@@ -953,8 +1349,82 @@ function renderDietitianRows(dietitians) {
         .join("")}</div>`;
 }
 
+// The care journey follows the paper workflow. Stages reflect recorded data;
+// a confirmed appointment alone does NOT prove that a consultation occurred.
+async function patientCareJourneyMarkup(clientId) {
+    const id = encodeURIComponent(clientId);
+    const endpoints = [
+        `/api/v1/clients/${id}/profile`,
+        `/api/v1/appointments?client_id=${id}`,
+        `/api/v1/goals?client_id=${id}`,
+        "/api/v1/meal-plans/approved",
+        `/api/v1/clients/${id}/progress`,
+        `/api/v1/care-reviews?client_id=${id}`,
+    ];
+    const responses = await Promise.allSettled(endpoints.map((url) => request(url)));
+    const [history, appointments, goals, plans, progress, reviews] = responses.map(
+        (result) => result.status === "fulfilled" ? result.value : null,
+    );
+    const unavailable = responses.some((result) => result.status === "rejected");
+    const safeAppointments = Array.isArray(appointments) ? appointments : [];
+    const safeReviews = Array.isArray(reviews) ? reviews : [];
+    const bookings = safeAppointments.filter((item) => item.status !== "CANCELLED" && item.status !== "REJECTED");
+    bookings.sort((a, b) => new Date(b.appointment_date) - new Date(a.appointment_date));
+    const latestBooking = bookings[0];
+    const confirmed = bookings.filter((item) => item.status === "CONFIRMED");
+    const hasElapsedConsultation = confirmed.some((item) => new Date(item.appointment_date).getTime() <= Date.now());
+    const hasHistory = history && (history.allergies?.length || history.conditions?.length);
+    const hasPlans = Array.isArray(plans) && plans.length > 0;
+    const hasGoals = Array.isArray(goals) && goals.length > 0;
+    const hasProgress = Array.isArray(progress) && progress.length > 0;
+    const latestReview = safeReviews[0];
+    const stages = [
+        { step: "01", title: "Medical history", detail: hasHistory
+            ? "Health information recorded. Check that it stays up to date."
+            : "Review your profile, conditions and allergies before the consultation.",
+          status: hasHistory ? "Recorded" : "Review details", view: "my-profile", action: "Review history" },
+        { step: "02", title: "Book an appointment", detail: latestBooking
+            ? `${latestBooking.consultation_type === "VIRTUAL" ? "Virtual" : "In-person"} · ${latestBooking.status.toLowerCase().replaceAll("_", " ")} · ${new Date(latestBooking.appointment_date).toLocaleDateString()}`
+            : "Choose your dietitian, date and in-person or virtual consultation.",
+          status: latestBooking ? latestBooking.status.toLowerCase().replaceAll("_", " ") : "Not booked", view: "client-appointments", action: "Appointments" },
+        { step: "03", title: "Consultation", detail: safeReviews.length
+            ? "A dietitian has documented a follow-up review."
+            : hasElapsedConsultation ? "The scheduled time has passed; your dietitian must confirm the review."
+            : confirmed.length ? "Your appointment is confirmed. Attend at the scheduled time." : "Awaiting a confirmed appointment.",
+          status: safeReviews.length ? "Reviewed" : hasElapsedConsultation ? "Review pending" : "Upcoming", view: "client-appointments", action: "View booking" },
+        { step: "04", title: "Prescribed care plan", detail: `${hasPlans ? "Approved meal plan available" : "Meal plan awaiting dietitian approval"}. ${hasGoals ? "Goals assigned." : "Goals not yet assigned."}`,
+          status: hasPlans && hasGoals ? "Shared" : "Awaiting care team", view: "client-meal-plan", action: "My meal plan" },
+        { step: "05", title: "Track progress", detail: hasProgress
+            ? "Your progress entries are available for your dietitian to review."
+            : "Log the progress and meals you are comfortable sharing with your dietitian.",
+          status: hasProgress ? "Being tracked" : "Not yet logged", view: "client-progress", action: "My progress" },
+        { step: "06", title: "Review & monitoring", detail: latestReview
+            ? `Next steps: ${latestReview.monitoring_plan}${latestReview.next_review_date ? ` · Follow-up ${latestReview.next_review_date}` : ""}`
+            : "After your consultation, your dietitian records the care review and monitoring plan.",
+          status: latestReview ? "Under review" : "Awaiting review", view: "client-goals", action: "My goals" },
+    ];
+    return `<section class="care-journey" aria-labelledby="careJourneyHeading">
+      <div class="section-heading"><h2 id="careJourneyHeading">Your care journey</h2><span>STEP BY STEP</span></div>
+      <p class="care-journey-intro">Start with your health history, book a consultation, then follow the goals and meal plan approved by your dietitian. Progress and follow-up reviews support ongoing care.</p>
+      ${unavailable ? '<p class="care-journey-alert" role="status">Some care details are temporarily unavailable. You can still open each section below.</p>' : ""}
+      <ol class="care-journey-grid">${stages.map((stage) => `<li class="care-step">
+        <div class="care-step-top"><span class="care-step-number">${stage.step}</span><span class="care-step-status">${escapeHtml(stage.status)}</span></div>
+        <h3>${escapeHtml(stage.title)}</h3><p>${escapeHtml(stage.detail)}</p>
+        <button type="button" class="care-step-link" data-go="${stage.view}">${stage.action} <span aria-hidden="true">→</span></button>
+      </li>`).join("")}</ol>
+      ${latestReview ? `<div class="care-followup-note"><strong>Most recent dietitian review</strong><p>${escapeHtml(latestReview.review_summary)}</p><p><strong>Monitoring:</strong> ${escapeHtml(latestReview.monitoring_plan)}</p></div>` : ""}
+      <p class="care-journey-disclaimer">Only your dietitian can prescribe or change clinical goals, approve meal plans, and document care reviews. Appointment confirmation is not proof that a consultation took place.</p>
+    </section>`;
+}
+
 async function renderClientDashboard(firstName) {
-    const dietitians = await request("/api/v1/dietitians");
+    const [dietitiansResult, journeyResult] = await Promise.allSettled([
+        request("/api/v1/dietitians"),
+        patientCareJourneyMarkup(currentUser.id),
+    ]);
+    const dietitians = dietitiansResult.status === "fulfilled" ? dietitiansResult.value : [];
+    const careJourney = journeyResult.status === "fulfilled" ? journeyResult.value :
+        '<section class="content-panel"><h2>Your care journey</h2><p>Your care summary is temporarily unavailable. Please use the navigation to review your history and bookings.</p></section>';
     workspaceContent.innerHTML = `
     ${pageHeading("PATIENT DASHBOARD", `Welcome, ${escapeHtml(firstName)}.`, "Nutrition support for your health, lifestyle, culture, preferences, and stage of life.")}
     <section class="feature-panel client-home-feature">
@@ -963,6 +1433,7 @@ async function renderClientDashboard(firstName) {
       <p>Whether you want everyday nutrition guidance, support with a health condition, help through a life stage, sports-fuelling advice, or practical meal ideas, your care can be tailored to you.</p>
       <button class="button button-lime" data-go="client-progress" type="button">View my progress <span aria-hidden="true">&#8594;</span></button>
     </section>
+    ${careJourney}
     <div class="section-heading"><h2>My workspace</h2><span>QUICK ACCESS</span></div>
     <div class="quick-grid client-quick-grid">
       <button class="quick-link" data-go="my-profile" type="button"><strong>My Profile</strong><span aria-hidden="true">&#8599;</span></button>
@@ -1004,60 +1475,7 @@ async function renderClientDashboard(firstName) {
 }
 
 async function renderMyProfile() {
-    const user = currentUser;
-    const isClient = user.type === "client";
-    let profileUser = user;
-    if (isClient) {
-        const clientRecord = (
-            await request(`/api/v1/clients?client_id=${encodeURIComponent(user.id)}`).catch(
-                () => [],
-            )
-        )[0];
-        if (clientRecord) {
-            profileUser = { ...user, ...clientRecord, id: user.id, full_name: user.full_name };
-            currentUser = profileUser;
-            sessionStorage.setItem(sessionKey, JSON.stringify(profileUser));
-            const isMaleClient = String(profileUser.gender || "").toLowerCase() === "male";
-            document.querySelectorAll("[data-maternal-only]").forEach((item) => {
-                item.hidden = isMaleClient;
-            });
-        }
-    }
-    const approval =
-        user.type === "dietitian" ? await request("/api/v1/dietitians/me/approval") : null;
-    const fields = isClient
-        ? [
-              ["Patient ID", profileUser.id],
-              ["Full name", profileUser.full_name],
-              ["Email", profileUser.email],
-              ["ID number", profileUser.id_number],
-              ["Gender", profileUser.gender],
-              ["Date of birth", profileUser.date_of_birth],
-              ["Dietitian ID", profileUser.dietitian_id],
-              ...(String(profileUser.gender || "").toLowerCase() === "male"
-                  ? [["Testosterone", "Still under production"]]
-                  : []),
-          ]
-        : [
-              ["Dietitian ID", user.id],
-              ["Full name", user.full_name],
-              ["Email", user.email],
-              ["License number", user.license_number],
-              ["Account status", approval.status],
-          ];
-    workspaceContent.innerHTML = `
-    ${pageHeading("MY PROFILE", isClient ? "My Profile." : "Dietitian Profile.", "Account information used to coordinate your nutrition care.")}
-    ${approval ? `${dietitianApprovalMarkup(approval)}<div data-message class="workspace-message" hidden></div>` : ""}
-    <section class="content-panel">
-      <dl class="profile-details">${fields
-          .map(
-              ([label, value]) => `
-        <div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "Not provided")}</dd></div>
-      `,
-          )
-          .join("")}</dl>
-    </section>`;
-    if (approval) bindApprovalResubmission();
+    return renderAdvancedAccountProfile();
 }
 
 function dietitianApprovalMarkup(approval) {
@@ -1519,9 +1937,10 @@ async function renderClientProgress(clientId) {
         request(`/api/v1/clients/${encodeURIComponent(clientId)}/progress`),
         request(`/api/v1/clients/${encodeURIComponent(clientId)}/metrics`),
     ]);
-    const meals = await request(`/api/v1/clients/${encodeURIComponent(clientId)}/meals`).catch(
-        () => [],
-    );
+    const [meals, followUpReviews] = await Promise.all([
+        request(`/api/v1/clients/${encodeURIComponent(clientId)}/meals`).catch(() => []),
+        request(`/api/v1/care-reviews?client_id=${encodeURIComponent(clientId)}`).catch(() => []),
+    ]);
     const progress = progressResult.status === "fulfilled" ? progressResult.value : [];
     const metrics = metricsResult.status === "fulfilled" ? metricsResult.value : [];
     const latest = progress.at(-1) || {};
@@ -1587,6 +2006,12 @@ async function renderClientProgress(clientId) {
     workspaceContent.innerHTML = `
     ${pageHeading("MY PROGRESS", "Progress metrics.", "Track the measurements and daily habits recorded for your care.")}
     <div data-message class="workspace-message" hidden></div>
+    ${followUpReviews.length ? `<section class="care-followup-note" aria-label="Dietitian follow-up plan">
+      <span class="eyebrow">LATEST DIETITIAN REVIEW</span><h2>Follow-up and monitoring</h2>
+      <p>${escapeHtml(followUpReviews[0].review_summary)}</p>
+      <p><strong>Monitoring:</strong> ${escapeHtml(followUpReviews[0].monitoring_plan)}</p>
+      ${followUpReviews[0].next_review_date ? `<p><strong>Review date:</strong> ${escapeHtml(followUpReviews[0].next_review_date)}</p>` : ""}
+    </section>` : '<p class="appointment-note">Your dietitian will add monitoring instructions after reviewing your consultation and progress.</p>'}
     <div class="client-progress-layout">
       <section class="content-panel weight-trend"><div class="progress-section-heading"><h2>Weight</h2><strong>${escapeHtml(metricCards[0][1])}</strong></div>
         ${weightHistory.length ? renderWeightChart(weightHistory) : '<p class="empty-state">No weight history has been recorded yet.</p>'}
@@ -1670,45 +2095,48 @@ async function renderClientProgress(clientId) {
     });
 }
 
+// Clinical goals are read-only to patients. Goal creation is restricted in FastAPI too.
 async function renderClientGoals(clientId) {
     const goals = await request(`/api/v1/goals?client_id=${encodeURIComponent(clientId)}`);
     workspaceContent.innerHTML = `
-    ${pageHeading("MY GOALS", "Goals that move with you.", "Choose goals that reflect what matters to you, from daily habits and energy to hydration, digestion, health needs, or weight if relevant.")}
-    <div data-message class="workspace-message" hidden></div>
-    <section class="content-panel"><form id="clientGoalForm" class="form-grid">
-      <div class="form-field"><label for="goalMetric">Goal metric</label><select id="goalMetric" name="target_metric"><option>Balanced meals per day</option><option>Fruit and vegetable servings</option><option>Fiber servings</option><option>Water (ml)</option><option>Meals per day</option><option>Home-cooked meals per week</option><option>Protein servings</option><option>Sleep (hours)</option><option>Steps</option><option>Symptom-free days</option><option>Weight (optional)</option><option>Body fat (optional)</option><option>Waist (optional)</option><option>Calories (dietitian-guided)</option></select></div>
-      <div class="form-field"><label for="goalTarget">Target value</label><input class="text-input" id="goalTarget" name="target_value" type="number" step="any" required></div>
-      <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add goal</button></div>
-    </form></section>
-    <div class="section-heading"><h2>My goals</h2><span>${goals.length} SAVED</span></div>
-    <div class="goal-list">${
-        goals.length
-            ? goals
-                  .map(
-                      (goal) => `
-      <article class="goal-row"><div><span class="subsection-label">${escapeHtml(goal.target_metric)}</span><h3>Target ${escapeHtml(goal.target_value)}</h3></div><div class="goal-current"><span>Current</span><strong>${goal.current_value == null ? "Not recorded" : escapeHtml(goal.current_value)}</strong></div></article>`,
-                  )
-                  .join("")
-            : '<p class="empty-state">No goals saved yet. Choose a goal that is meaningful to you. Goals can focus on habits, nourishment, hydration, symptoms, activity, or measurements when relevant.</p>'
-    }</div>`;
-    document.querySelector("#clientGoalForm").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const values = Object.fromEntries(new FormData(event.currentTarget));
-        values.client_id = clientId;
-        values.target_value = Number(values.target_value);
-        try {
-            await request("/api/v1/goals", { method: "POST", body: JSON.stringify(values) });
-            await renderClientGoals(clientId);
-            showWorkspaceMessage("Goal saved.");
-        } catch (error) {
-            showWorkspaceMessage(error.message, true);
-        }
-    });
+    ${pageHeading("MY GOALS", "Goals that move with you.", "Your nutrition goals are set by your dietitian based on your individual health needs.")}
+    <section class="content-panel clinician-guidance" aria-label="Goal guidance">
+      <div class="clinician-guidance-icon" aria-hidden="true">&#10003;</div>
+      <div><span class="eyebrow">DIETITIAN-LED CARE</span><h2>Goals set by your dietitian</h2>
+      <p>For your safety, your care team creates and adjusts nutrition goals. You can review your targets here, but cannot change them yourself.</p></div>
+      <span class="readonly-label">VIEW ONLY</span>
+    </section>
+    <div class="section-heading"><h2>My goals</h2><span>${goals.length} ASSIGNED</span></div>
+    <div class="goal-list">${goals.length
+        ? goals.map((goal) => `
+          <article class="goal-row"><div><span class="subsection-label">${escapeHtml(goal.target_metric)}</span>
+          <h3>Target: ${escapeHtml(goal.target_value)}</h3>
+          ${goal.target_date ? `<p class="appointment-note">Review date: ${escapeHtml(goal.target_date)}</p>` : ""}</div>
+          <div class="goal-current"><span>Current</span><strong>${goal.current_value == null ? "Not recorded" : escapeHtml(goal.current_value)}</strong></div></article>`).join("")
+        : '<section class="content-panel"><p class="empty-state">Your dietitian has not assigned nutrition goals yet. Goals will appear here once they are set by your care team.</p></section>'}
+    </div>
+    <section class="clinician-footnote"><p>Have questions about a target or need an adjustment? Please discuss it with your dietitian.</p>
+      <button class="button quiet-button" id="discussGoals" type="button">View appointments</button>
+    </section>`;
+    document.querySelector("#discussGoals").addEventListener("click", () => navTo("client-appointments"));
 }
 
+// Patients only view published plans; drafting and approval are done by the dietitian.
 async function renderClientMealPlan(clientId, selectedTab = "today") {
-    // The server identifies the client from their bearer session, never a query parameter.
-    const plans = await request("/api/v1/meal-plans/approved");
+    let plans;
+    try {
+        // The signed-in client is identified from the bearer session on the backend.
+        plans = await request("/api/v1/meal-plans/approved");
+    } catch (error) {
+        workspaceContent.innerHTML = `${pageHeading("MY MEAL PLAN", "Your dietitian's meal plan.", "Only plans reviewed and approved by your dietitian are shown here.")}
+        <section class="content-panel" role="alert"><span class="eyebrow">MEAL PLAN UNAVAILABLE</span>
+        <h2>We couldn't load your approved plan.</h2>
+        <p>Your meal plan hasn't been changed. This may be a temporary service issue. Please try again or contact your care team.</p>
+        <p class="appointment-note">${escapeHtml(error.message)}</p>
+        <button class="button button-primary" id="retryApprovedPlan" type="button">Try again</button></section>`;
+        document.querySelector("#retryApprovedPlan").addEventListener("click", () => renderClientMealPlan(clientId, selectedTab));
+        return;
+    }
     const tabs = ["today", "week", "details"];
     const renderSchedule = (plan, tab) => {
         const schedule = Array.isArray(plan.schedule) ? plan.schedule : [];
@@ -1718,35 +2146,178 @@ async function renderClientMealPlan(clientId, selectedTab = "today") {
             .map((day, index) => {
                 const meals = Array.isArray(day.meals) ? day.meals : [];
                 const entries = meals.map((meal) =>
-                    typeof meal === "string"
-                        ? meal
+                    typeof meal === "string" ? meal
                         : [meal.name, meal.recipe_name, meal.meal_type].filter(Boolean).join(" — "),
                 );
+                // Draft schedules can contain a reviewed candidate recipe rather than meals.
+                if (!entries.length && day.candidate_recipe?.title) {
+                    entries.push(day.candidate_recipe.title);
+                }
                 return `<article class="meal-plan-row"><h3>Day ${escapeHtml(day.day || index + 1)}</h3><ul class="meal-summary">${entries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></article>`;
             })
             .join("");
     };
     const activeContent = plans.length
-        ? plans
-              .map((item) => {
-                  const plan = item.plan || {};
-                  return `<section class="content-panel"><h2>${escapeHtml(plan.diet_type || "Dietitian-approved meal plan")}</h2>
-      <p class="appointment-note">Status: ${escapeHtml(item.status)} · ${escapeHtml(plan.days || "")} days</p>
-      ${selectedTab === "details" ? `<p>Plan reviewed by your dietitian.</p>${renderSchedule(plan, "week")}` : renderSchedule(plan, selectedTab)}
-    </section>`;
-              })
-              .join("")
-        : '<section class="content-panel"><p class="empty-state">No approved meal plans have been shared by your dietitian yet.</p></section>';
-    workspaceContent.innerHTML = `${pageHeading("MY MEAL PLAN", "A plan for everyday life.", "Only dietitian-approved plans appear here.")}
+        ? plans.map((item) => {
+              const plan = item.plan || {};
+              return `<section class="content-panel"><span class="readonly-label">DIETITIAN APPROVED</span>
+              <h2>${escapeHtml(plan.diet_type || "Your approved meal plan")}</h2>
+              <p class="appointment-note">${escapeHtml(plan.days || "")} days · Read-only · Changes are made by your dietitian</p>
+              ${selectedTab === "details" ? `<p>Reviewed by your dietitian.</p>${renderSchedule(plan, "week")}` : renderSchedule(plan, selectedTab)}
+              </section>`;
+          }).join("")
+        : '<section class="content-panel"><p class="empty-state">Your dietitian has not shared an approved meal plan yet. Once your plan is reviewed and approved, you will see it here.</p></section>';
+    workspaceContent.innerHTML = `${pageHeading("MY MEAL PLAN", "Your dietitian's meal plan.", "Review your professionally approved nutrition plan. Any changes must be made by your dietitian.")}
+    <section class="clinician-guidance" aria-label="Meal plan permissions"><div class="clinician-guidance-icon" aria-hidden="true">&#10003;</div>
+    <div><span class="eyebrow">YOUR CARE PLAN</span><h2>Created and approved by your dietitian</h2><p>You can read your plan here. If something does not suit your health needs, discuss it with your dietitian rather than changing it yourself.</p></div>
+    <span class="readonly-label">VIEW ONLY</span></section>
     <div class="meal-view-tabs" role="tablist" aria-label="Meal plan view">${tabs.map((tab) => `<button class="meal-view-tab${tab === selectedTab ? " is-active" : ""}" role="tab" aria-selected="${tab === selectedTab}" data-meal-tab="${tab}" type="button">${tab === "week" ? "This Week" : tab === "details" ? "Meal Details" : "Today"}</button>`).join("")}</div>
     ${activeContent}`;
-    workspaceContent
-        .querySelectorAll("[data-meal-tab]")
-        .forEach((button) =>
-            button.addEventListener("click", () =>
-                renderClientMealPlan(clientId, button.dataset.mealTab),
-            ),
-        );
+    workspaceContent.querySelectorAll("[data-meal-tab]").forEach((button) =>
+        button.addEventListener("click", () => renderClientMealPlan(clientId, button.dataset.mealTab)),
+    );
+}
+
+// Dietitian workspace for patient-specific clinical goals.
+async function renderDietitianGoals(clientId) {
+    if (currentUser.type !== "dietitian") return;
+    const goals = await request(`/api/v1/goals?client_id=${encodeURIComponent(clientId)}`);
+    const availableMetrics = ["Balanced meals per day", "Fruit and vegetable servings", "Fibre servings", "Water (ml)", "Meals per day", "Home-cooked meals per week", "Sleep (hours)", "Steps", "Symptom-free days", "Other clinical target"];
+    workspaceContent.innerHTML = `
+    ${pageHeading("PATIENT GOALS", "Set nutrition goals.", "Only the patient's assigned dietitian can prescribe nutrition targets. Review clinical history before setting a goal.")}
+    <div data-message class="workspace-message" hidden></div>
+    <section class="content-panel"><p class="appointment-note">Patient: ${escapeHtml(clientId)}</p>
+      <form id="dietitianGoalForm" class="form-grid">
+        <div class="form-field"><label for="dietitianGoalMetric">Goal metric</label><select id="dietitianGoalMetric" name="target_metric" required>${availableMetrics.map((metric) => `<option value="${escapeHtml(metric)}">${escapeHtml(metric)}</option>`).join("")}</select></div>
+        <div class="form-field"><label for="dietitianGoalTarget">Individualized target value</label><input class="text-input" id="dietitianGoalTarget" name="target_value" type="number" step="any" required></div>
+        <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Assign patient goal</button></div>
+      </form>
+      <p class="appointment-note">Only assign targets appropriate to this person's clinical assessment. Saved goals become visible to the patient in read-only mode.</p>
+    </section>
+    <div class="section-heading"><h2>Assigned goals</h2><span>${goals.length} GOALS</span></div>
+    <div class="goal-list">${goals.length
+        ? goals.map((goal) => `<article class="goal-row"><div><span class="subsection-label">${escapeHtml(goal.target_metric)}</span><h3>Target: ${escapeHtml(goal.target_value)}</h3></div></article>`).join("")
+        : '<p class="empty-state">No goals have been assigned to this patient yet.</p>'}</div>
+    <button class="button quiet-button" id="backToDietitianPatients" type="button">Back to patients</button>`;
+    document.querySelector("#dietitianGoalForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = event.currentTarget.querySelector('button[type="submit"]');
+        const data = Object.fromEntries(new FormData(event.currentTarget));
+        data.client_id = clientId;
+        data.target_value = Number(data.target_value);
+        button.disabled = true;
+        try {
+            await request("/api/v1/goals", { method: "POST", body: JSON.stringify(data) });
+            await renderDietitianGoals(clientId);
+            showWorkspaceMessage("Goal assigned to patient successfully.");
+        } catch (error) {
+            button.disabled = false;
+            showWorkspaceMessage(error.message, true);
+        }
+    });
+    document.querySelector("#backToDietitianPatients").addEventListener("click", () => navTo("clients"));
+}
+
+// The clinician must explicitly document a review; we never treat a booking as attendance.
+async function renderDietitianCareReview(clientId) {
+    if (currentUser?.type !== "dietitian") return;
+    const id = encodeURIComponent(clientId);
+    const [appointmentResult, reviewResult, progressResult] = await Promise.allSettled([
+        request(`/api/v1/appointments?dietitian_id=${encodeURIComponent(currentUser.id)}`),
+        request(`/api/v1/care-reviews?client_id=${id}`),
+        request(`/api/v1/clients/${id}/progress`),
+    ]);
+    if (appointmentResult.status !== "fulfilled" || reviewResult.status !== "fulfilled") {
+        workspaceContent.innerHTML = `${pageHeading("CLINICAL FOLLOW-UP", "Could not load the care review.", "Please check the API and try again.")}
+          <div class="workspace-message error">${escapeHtml(appointmentResult.reason?.message || reviewResult.reason?.message || "Care review unavailable")}</div>
+          <button class="button quiet-button" data-go="clients" type="button">Back to patients</button>`;
+        bindGoButtons();
+        return;
+    }
+    const consultations = appointmentResult.value.filter((appt) =>
+        appt.client_id === clientId && appt.status === "CONFIRMED" &&
+        new Date(appt.appointment_date).getTime() <= Date.now());
+    const reviews = reviewResult.value;
+    const logs = progressResult.status === "fulfilled" ? progressResult.value : [];
+    workspaceContent.innerHTML = `
+      ${pageHeading("CLINICAL REVIEW & MONITORING", "Review patient progress.", "Document the consultation review, decide next steps, and set follow-up monitoring. Only assigned dietitians may save reviews.")}
+      <div data-message class="workspace-message" hidden></div>
+      <section class="content-panel"><p class="appointment-note">Patient: ${escapeHtml(clientId)}</p>
+        <p class="appointment-note">${logs.length} progress entries available. Review the patient's medical history, recorded progress, nutrition goals and approved plans before making clinical decisions.</p>
+        <div class="review-actions"><button type="button" class="button quiet-button" id="reviewPatientHistory">View medical history</button>
+        <button type="button" class="button quiet-button" id="reviewPatientGoals">View prescribed goals</button></div>
+      </section>
+      <section class="content-panel"><h2 class="compact-heading">Document follow-up review</h2>
+        ${consultations.length ? `<form id="careReviewForm" class="form-grid">
+          <div class="form-field full-width"><label for="careReviewAppointment">Confirmed consultation</label>
+          <select class="text-input" id="careReviewAppointment" name="appointment_id" required>${consultations.map((appt) =>
+              `<option value="${escapeHtml(appt.appointment_id)}">${escapeHtml(new Date(appt.appointment_date).toLocaleString())} · ${escapeHtml(appointmentTypeLabel(appt))}</option>`).join("")}</select></div>
+          <div class="form-field full-width"><label for="careReviewSummary">Dietitian review summary</label>
+            <textarea class="text-input" id="careReviewSummary" name="review_summary" minlength="10" maxlength="2000" required placeholder="Document the clinical assessment and observations after the consultation"></textarea></div>
+          <div class="form-field"><label for="careReviewDecision">Next clinical action</label><select class="text-input" id="careReviewDecision" name="decision">
+            <option value="FOLLOW_UP">Arrange follow-up</option><option value="CONTINUE_PLAN">Continue approved plan</option><option value="ADJUST_PLAN">Adjust plan through review workflow</option>
+          </select></div>
+          <div class="form-field"><label for="careReviewDate">Next review date (optional)</label><input class="text-input" id="careReviewDate" name="next_review_date" type="date"></div>
+          <div class="form-field full-width"><label for="careMonitoringPlan">Monitoring plan</label>
+            <textarea class="text-input" id="careMonitoringPlan" name="monitoring_plan" minlength="10" maxlength="2000" required placeholder="What to monitor, when to check in, and what the patient should report"></textarea></div>
+          <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Save clinical review</button></div>
+        </form>` : `<p class="empty-state">A care review can only be recorded after the scheduled time of a confirmed consultation. Pending, cancelled and future bookings cannot be used.</p>`}
+        <p class="appointment-note">Saving a review does not automatically approve a meal plan or change a goal. Use the existing dietitian approval workflows for those actions.</p>
+      </section>
+      <div class="section-heading"><h2>Recorded reviews</h2><span>${reviews.length} SAVED</span></div>
+      ${reviews.length ? `<div class="care-review-list">${reviews.map((review) => `<article class="content-panel care-review-entry">
+        <span class="eyebrow">${escapeHtml(new Date(review.reviewed_at).toLocaleString())} · ${escapeHtml(review.decision.replaceAll("_", " "))}</span>
+        <h3>Clinical review</h3><p>${escapeHtml(review.review_summary)}</p><h4>Monitoring instructions</h4><p>${escapeHtml(review.monitoring_plan)}</p>
+        ${review.next_review_date ? `<p class="appointment-note">Next review: ${escapeHtml(review.next_review_date)}</p>` : ""}
+      </article>`).join("")}</div>` : '<p class="empty-state">No follow-up review has been recorded yet.</p>'}
+      <button class="button quiet-button" id="backFromCareReview" type="button">Back to patients</button>`;
+    document.querySelector("#backFromCareReview").addEventListener("click", () => navTo("clients"));
+    document.querySelector("#reviewPatientHistory").addEventListener("click", () => renderClientManagementProfile(clientId));
+    document.querySelector("#reviewPatientGoals").addEventListener("click", () => renderDietitianGoals(clientId));
+    const form = document.querySelector("#careReviewForm");
+    form?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        const data = Object.fromEntries(new FormData(form));
+        data.client_id = clientId;
+        if (!data.next_review_date) data.next_review_date = null;
+        try {
+            await request("/api/v1/care-reviews", { method: "POST", body: JSON.stringify(data) });
+            await renderDietitianCareReview(clientId);
+            showWorkspaceMessage("Clinical review and follow-up monitoring saved.");
+        } catch (error) {
+            button.disabled = false;
+            showWorkspaceMessage(error.message, true);
+        }
+    });
+}
+
+function appointmentTypeLabel(appointment) {
+    return appointment.consultation_type === "VIRTUAL" ? "Virtual · Video call" : "In-person · At branch";
+}
+
+function bindVirtualMeetingButtons(root = workspaceContent) {
+    root.querySelectorAll("[data-join-virtual]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const target = button.closest("[data-appointment-id]")?.querySelector("[data-virtual-link]");
+            if (!target) return;
+            button.disabled = true;
+            target.textContent = "Preparing your video link…";
+            try {
+                const result = await request(
+                    `/api/v1/appointments/${encodeURIComponent(button.dataset.joinVirtual)}/meeting`,
+                );
+                const url = new URL(result.meeting_url);
+                if (url.protocol !== "https:") throw new Error("Invalid video meeting link");
+                target.innerHTML = `<p class="appointment-note">External video service. Keep this link private and use an approved provider for real care.</p>
+                  <a class="button button-small button-primary" href="${escapeHtml(url.href)}" target="_blank" rel="noopener noreferrer">Open video room ↗</a>`;
+            } catch (error) {
+                target.textContent = error.message || "Could not prepare video meeting";
+                button.disabled = false;
+            }
+        });
+    });
 }
 
 async function renderClientAppointments(
@@ -1760,7 +2331,10 @@ async function renderClientAppointments(
     ]);
     const now = Date.now();
     const isUpcoming = (appointment) =>
-        new Date(appointment.appointment_date).getTime() >= now &&
+        (new Date(appointment.appointment_date).getTime() >= now ||
+            (appointment.consultation_type === "VIRTUAL" &&
+                appointment.status === "CONFIRMED" &&
+                new Date(appointment.appointment_date).getTime() + 90 * 60000 >= now)) &&
         ["PENDING", "CONFIRMED", "SCHEDULED"].includes(appointment.status || "SCHEDULED");
     const upcoming = appointments.filter(isUpcoming);
     const past = appointments.filter((appointment) => !isUpcoming(appointment));
@@ -1771,10 +2345,20 @@ async function renderClientAppointments(
         ? rows
               .map(
                   (appointment) => `
-    <article class="appointment-row">
-      <div><span class="appointment-status status-${escapeHtml((appointment.status || "scheduled").toLowerCase())}">${escapeHtml(appointment.status || "SCHEDULED")}</span><h3>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</h3></div>
+    <article class="appointment-row" data-appointment-id="${escapeHtml(appointment.appointment_id)}">
+      <div><span class="appointment-status status-${escapeHtml((appointment.status || "scheduled").toLowerCase())}">${escapeHtml(appointment.status || "SCHEDULED")}</span><h3>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</h3>
+        <p class="appointment-mode">${escapeHtml(appointmentTypeLabel(appointment))}</p></div>
       <span>${escapeHtml(dietitians.find((dietitian) => dietitian.id === appointment.dietitian_id)?.full_name || `Dietitian ${appointment.dietitian_id}`)}</span>
-      ${activeTab === "upcoming" ? `<button class="button button-small button-reject" data-cancel-appointment="${escapeHtml(appointment.appointment_id)}" type="button">Cancel appointment</button>` : ""}
+      ${activeTab === "upcoming" ? `<div class="appointment-actions">
+      ${appointment.consultation_type === "VIRTUAL"
+          ? (appointment.status === "CONFIRMED"
+              ? `<button class="button button-small button-primary" data-join-virtual="${escapeHtml(appointment.appointment_id)}" type="button">Join virtual meeting</button><div data-virtual-link class="meeting-link"></div>`
+              : `<span class="appointment-note">Video link available after your dietitian confirms the appointment.</span>`)
+          : (["CONFIRMED", "SCHEDULED"].includes(appointment.status)
+              ? `<button class="button button-small button-primary" data-checkin-appointment="${escapeHtml(appointment.appointment_id)}" type="button">Check-in QR</button>`
+              : `<span class="appointment-note">QR available after the dietitian confirms your appointment.</span>`)}
+      <button class="button button-small button-reject" data-cancel-appointment="${escapeHtml(appointment.appointment_id)}" type="button">Cancel appointment</button>
+      </div>` : ""}
     </article>`,
               )
               .join("")
@@ -1795,9 +2379,16 @@ async function renderClientAppointments(
             ? `<section class="content-panel"><h2 class="compact-heading">Request an appointment</h2>${
                   dietitians.length
                       ? `
+      <div class="care-booking-reminder"><strong>Before your consultation</strong><p>Review your medical history, allergies and personal details so your dietitian can prepare. You do not need to report a medical condition if you have none.</p><button type="button" class="button quiet-button" data-go="my-profile">Review medical history</button></div>
       <form id="appointmentForm" class="form-grid appointment-booking-form">
         <div class="form-field"><label for="appointmentDietitian">Dietitian</label><select class="text-input" id="appointmentDietitian" name="dietitian_id" required><option value="">Choose a Dietitian</option>${dietitians.map((dietitian) => `<option value="${escapeHtml(dietitian.id)}" ${dietitian.id === preferredDietitianId ? "selected" : ""}>${escapeHtml(dietitian.full_name)}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` · ${escapeHtml(dietitian.branch_address)}` : ""}</option>`).join("")}</select></div>
         <div class="form-field"><label for="appointmentDate">Preferred date and time</label><input class="text-input" id="appointmentDate" name="appointment_date" type="datetime-local" min="${minDate}" required></div>
+        <fieldset class="appointment-type-field"><legend>Appointment type</legend>
+          <label class="appointment-type-option"><input type="radio" name="consultation_type" value="IN_PERSON" checked>
+            <span><strong>In-person consultation</strong><small>Meet your dietitian at the branch. QR check-in after confirmation.</small></span></label>
+          <label class="appointment-type-option"><input type="radio" name="consultation_type" value="VIRTUAL">
+            <span><strong>Virtual consultation</strong><small>Video call with your dietitian. Private joining link after confirmation.</small></span></label>
+        </fieldset>
         <div class="form-field form-actions"><button class="button button-primary" type="submit">Send request <span class="button-arrow" aria-hidden="true">&#8594;</span></button></div>
       </form>
       <p class="appointment-note">Your request stays pending until the selected Dietitian approves or rejects it.</p>`
@@ -1833,6 +2424,15 @@ async function renderClientAppointments(
                 showWorkspaceMessage(error.message, true);
             }
         });
+    bindVirtualMeetingButtons();
+    workspaceContent.querySelectorAll("[data-checkin-appointment]").forEach((button) => {
+        button.addEventListener("click", () => {
+            document.querySelectorAll(".nav-item").forEach((item) => {
+                item.classList.toggle("is-current", item.dataset.view === "client-appointments");
+            });
+            renderClientCheckin(clientId, button.dataset.checkinAppointment);
+        });
+    });
     workspaceContent.querySelectorAll("[data-cancel-appointment]").forEach((button) => {
         button.addEventListener("click", async () => {
             button.disabled = true;
@@ -1859,6 +2459,12 @@ async function renderAppointmentRequests() {
         `/api/v1/appointments?dietitian_id=${encodeURIComponent(currentUser.id)}`,
     );
     const pending = appointments.filter((appointment) => appointment.status === "PENDING");
+    const confirmed = appointments.filter((appointment) =>
+        appointment.status === "CONFIRMED" &&
+        (new Date(appointment.appointment_date).getTime() >= Date.now() ||
+            (appointment.consultation_type === "VIRTUAL" &&
+             new Date(appointment.appointment_date).getTime() + 90 * 60000 >= Date.now()))
+    );
     workspaceContent.innerHTML = `
     ${pageHeading("APPOINTMENT REQUESTS", "Requests awaiting your review.", "Approve a request to confirm the appointment, or reject it.")}
     <div data-message class="workspace-message" hidden></div>
@@ -1868,14 +2474,22 @@ async function renderAppointmentRequests() {
                   .map(
                       (appointment) => `
       <article class="appointment-request-row" data-appointment-id="${escapeHtml(appointment.appointment_id)}" data-patient-card>
-        <div class="appointment-request-details"><span class="appointment-status status-pending">PENDING</span><h2>${escapeHtml(appointment.client_id)}</h2><p>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</p></div>
+        <div class="appointment-request-details"><span class="appointment-status status-pending">PENDING</span><h2>${escapeHtml(appointment.client_id)}</h2><p>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</p><p class="appointment-mode">${escapeHtml(appointmentTypeLabel(appointment))}</p></div>
         <div class="review-actions"><button class="button button-small" data-patient-context="${escapeHtml(appointment.client_id)}" aria-expanded="false" type="button">View patient info</button><button class="button button-small button-reject" data-appointment-decision="REJECTED" type="button">Reject</button><button class="button button-small button-approve" data-appointment-decision="APPROVED" type="button">Approve</button></div>
         <div data-patient-preview hidden></div>
       </article>`,
                   )
                   .join("")
             : '<p class="empty-state">No appointment requests need review.</p>'
-    }</div>`;
+    }</div>
+    <div class="section-heading"><h2>Confirmed upcoming consultations</h2><span>${confirmed.length} APPOINTMENTS</span></div>
+    <div class="appointment-list">${confirmed.length ? confirmed.map((appointment) => `
+      <article class="appointment-request-row" data-appointment-id="${escapeHtml(appointment.appointment_id)}">
+        <div class="appointment-request-details"><span class="appointment-status status-confirmed">CONFIRMED</span><h2>${escapeHtml(appointment.client_id)}</h2>
+          <p>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</p><p class="appointment-mode">${escapeHtml(appointmentTypeLabel(appointment))}</p></div>
+        ${appointment.consultation_type === "VIRTUAL" ? `<div class="appointment-actions"><button class="button button-small button-primary" data-join-virtual="${escapeHtml(appointment.appointment_id)}" type="button">Join virtual meeting</button><div data-virtual-link class="meeting-link"></div></div>` : `<p class="appointment-note">Branch consultation</p>`}
+      </article>`).join("") : `<p class="empty-state">No confirmed upcoming consultations.</p>`}</div>`;
+    bindVirtualMeetingButtons();
     bindPatientContextButtons();
     workspaceContent.querySelectorAll("[data-appointment-decision]").forEach((button) => {
         button.addEventListener("click", async () => {
@@ -1906,6 +2520,25 @@ async function renderAppointmentRequests() {
             }
         });
     });
+}
+
+function renderPatientSettings() {
+    // A navigation hub for existing care pages; never creates or modifies clinical instructions.
+    workspaceContent.innerHTML = `
+      ${pageHeading("SETTINGS", "Settings & care information.", "Find your account details, health history, and dietitian-approved documents in one place.")}
+      <section class="content-panel patient-care-panel">
+        <div class="section-heading"><h2>Account & care documents</h2><span>QUICK ACCESS</span></div>
+        <p class="document-hint">Your dietitian sets nutrition goals and approves meal plans. You may view them here, but cannot prescribe or change them.</p>
+        <div class="quick-grid patient-care-links">
+          <button class="quick-link" data-go="my-profile" type="button"><strong>My Profile</strong><span aria-hidden="true">&#8599;</span></button>
+          <button class="quick-link" data-go="health-conditions" type="button"><strong>Medical conditions</strong><span aria-hidden="true">&#8599;</span></button>
+          <button class="quick-link" data-go="health-allergies" type="button"><strong>Allergies</strong><span aria-hidden="true">&#8599;</span></button>
+          <button class="quick-link" data-go="client-meal-plan" type="button"><strong>My Meal Plan</strong><span aria-hidden="true">&#8599;</span></button>
+          <button class="quick-link" data-go="client-recommendations" type="button"><strong>Recommendations</strong><span aria-hidden="true">&#8599;</span></button>
+          <button class="quick-link" data-go="support" type="button"><strong>Support & tickets</strong><span aria-hidden="true">&#8599;</span></button>
+        </div>
+      </section>`;
+    bindGoButtons();
 }
 
 async function renderClientRecommendations(clientId) {
@@ -2004,6 +2637,8 @@ async function loadView(view, initialAIPanel = "coach") {
             await renderReceptionCheckin();
         } else if (view === "my-profile") {
             await renderMyProfile();
+        } else if (view === "account-security") {
+            await renderAccountSecurity();
         } else if (view === "health-lactation") {
             await renderLactationTracking(clientId);
         } else if (view.startsWith("health-")) {
@@ -2012,6 +2647,8 @@ async function loadView(view, initialAIPanel = "coach") {
             await renderClientProgress(clientId);
         } else if (view === "client-goals") {
             await renderClientGoals(clientId);
+        } else if (view === "client-settings" && currentUser.type === "client") {
+            renderPatientSettings();
         } else if (view === "client-meal-plan") {
             await renderClientMealPlan(clientId);
         } else if (view === "client-appointments") {
@@ -2038,7 +2675,7 @@ async function loadView(view, initialAIPanel = "coach") {
         } else if (view === "admin-access-events" || view === "staff-access-events") {
             await renderAccessEvents();
         } else if (view === "staff-profile") {
-            await renderStaffProfile();
+            await renderMyProfile();
         } else if (view === "admin-dietitians") {
             await renderAdminDietitians();
         } else if (view === "admin-businesses") {
@@ -3195,6 +3832,19 @@ document
     .querySelectorAll(".nav-item")
     .forEach((item) => item.addEventListener("click", () => navTo(item.dataset.view)));
 
+document.querySelector("#patientAccountButton").addEventListener("click", togglePatientAccountMenu);
+document.querySelectorAll("[data-account-view]").forEach((button) => {
+    button.addEventListener("click", () => navTo(button.dataset.accountView));
+});
+document.querySelector("#patientAccountSignout").addEventListener("click", signOut);
+document.addEventListener("click", (event) => {
+    const menu = document.querySelector("#patientAccount");
+    if (menu && !menu.hidden && !menu.contains(event.target)) closePatientAccountMenu();
+});
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closePatientAccountMenu({ restoreFocus: true });
+});
+
 loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = loginForm.querySelector("button[type=submit]");
@@ -3423,27 +4073,62 @@ adminSetupForm.addEventListener("submit", async (event) => {
 });
 
 // FR-1.7: authenticated patient QR view; the code is never the patient's ID.
-async function renderClientCheckin(clientId) {
-    workspaceContent.innerHTML = `${pageHeading("CHECK-IN", "Your QR check-in.", "Show your private code to reception when you arrive.")}
-    <section class="content-panel" aria-label="Check-in QR"><p>Generate a fresh QR code for your visit. The previous code will stop working.</p>
-    <button class="button button-primary" id="generateCheckinQR" type="button">Generate my check-in QR</button>
-    <div id="clientQRDisplay" class="qr-display" role="status"></div></section>`;
+async function renderClientCheckin(clientId, selectedAppointmentId = "") {
+    // This page is reachable only from a confirmed appointment in the UI.
+    // The backend independently enforces appointment ownership and status.
+    workspaceContent.innerHTML = `${pageHeading("CHECK-IN", "Check in for your appointment.", "Your QR becomes available after your dietitian confirms your booking.")}
+      <section class="content-panel" aria-label="Appointment check-in QR"><p>Checking your confirmed appointments…</p></section>`;
+    let appointments;
+    try {
+        appointments = await request(`/api/v1/clients/${encodeURIComponent(clientId)}/checkin-appointments`);
+    } catch (error) {
+        workspaceContent.querySelector(".content-panel").innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>
+          <button class="button" id="returnToAppointments" type="button">Back to appointments</button>`;
+        document.querySelector("#returnToAppointments").addEventListener("click", () => navTo("client-appointments"));
+        return;
+    }
+    const chosen = appointments.find((a) => a.appointment_id === selectedAppointmentId) || appointments[0];
+    if (!chosen) {
+        workspaceContent.querySelector(".content-panel").innerHTML = `<h2>No confirmed upcoming appointment</h2>
+          <p class="empty-state">To receive a check-in QR, book an appointment and wait for your dietitian to confirm it.</p>
+          <button class="button button-primary" id="returnToAppointments" type="button">View appointments</button>`;
+        document.querySelector("#returnToAppointments").addEventListener("click", () => navTo("client-appointments"));
+        return;
+    }
+    const options = appointments.map((appointment) =>
+        `<option value="${escapeHtml(appointment.appointment_id)}" ${chosen.appointment_id === appointment.appointment_id ? "selected" : ""}>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</option>`
+    ).join("");
+    workspaceContent.querySelector(".content-panel").innerHTML = `
+      <h2>Confirmed appointment</h2>
+      <p>Your check-in QR is linked to this appointment and can be scanned only at the assigned branch.</p>
+      <div class="form-field"><label for="qrAppointment">Appointment date and time</label>
+        <select class="text-input" id="qrAppointment">${options}</select></div>
+      <p class="appointment-note">The QR expires after 10 minutes and works only once. Generate it when you are ready to check in.</p>
+      <button class="button button-primary" id="generateCheckinQR" type="button">Generate appointment QR</button>
+      <button class="button quiet-button" id="returnToAppointments" type="button">Back to appointments</button>
+      <div id="clientQRDisplay" class="qr-display" role="status" aria-live="polite"></div>`;
+    document.querySelector("#returnToAppointments").addEventListener("click", () => navTo("client-appointments"));
+    document.querySelector("#qrAppointment").addEventListener("change", () => {
+        document.querySelector("#clientQRDisplay").replaceChildren();
+    });
     document.querySelector("#generateCheckinQR").addEventListener("click", async (event) => {
         event.currentTarget.disabled = true;
+        const target = document.querySelector("#clientQRDisplay");
+        target.textContent = "Generating your check-in QR…";
         try {
             const result = await request(
                 `/api/v1/clients/${encodeURIComponent(clientId)}/checkin-code`,
-                { method: "POST" },
+                { method: "POST", body: JSON.stringify({ appointment_id: document.querySelector("#qrAppointment").value }) },
             );
+            // SVG remains in a blob URL rather than being inserted as live HTML.
             const svgBlob = new Blob([result.qr_svg], { type: "image/svg+xml" });
             const url = URL.createObjectURL(svgBlob);
-            const target = document.querySelector("#clientQRDisplay");
-            target.innerHTML = `<img alt="Your private check-in QR code" src="${url}" width="260" height="260"><p>Show this QR to authorized reception staff.</p>`;
-            target
-                .querySelector("img")
-                .addEventListener("load", () => URL.revokeObjectURL(url), { once: true });
+            target.innerHTML = `<img alt="Your private appointment check-in QR code" width="260" height="260"><p>Show this QR to authorized reception staff within 10 minutes.</p>`;
+            const image = target.querySelector("img");
+            image.src = url;
+            image.addEventListener("load", () => URL.revokeObjectURL(url), { once: true });
         } catch (error) {
-            document.querySelector("#clientQRDisplay").textContent = error.message;
+            target.textContent = error.message;
         } finally {
             event.currentTarget.disabled = false;
         }

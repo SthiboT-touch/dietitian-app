@@ -8,6 +8,7 @@ import sys
 import types
 import base64
 import io
+from datetime import datetime, timedelta
 from pathlib import Path
 from PIL import Image
 
@@ -42,6 +43,7 @@ for store in (
     state.profile_photos_db,
     state.client_documents_db,
     state.checkin_credentials_db,
+    state.appointments_db,
 ):
     store.clear()
 state.checkin_events_db.clear()
@@ -120,9 +122,22 @@ assert (
 r = api.post("/api/v1/auth/register/client", json={**BASE, "id_number": "9005140012352"})
 assert r.status_code == 409
 
-# FR-1.7: only patient owner can request QR; reception can scan and record.
-assert api.post(f"/api/v1/clients/{client_id}/checkin-code").status_code == 401
-qr = api.post(f"/api/v1/clients/{client_id}/checkin-code", headers=headers)
+# FR-1.7 (updated): QR is created only for a confirmed upcoming appointment.
+appointment_id = "appt-sample1"
+state.appointments_db[appointment_id] = {
+    "appointment_id": appointment_id, "client_id": client_id, "dietitian_id": "dietitian-sample",
+    "status": "PENDING", "appointment_date": (datetime.now() + timedelta(days=3)).isoformat(),
+}
+state.users_db["dietitian-sample"] = {
+    "id": "dietitian-sample", "type": "dietitian", "branch_id": "branch-test",
+    "email": "dietitian-sample@example.test", "password_hash": "", "full_name": "Sample Dietitian",
+}
+checkin_url = f"/api/v1/clients/{client_id}/checkin-code"
+assert api.post(checkin_url, json={"appointment_id": appointment_id}).status_code == 401
+assert api.get(f"/api/v1/clients/{client_id}/checkin-appointments", headers=headers).json() == []
+assert api.post(checkin_url, json={"appointment_id": appointment_id}, headers=headers).status_code == 409
+state.appointments_db[appointment_id]["status"] = "CONFIRMED"
+qr = api.post(checkin_url, json={"appointment_id": appointment_id}, headers=headers)
 assert qr.status_code == 200, qr.text
 code = qr.json()["checkin_code"]
 assert code.startswith("NC1:") and "<svg" in qr.json()["qr_svg"]
@@ -143,30 +158,27 @@ assert api.post("/api/v1/reception/check-in", json={"checkin_code": code}).statu
 result = api.post("/api/v1/reception/check-in", json={"checkin_code": code}, headers=staff_headers)
 assert result.status_code == 201, result.text
 assert len(state.checkin_events_db) == 1
+assert state.checkin_events_db[0]["appointment_id"] == appointment_id
 assert (
     api.post(
         "/api/v1/reception/check-in", json={"checkin_code": code}, headers=staff_headers
-    ).status_code
-    == 404
+    ).status_code == 404
 )
-qr2 = api.post(f"/api/v1/clients/{client_id}/checkin-code", headers=headers)
-assert qr2.status_code == 200
-assert (
-    api.post(
-        "/api/v1/reception/check-in", json={"checkin_code": code}, headers=staff_headers
-    ).status_code
-    == 404
-)
-# Explicit expiry prevents stale/photographed QR codes from remaining useful.
-expired = api.post(f"/api/v1/clients/{client_id}/checkin-code", headers=headers)
+assert api.post(checkin_url, json={"appointment_id": appointment_id}, headers=headers).status_code == 409
+# A different confirmed appointment may issue a new code; expired codes fail.
+next_id = "appt-sample2"
+state.appointments_db[next_id] = {
+    **state.appointments_db[appointment_id], "appointment_id": next_id,
+}
+expired = api.post(checkin_url, json={"appointment_id": next_id}, headers=headers)
+assert expired.status_code == 200
 state.checkin_credentials_db[client_id]["expires_at"] = 0
 assert (
     api.post(
         "/api/v1/reception/check-in",
         json={"checkin_code": expired.json()["checkin_code"]},
         headers=staff_headers,
-    ).status_code
-    == 404
+    ).status_code == 404
 )
 
 # FR-1.8: receptionist may assist only with explicit consent; patient creates password.

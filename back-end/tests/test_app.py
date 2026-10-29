@@ -1050,7 +1050,10 @@ def test_appointments_can_be_filtered_by_client():
     assert response.json()[0]["client_id"] == "client-a"
 
 
-def test_goals_can_be_created_and_listed_by_client():
+def test_goals_can_be_created_by_dietitian_and_viewed_by_client():
+    state.users_db["client-goal-test"] = {
+        "id": "client-goal-test", "type": "client", "dietitian_id": "diet-goal-test"
+    }
     created = client.post(
         "/api/v1/goals",
         json={
@@ -1058,7 +1061,7 @@ def test_goals_can_be_created_and_listed_by_client():
             "target_metric": "Weight",
             "target_value": 72.5,
         },
-        headers=authenticated_client_headers("client-goal-test"),
+        headers=authenticated_dietitian_headers("diet-goal-test"),
     )
 
     assert created.status_code == 200, created.text

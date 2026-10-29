@@ -434,6 +434,11 @@ CREATE TABLE appointment (
 
         CHECK (status IN ('PENDING','CONFIRMED','REJECTED','SCHEDULED','COMPLETED','CANCELLED','NO_SHOW')),
 
+    consultation_type VARCHAR(12) NOT NULL DEFAULT 'IN_PERSON'
+        CHECK (consultation_type IN ('IN_PERSON', 'VIRTUAL')),
+
+    virtual_room_id VARCHAR(96),
+
     notes           TEXT
 
 );
@@ -1048,6 +1053,7 @@ CREATE TABLE IF NOT EXISTS client_profile_photo (
 -- FR-1.7: store only SHA256 of random check-in credential; never ID numbers.
 CREATE TABLE IF NOT EXISTS client_checkin_credential (
     client_id VARCHAR(36) PRIMARY KEY REFERENCES client(client_id) ON DELETE CASCADE,
+    appointment_id VARCHAR(36) NOT NULL REFERENCES appointment(appointment_id) ON DELETE CASCADE,
     token_hash VARCHAR(64) UNIQUE NOT NULL,
     rotated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes')
@@ -1055,6 +1061,7 @@ CREATE TABLE IF NOT EXISTS client_checkin_credential (
 CREATE TABLE IF NOT EXISTS client_checkin_event (
     checkin_id VARCHAR(36) PRIMARY KEY,
     client_id VARCHAR(36) NOT NULL REFERENCES client(client_id) ON DELETE RESTRICT,
+    appointment_id VARCHAR(36) NOT NULL UNIQUE REFERENCES appointment(appointment_id) ON DELETE RESTRICT,
     staff_id VARCHAR(36) NOT NULL REFERENCES staff_account(staff_id) ON DELETE RESTRICT,
     branch_id VARCHAR(36) NOT NULL REFERENCES branch(branch_id) ON DELETE RESTRICT,
     checked_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1086,3 +1093,38 @@ CREATE INDEX IF NOT EXISTS idx_support_message_ticket ON support_message(ticket_
 
 ALTER TABLE support_ticket ADD COLUMN IF NOT EXISTS contact_email VARCHAR(150);
 CREATE INDEX IF NOT EXISTS idx_support_contact_time ON support_ticket(contact_email, created_at);
+
+-- Clinician follow-up history; also available as additive migration 019 on existing DBs.
+CREATE TABLE IF NOT EXISTS care_review (
+    review_id VARCHAR(36) PRIMARY KEY,
+    client_id VARCHAR(36) NOT NULL REFERENCES client(client_id) ON DELETE CASCADE,
+    dietitian_id VARCHAR(36) NOT NULL REFERENCES dietitian(dietitian_id),
+    appointment_id VARCHAR(36) NOT NULL REFERENCES appointment(appointment_id),
+    review_summary TEXT NOT NULL,
+    monitoring_plan TEXT NOT NULL,
+    decision VARCHAR(20) NOT NULL CHECK (decision IN ('CONTINUE_PLAN', 'ADJUST_PLAN', 'FOLLOW_UP')),
+    next_review_date DATE,
+    reviewed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_care_review_client_date ON care_review(client_id, reviewed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_care_review_dietitian ON care_review(dietitian_id);
+
+-- User profile customization: migration 020_account_profiles.sql
+CREATE TABLE IF NOT EXISTS account_profile (
+    account_role VARCHAR(30) NOT NULL CHECK (account_role IN
+        ('client', 'dietitian', 'admin', 'reception', 'branch_manager', 'compliance_officer', 'executive', 'content_manager')),
+    account_id VARCHAR(36) NOT NULL,
+    phone_number VARCHAR(30),
+    address VARCHAR(240),
+    emergency_contact VARCHAR(120),
+    bio VARCHAR(500),
+    preferred_contact VARCHAR(10) NOT NULL DEFAULT 'email'
+        CHECK (preferred_contact IN ('email', 'phone')),
+    email_notifications BOOLEAN NOT NULL DEFAULT TRUE,
+    appointment_reminders BOOLEAN NOT NULL DEFAULT TRUE,
+    photo_data BYTEA,
+    photo_content_type VARCHAR(30),
+    photo_hidden BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (account_role, account_id)
+);

@@ -2561,3 +2561,106 @@ textarea {
     cursor: not-allowed;
     opacity: 0.65;
 }
+
+
+/* Patient care plans are read-only: prescribing controls live with dietitians. */
+.clinician-guidance {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: clamp(18px, 3vw, 27px);
+    margin-bottom: 22px;
+    background: linear-gradient(115deg, #e9f9f2, #f9fbf8 78%);
+    border: 1px solid #cfe9de;
+    border-radius: 18px;
+}
+.clinician-guidance h2 {
+    margin: 6px 0 8px;
+    font-size: clamp(18px, 2vw, 24px);
+    color: var(--green-deep);
+}
+.clinician-guidance p { margin: 0; color: var(--muted); line-height: 1.6; }
+.clinician-guidance-icon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 42px;
+    height: 42px;
+    border-radius: 50%;
+    color: #177257;
+    background: #d5f2e6;
+    font-weight: 800;
+}
+.readonly-label {
+    display: inline-block;
+    flex-shrink: 0;
+    padding: 7px 11px;
+    border-radius: 999px;
+    color: #206450;
+    background: #e0f2e9;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .07em;
+}
+.clinician-footnote {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    margin-top: 22px;
+    padding: 16px 20px;
+    border-radius: 14px;
+    background: #f0f5fa;
+    color: var(--muted);
+}
+.clinician-footnote p { margin: 0; }
+@media (max-width: 720px) {
+    .clinician-guidance { flex-wrap: wrap; }
+    .readonly-label { margin-left: 58px; }
+}
+
+/* Appointment QR is part of a confirmed booking, not general patient setup. */
+.appointment-actions { display: flex; flex-direction: column; align-items: flex-start; gap: .65rem; }
+.appointment-actions .appointment-note { max-width: 17rem; font-size: .78rem; }
+@media (max-width: 640px) { .appointment-actions { width: 100%; } }
+
+
+/* Consultation type chooser: clear, mobile-friendly, accessible controls. */
+.appointment-type-field { display: grid; gap: .7rem; grid-column: 1 / -1; border: 0; padding: 0; margin: 0; min-width: 0; }
+.appointment-type-field legend { font-size: .86rem; font-weight: 700; color: var(--green-deep); margin-bottom: .45rem; }
+.appointment-type-option { display: flex; align-items: flex-start; gap: .85rem; padding: 1rem; background: #f7faf5; border: 1px solid #cedbd0; border-radius: 12px; cursor: pointer; }
+.appointment-type-option:has(input:checked) { border-color: #24755c; background: #e9f5ec; box-shadow: 0 0 0 1px #24755c inset; }
+.appointment-type-option:focus-within { outline: 2px solid #236b4a; outline-offset: 2px; }
+.appointment-type-option input { flex: none; accent-color: #236b4a; margin: .2rem 0 0; }
+.appointment-type-option span { display: grid; gap: .3rem; }
+.appointment-type-option strong { font-size: .88rem; color: #213b30; }
+.appointment-type-option small { font-size: .78rem; line-height: 1.45; color: #486459; }
+.appointment-mode { margin-top: .5rem !important; font-size: .79rem !important; font-weight: 650; color: #235c49 !important; }
+.meeting-link { display: grid; gap: .5rem; max-width: 18rem; }
+.meeting-link .appointment-note { line-height: 1.5; }
+@media (max-width: 640px) { .appointment-request-row { grid-template-columns: 1fr; } .appointment-actions { align-items: stretch; } }
+
+/* Patient care journey: medical history → appointment → consultation → care plan → progress → monitoring. */
+.care-journey { margin: 28px 0 34px; }
+.care-journey-intro { max-width: 76ch; color: var(--text-muted, #526574); line-height: 1.65; margin: 4px 0 20px; }
+.care-journey-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; list-style: none; margin: 0; padding: 0; counter-reset: none; }
+.care-step { display: flex; flex-direction: column; min-width: 0; gap: 11px; padding: 20px; border: 1px solid #d8e8e3; border-radius: 18px; background: #fff; box-shadow: 0 8px 25px rgba(18, 58, 62, .045); }
+.care-step-top { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.care-step-number { border-radius: 12px; padding: 7px 10px; background: #e1f4eb; color: #11795d; font-weight: 800; font-size: .8rem; }
+.care-step-status { border-radius: 50px; background: #f0f4f6; color: #34546b; padding: 5px 9px; font-size: .72rem; text-align: right; }
+.care-step h3 { color: #192947; font-size: 1.05rem; margin: 0; }
+.care-step p { margin: 0; flex: 1; color: #536579; line-height: 1.6; font-size: .88rem; }
+.care-step-link { display: inline-flex; align-items: center; justify-content: space-between; text-align: left; width: 100%; background: #eef9f5; border: 1px solid #cae7d9; color: #0d6956; font-weight: 700; padding: 10px 13px; border-radius: 10px; cursor: pointer; }
+.care-step-link:hover { background: #d9f4e8; }
+.care-step-link:focus-visible { outline: 3px solid #318dff; outline-offset: 2px; }
+.care-followup-note { margin-top: 14px; padding: 16px 20px; background: #edf7fd; border: 1px solid #cfdfec; border-radius: 14px; overflow-wrap: anywhere; }
+.care-followup-note p { line-height: 1.55; margin: 8px 0 0; }
+.care-journey-disclaimer { color: #617183; font-size: .83rem; margin-top: 15px; line-height: 1.55; }
+.care-journey-alert { background: #fff6dc; color: #654811; padding: 12px 15px; border-radius: 10px; }
+.care-booking-reminder { border-radius: 12px; padding: 15px 20px; margin-bottom: 20px; background: #effaf3; border: 1px solid #c9e9d4; }
+.care-booking-reminder p { line-height: 1.55; }
+.care-review-entry { margin-bottom: 15px; overflow-wrap: anywhere; }
+.care-review-entry h3, .care-review-entry h4 { margin: 8px 0; }
+.care-review-entry p { white-space: pre-wrap; }
+@media (max-width: 1000px) { .care-journey-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 660px) { .care-journey-grid { grid-template-columns: 1fr; } .care-step { padding: 16px; } }
