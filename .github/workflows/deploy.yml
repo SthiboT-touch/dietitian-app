@@ -56,6 +56,10 @@ jobs:
             done
             docker compose run --rm --no-deps api python migrations/apply_015_support_tickets.py
             docker compose run --rm --no-deps api python migrations/apply_016_guest_support.py
+            docker compose run --rm --no-deps api python migrations/apply_017_appointment_bound_checkin.py
+            docker compose run --rm --no-deps api python migrations/apply_018_virtual_appointments.py
+            docker compose run --rm --no-deps api python migrations/apply_019_care_reviews.py
+            docker compose run --rm --no-deps api python migrations/apply_020_account_profiles.py
             docker compose up -d --build
             for attempt in $(seq 1 30); do
               if docker compose exec -T api python -c 'import urllib.request,json; h=json.load(urllib.request.urlopen("http://localhost:8000/health")); assert h["database"] == "online"'; then
