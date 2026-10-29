@@ -266,8 +266,6 @@ class AppointmentCreate(BaseModel):
     client_id: str
     dietitian_id: str
     appointment_date: str
-    # Older booking clients remain compatible; the web form now makes this explicit.
-    consultation_type: Literal["IN_PERSON", "VIRTUAL"] = "IN_PERSON"
 
 
 class AppointmentDecision(BaseModel):

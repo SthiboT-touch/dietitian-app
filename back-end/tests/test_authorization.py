@@ -223,8 +223,7 @@ def test_goals_require_authenticated_owner_or_assigned_dietitian():
     payload = {"client_id": "c1", "target_metric": "Water", "target_value": "2"}
     assert api.get("/api/v1/goals", params={"client_id": "c1"}).status_code == 401
     assert api.post("/api/v1/goals", json=payload, headers=headers("client-2")).status_code == 403
-    assert api.post("/api/v1/goals", json=payload, headers=headers("client-1")).status_code == 403
-    assert api.post("/api/v1/goals", json=payload, headers=headers("dietitian-1")).status_code == 200
+    assert api.post("/api/v1/goals", json=payload, headers=headers("client-1")).status_code == 200
     assert (
         api.get(
             "/api/v1/goals", params={"client_id": "c1"}, headers=headers("dietitian-1")

@@ -13,8 +13,6 @@ client_sessions_db: Dict[str, str] = {}
 client_registration_consents_db: Dict[str, dict] = {}
 welcome_outbox_db: Dict[str, dict] = {}
 profile_photos_db: Dict[str, dict] = {}
-# Shared self-service profile details/photos for all authenticated roles.
-account_profiles_db: Dict[tuple[str, str], dict] = {}
 checkin_credentials_db: Dict[str, dict] = {}
 checkin_events_db: List[dict] = []
 # BRS staff roles are distinct from full system administrators.
@@ -31,7 +29,6 @@ cms_nutrition_plans_db: Dict[str, List[dict]] = {}
 cms_attachments_db: Dict[str, dict] = {}
 cms_audit_db: List[dict] = []
 appointments_db: Dict[str, dict] = {}
-care_reviews_db: Dict[str, dict] = {}
 goals_db: Dict[str, List[dict]] = {}
 meal_plans_db: Dict[str, dict] = {}
 recipes_db: Dict[str, dict] = {}

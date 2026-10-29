@@ -28,7 +28,6 @@ def _is_sensitive_path(path: str) -> bool:
         or path.startswith("/api/v1/appointments")
         or path.startswith("/api/v1/reception/")
         or path.startswith("/api/v1/goals")
-        or path.startswith("/api/v1/care-reviews")
         or path.startswith("/api/v1/admin/")
         or path.startswith("/api/v1/meal-plans/")
         or path.startswith("/api/v1/ai/")
