@@ -41,6 +41,7 @@ from state import (
 )
 from schemas import (
     DietitianRegister,
+    DietitianProfileUpdate,
     ClientRegister,
     LoginRequest,
     EmailVerificationSend,
@@ -557,15 +558,13 @@ def login(data: LoginRequest):
             if not user:
                 cursor.execute(
                     "SELECT client_id AS id, 'client' AS type, name AS full_name, email, "
-                    "dietitian_id, id_number, date_of_birth, gender, phone_number, consent_accepted, email_verified, password AS password_hash "
-                    "FROM client WHERE LOWER(email) = LOWER(%s)",
+                        "dietitian_id, id_number, date_of_birth, gender, phone AS phone_number, privacy_notice_acknowledged AS consent_accepted, email_verified, password AS password_hash "                    "FROM client WHERE LOWER(email) = LOWER(%s)",
                     (data.email,),
                 )
                 user = cursor.fetchone()
             if not user:
                 cursor.execute(
-                    "SELECT admin_id AS id, COALESCE(role, 'admin') AS type, "
-                    "TRIM(first_name || ' ' || last_name) AS full_name, email, password AS password_hash "
+                    "SELECT admin_id AS id, 'admin' AS type, "                    "TRIM(first_name || ' ' || last_name) AS full_name, email, password AS password_hash "
                     "FROM admin WHERE LOWER(email) = LOWER(%s)",
                     (data.email,),
                 )
@@ -827,6 +826,110 @@ def create_my_dietitian_branch(
         previous_branch["dietitian_count"] = max(0, previous_branch.get("dietitian_count", 1) - 1)
     user["branch_id"] = branch_id
     return {"message": "Branch created and set as your current base", "branch": branch}
+
+
+@router.get("/api/v1/dietitians/me/profile", tags=["1. Auth & Admin"])
+def get_my_dietitian_profile(
+    dietitian_id: str = Depends(require_dietitian),
+):
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT dietitian_id AS id, first_name, last_name, email, "
+                "registration_number AS license_number, specialisation "
+                "FROM dietitian WHERE dietitian_id = %s",
+                (dietitian_id,),
+            )
+            profile = cursor.fetchone()
+
+        if not profile:
+            raise HTTPException(status_code=404, detail="Dietitian not found")
+
+        return dict(profile)
+
+    user = users_db.get(dietitian_id)
+    if not user or user.get("type") != "dietitian":
+        raise HTTPException(status_code=404, detail="Dietitian not found")
+
+    return {
+        "id": user.get("id", dietitian_id),
+        "first_name": user.get("first_name", ""),
+        "last_name": user.get("last_name", ""),
+        "email": user.get("email", ""),
+        "license_number": user.get("license_number", user.get("registration_number", "")),
+        "specialisation": user.get("specialisation", ""),
+    }
+
+
+@router.patch("/api/v1/dietitians/me/profile", tags=["1. Auth & Admin"])
+def update_my_dietitian_profile(
+    data: DietitianProfileUpdate,
+    dietitian_id: str = Depends(require_dietitian),
+):
+    values = {}
+    for field_name, value in data.model_dump(exclude_unset=True).items():
+        if value is not None:
+            values[field_name] = value
+
+    if not values:
+        return {"message": "Profile unchanged"}
+
+    if "email" in values:
+        values["email"] = values["email"].strip().lower()
+
+    if "specialisation" in values and values["specialisation"] == "":
+        values["specialisation"] = None
+
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT dietitian_id FROM dietitian WHERE dietitian_id = %s",
+                (dietitian_id,),
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="Dietitian not found")
+
+            assignments = ", ".join(f"{key} = %s" for key in values)
+            try:
+                cursor.execute(
+                    f"UPDATE dietitian SET {assignments} "
+                    "WHERE dietitian_id = %s RETURNING dietitian_id",
+                    (*values.values(), dietitian_id),
+                )
+            except Exception as error:
+                # PostgreSQL unique violation: another account uses this email.
+                if getattr(error, "sqlstate", None) == "23505":
+                    raise HTTPException(
+                        status_code=409,
+                        detail="That email address is already in use",
+                    ) from error
+                raise
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="Dietitian not found")
+    else:
+        user = users_db.get(dietitian_id)
+        if not user or user.get("type") != "dietitian":
+            raise HTTPException(status_code=404, detail="Dietitian not found")
+
+        if "email" in values:
+            email = values["email"].casefold()
+            if any(
+                other_id != dietitian_id
+                and other.get("type") == "dietitian"
+                and str(other.get("email", "")).casefold() == email
+                for other_id, other in users_db.items()
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="That email address is already in use",
+                )
+
+        user.update(values)
+        user["full_name"] = (
+            f"{user.get('first_name', '')} {user.get('last_name', '')}"
+        ).strip()
+
+    return {"message": "Profile saved"}
 
 
 @router.get("/api/v1/dietitians/me/approval", tags=["1. Auth & Admin"])

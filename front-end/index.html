@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
     <head>
         <meta charset="utf-8" />
@@ -198,7 +198,7 @@
                                 <span
                                     id="patientSignupStepLabel"
                                     aria-live="polite"
-                                    >Step 1 of 3 · Your details</span
+                                    >Step 1 of 3 Â· Your details</span
                                 >
                                 <span>Patient registration</span>
                             </div>
@@ -770,7 +770,7 @@
                         class="nav-item"
                         data-view="support"
                         type="button"
-                        ><span class="nav-glyph">&#9993;</span>Support &amp; Tickets</button
+                         data-dietitian-hide><span class="nav-glyph">&#9993;</span>Support &amp; Tickets</button
                     >
                     <button
                         class="nav-item"
@@ -881,13 +881,6 @@
                         type="button"
                         ><span class="nav-glyph">&#9636;</span>My QR Check-In</button
                     >
-                    <button
-                        class="nav-item"
-                        data-view="my-profile"
-                        data-standard-only
-                        type="button"
-                        ><span class="nav-glyph">&#9787;</span>My Profile</button
-                    >
                     <div
                         class="nav-section-label"
                         data-client-only
@@ -972,7 +965,7 @@
                         data-view="ai-workspace"
                         data-standard-only
                         type="button"
-                        ><span class="nav-glyph">&#10022;</span>AI Coach</button
+                         data-dietitian-hide><span class="nav-glyph">&#10022;</span>AI Coach</button
                     >
                     <button
                         class="nav-item"
@@ -980,35 +973,7 @@
                         data-dietitian-only
                         data-standard-only
                         type="button"
-                        ><span class="nav-glyph">&#9635;</span>Appointment Requests</button
-                    >
-                    <button
-                        class="nav-item"
-                        data-view="reviews"
-                        data-dietitian-only
-                        data-standard-only
-                        type="button"
-                        ><span class="nav-glyph">&#9678;</span>Review queue<span
-                            id="reviewCount"
-                            class="nav-count"
-                            >0</span
-                        ></button
-                    >
-                    <button
-                        class="nav-item"
-                        data-view="verification-documents"
-                        data-dietitian-only
-                        data-standard-only
-                        type="button"
-                        ><span class="nav-glyph">&#9636;</span>Verification documents</button
-                    >
-                    <button
-                        class="nav-item"
-                        data-view="dietitian-branches"
-                        data-dietitian-only
-                        data-standard-only
-                        type="button"
-                        ><span class="nav-glyph">&#9636;</span>My branches</button
+                        ><span class="nav-glyph">&#9635;</span>Appointments and Queues</button
                     >
                     <button
                         class="nav-item"
@@ -1018,6 +983,8 @@
                         type="button"
                         ><span class="nav-glyph">&#9787;</span>My Patients</button
                     >
+                    <button class="nav-item" data-view="support" data-dietitian-only data-standard-only type="button"><span class="nav-glyph">&#9993;</span>Support &amp; Tickets</button>
+                    <button class="nav-item" data-view="settings" data-dietitian-only data-standard-only type="button"><span class="nav-glyph">&#9881;</span>Settings</button>
                     <button
                         class="nav-item"
                         data-view="foods"
@@ -1025,23 +992,15 @@
                         data-dietitian-only
                         data-standard-only
                         type="button"
-                        ><span class="nav-glyph">&#10047;</span>Food library</button
-                    >
-                    <button
-                        class="nav-item"
-                        data-view="recipes"
-                        data-dietitian-only
-                        data-standard-only
-                        type="button"
-                        ><span class="nav-glyph">&#10047;</span>Recipes</button
-                    >
+                         data-dietitian-hide><span class="nav-glyph">&#10047;</span>Food library</button
+
                     <button
                         class="nav-item"
                         data-view="meal-plans"
                         data-dietitian-only
                         data-standard-only
                         type="button"
-                        ><span class="nav-glyph">&#9776;</span>Meal plans</button
+                         data-dietitian-hide><span class="nav-glyph">&#9776;</span>Meal plans</button
                     >
                 </nav>
                 <div class="sidebar-bottom">
@@ -1055,7 +1014,7 @@
                             class="status-dot"
                             aria-hidden="true"
                         ></span
-                        ><span id="connectionStatusText">Checking connection…</span></div
+                        ><span id="connectionStatusText">Checking connectionâ€¦</span></div
                     >
                     <button
                         id="signOutButton"
@@ -1074,13 +1033,19 @@
                             class="header-date"
                         ></span
                     ></div>
-                    <div class="profile-chip"
-                        ><span
-                            id="profileInitials"
-                            class="profile-avatar"
-                            >FN</span
-                        ><span id="profileName">Your account</span></div
-                    >
+                    <div class="profile-menu" data-profile-menu>
+    <button class="profile-chip" id="profileMenuButton" type="button"
+        aria-expanded="false" aria-controls="profileDropdown">
+        <span id="profileInitials" class="profile-avatar">FN</span>
+        <span id="profileName">Your account</span>
+        <span aria-hidden="true">&#9662;</span>
+    </button>
+    <div class="profile-dropdown" id="profileDropdown" hidden>
+        <button type="button" data-profile-view="my-profile">My Profile</button>
+        <button type="button" data-profile-view="verification-documents">Verification Documents</button>
+        <button type="button" data-profile-view="dietitian-branches">My Branches</button>
+    </div>
+</div>
                     <button
                         id="mobileSignOutButton"
                         class="mobile-signout"

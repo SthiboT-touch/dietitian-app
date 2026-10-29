@@ -1,4 +1,4 @@
-:root {
+﻿:root {
     color-scheme: light;
     --paper: #f5f5ef;
     --white: #fffefa;
@@ -1574,7 +1574,7 @@ textarea {
 }
 .meal-summary li::before {
     color: var(--rust);
-    content: "•";
+    content: "â€¢";
 }
 .food-row:first-child {
     border-radius: 5px 5px 0 0;
@@ -2310,7 +2310,7 @@ textarea {
     min-height: 85px;
 }
 
-/* FR-1.1 — Accessible, mobile-friendly progressive patient registration. */
+/* FR-1.1 â€” Accessible, mobile-friendly progressive patient registration. */
 #signupForm > [hidden],
 #signupForm [hidden] {
     display: none !important;
@@ -2394,7 +2394,7 @@ textarea {
     }
 }
 
-/* FR-1.2 — Accessible, inline registration validation feedback. */
+/* FR-1.2 â€” Accessible, inline registration validation feedback. */
 .registration-field-help {
     display: block;
     margin: 0.15rem 0 0.85rem;
@@ -2487,7 +2487,7 @@ textarea {
     margin: 7px 0 0 28px;
 }
 
-/* FR-1.6–1.10: keep onboarding controls simple and accessible. */
+/* FR-1.6â€“1.10: keep onboarding controls simple and accessible. */
 .registration-uploads {
     margin: 1rem 0;
     padding: 1rem;
@@ -2560,4 +2560,388 @@ textarea {
 :where(button, input, select, textarea):disabled {
     cursor: not-allowed;
     opacity: 0.65;
+}
+
+/* Dietitian avatar dropdown */
+.profile-menu {
+    position: relative;
+}
+button.profile-chip {
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+}
+.profile-dropdown {
+    position: absolute;
+    z-index: 1000;
+    top: calc(100% + 10px);
+    right: 0;
+    min-width: 210px;
+    padding: 6px;
+    border: 1px solid #e1e7dc;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 12px 30px rgb(20 40 20 / 14%);
+}
+.profile-dropdown[hidden] {
+    display: none;
+}
+.profile-dropdown button {
+    display: block;
+    width: 100%;
+    padding: 10px 12px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #263b2b;
+    text-align: left;
+    cursor: pointer;
+}
+.profile-dropdown button:hover,
+.profile-dropdown button:focus-visible {
+    background: #f0f2eb;
+}
+
+/* Dietitian appointments dashboard */
+.appointment-overview {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    margin: 22px 0;
+}
+
+.appointment-overview-card {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--white);
+}
+
+.appointment-overview-card span {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+.appointment-overview-card strong {
+    color: var(--green-deep);
+    font-family: var(--serif);
+    font-size: 32px;
+    font-weight: 500;
+    line-height: 1;
+}
+
+.appointment-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 20px 0;
+}
+
+.appointment-filters {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.appointment-filters button[aria-pressed="true"] {
+    border-color: var(--green-deep);
+    background: var(--green-deep);
+    color: var(--white);
+}
+
+.appointment-filters button[aria-pressed="false"] {
+    border: 1px solid var(--line);
+    background: var(--white);
+    color: var(--ink);
+}
+
+.appointment-queue-section {
+    min-width: 0;
+    margin-top: 22px;
+}
+
+.appointment-queue-section .section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.appointment-queue-section .section-heading h2 {
+    margin: 0;
+    color: var(--green-deep);
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 500;
+}
+
+.appointment-queue-section [data-appointment-result-count] {
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.7px;
+}
+
+.appointment-request-row {
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    margin-bottom: 10px;
+    transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.appointment-request-row:hover {
+    border-color: #b7c8b9;
+    box-shadow: 0 4px 14px rgb(30 55 35 / 5%);
+}
+
+.appointment-request-details {
+    min-width: 0;
+}
+
+.appointment-request-details h2 {
+    overflow-wrap: anywhere;
+}
+
+.appointment-status {
+    width: fit-content;
+    align-items: center;
+}
+
+.status-pending {
+    background: #f5ecda;
+    color: #765e2f;
+}
+
+.appointment-queue-label {
+    display: inline-flex;
+    width: fit-content;
+    margin-top: 9px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    background: var(--green-pale);
+    color: var(--green-deep);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.appointment-request-row .review-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+@media (max-width: 760px) {
+    .appointment-overview {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .appointment-overview-card {
+        padding: 15px;
+    }
+
+    .appointment-overview-card:last-child {
+        grid-column: 1 / -1;
+    }
+
+    .appointment-toolbar {
+        align-items: stretch;
+    }
+
+    .appointment-filters {
+        width: 100%;
+    }
+
+    .appointment-toolbar > button {
+        width: 100%;
+    }
+
+    .appointment-request-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
+        padding: 14px;
+    }
+
+    .appointment-request-row .review-actions {
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 420px) {
+    .appointment-overview-card strong {
+        font-size: 27px;
+    }
+
+    .appointment-filters button {
+        flex: 1 1 auto;
+    }
+}
+
+/* NutriCare: Dietitian appointment calendar */
+.appointment-calendar-panel {
+    margin: 24px 0;
+    padding: 20px;
+    border: 1px solid #dce5df;
+    border-radius: 16px;
+    background: #fff;
+}
+
+.appointment-calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.appointment-calendar-header h2 {
+    margin: 0 0 6px;
+    font-size: 1.15rem;
+}
+
+.appointment-calendar-header p {
+    margin: 0;
+    color: #66736b;
+    font-size: 0.9rem;
+}
+
+.appointment-calendar-navigation {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.appointment-calendar-navigation strong {
+    min-width: 130px;
+    text-align: center;
+}
+
+.appointment-calendar-weekdays,
+.appointment-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.appointment-calendar-weekdays {
+    margin-bottom: 8px;
+    text-align: center;
+    color: #66736b;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.appointment-calendar-weekdays span {
+    padding: 8px 0;
+}
+
+.appointment-calendar-day,
+.appointment-calendar-empty {
+    min-width: 0;
+    min-height: 78px;
+    border-radius: 10px;
+}
+
+.appointment-calendar-day {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid #e0e7e2;
+    background: #fff;
+    color: #24352b;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.appointment-calendar-day:hover {
+    border-color: #39845a;
+    background: #f4faf6;
+}
+
+.appointment-calendar-day.is-selected {
+    border: 2px solid #27804a;
+    background: #edf8f0;
+}
+
+.appointment-calendar-day.is-today .appointment-calendar-day-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 27px;
+    height: 27px;
+    border-radius: 50%;
+    background: #243f30;
+    color: #fff;
+}
+
+.appointment-calendar-day-number {
+    font-weight: 700;
+}
+
+.appointment-calendar-count {
+    color: #287746;
+    font-size: 0.72rem;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
+.appointment-calendar-legend {
+    margin: 14px 0 0;
+    color: #66736b;
+    font-size: 0.82rem;
+}
+
+@media (max-width: 760px) {
+    .appointment-calendar-panel {
+        padding: 12px;
+    }
+
+    .appointment-calendar-weekdays,
+    .appointment-calendar-grid {
+        gap: 4px;
+    }
+
+    .appointment-calendar-day,
+    .appointment-calendar-empty {
+        min-height: 58px;
+    }
+
+    .appointment-calendar-day {
+        padding: 6px 4px;
+        gap: 5px;
+    }
+
+    .appointment-calendar-count {
+        font-size: 0.62rem;
+    }
+
+    .appointment-calendar-navigation {
+        width: 100%;
+        gap: 6px;
+    }
+
+    .appointment-calendar-navigation strong {
+        flex: 1;
+        min-width: 0;
+    }
 }

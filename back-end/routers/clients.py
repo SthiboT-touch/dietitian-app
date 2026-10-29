@@ -66,7 +66,7 @@ def list_clients(
             if client_id:
                 cursor.execute(
                     "SELECT client_id AS id, name, email, dietitian_id, status, id_number, date_of_birth, "
-                    "gender, phone_number, consent_accepted, height, activity_level, dietary_preferences "
+                    "gender, phone AS phone_number, privacy_notice_acknowledged AS consent_accepted, height, activity_level, dietary_preferences "
                     "FROM client WHERE client_id = %s",
                     (client_id,),
                 )

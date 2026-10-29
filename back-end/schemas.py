@@ -23,6 +23,37 @@ class DietitianRegister(BaseModel):
     def email_format(cls, value: str) -> str:
         return validate_email(value)
 
+class DietitianProfileUpdate(BaseModel):
+    first_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    last_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    email: Optional[str] = Field(default=None, max_length=150)
+    specialisation: Optional[str] = Field(default=None, max_length=150)
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def validate_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        value = value.strip()
+        if not value:
+            raise ValueError("Name cannot be empty")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def validate_profile_email(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return validate_email(value)
+
+    @field_validator("specialisation")
+    @classmethod
+    def clean_specialisation(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        value = value.strip()
+        return value or None
+
 
 class RegistrationAttachment(BaseModel):
     filename: str = Field(..., min_length=1, max_length=120)
