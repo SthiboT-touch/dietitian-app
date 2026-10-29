@@ -4,6 +4,7 @@
 !.env.example
 .git/
 .venv/
+.venv312/
 **/__pycache__/
 **/.pytest_cache/
 *.pyc
