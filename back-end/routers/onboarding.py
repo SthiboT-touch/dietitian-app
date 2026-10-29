@@ -54,11 +54,18 @@ def new_client_checkin_code(
     token, digest = new_checkin_credential()
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+<<<<<<< HEAD
             cursor.execute(
                 "INSERT INTO client_checkin_credential (client_id, token_hash) VALUES (%s,%s) "
                 "ON CONFLICT (client_id) DO UPDATE SET token_hash=EXCLUDED.token_hash, rotated_at=NOW(), expires_at=NOW()+INTERVAL '10 minutes'",
                 (client_id, digest),
             )
+=======
+            expiry_expression = "datetime('now', '+10 minutes')" if database.is_sqlite() else "NOW() + INTERVAL '10 minutes'"
+            cursor.execute('INSERT INTO client_checkin_credential (client_id, token_hash) VALUES (%s,%s) '
+                           f'ON CONFLICT (client_id) DO UPDATE SET token_hash=EXCLUDED.token_hash, rotated_at=NOW(), expires_at={expiry_expression}',
+                           (client_id, digest))
+>>>>>>> 29616db (Switch database from PostgreSQL to SQLite, add migration script)
     else:
         checkin_credentials_db[client_id] = {
             "token_hash": digest,
@@ -92,12 +99,19 @@ def scan_checkin(
                 "SELECT branch_id, is_active FROM staff_account WHERE staff_id=%s", (staff_id,)
             )
             staff = cursor.fetchone()
+<<<<<<< HEAD
             if not staff or not staff["is_active"] or not staff["branch_id"]:
                 raise HTTPException(403, "An active branch assignment is required")
             cursor.execute(
                 "SELECT client_id FROM client_checkin_credential WHERE token_hash=%s AND expires_at > NOW() FOR UPDATE",
                 (digest,),
             )
+=======
+            if not staff or not staff['is_active'] or not staff['branch_id']:
+                raise HTTPException(403, 'An active branch assignment is required')
+            expiry_check = "datetime(expires_at) > CURRENT_TIMESTAMP" if database.is_sqlite() else "expires_at > NOW()"
+            cursor.execute(f'SELECT client_id FROM client_checkin_credential WHERE token_hash=%s AND {expiry_check} FOR UPDATE', (digest,))
+>>>>>>> 29616db (Switch database from PostgreSQL to SQLite, add migration script)
             credential = cursor.fetchone()
             if not credential:
                 raise HTTPException(404, "Invalid or expired check-in code")
