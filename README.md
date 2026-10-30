@@ -8,7 +8,7 @@ The browser app is served by the API at `http://localhost:8000` when running wit
 - `back-end/` contains the FastAPI app, database access, SQL schema, Python requirements, tests, and Dockerfiles. It is one API service, organised by area:
   - `app.py` is the entry point: it serves the browser app, `/health`, and includes every router below.
   - `routers/auth_admin.py` (auth, admin, branches, dietitian documents), `routers/clients.py` (health history, metrics, progress), `routers/appointments.py` (appointments, goals), `routers/meal_planning.py` (foods, recipes, meal plans), `routers/ai.py` (AI chat, plan generation, recommendation review).
-  - `schemas.py` (request/response models), `security.py` (passwords and sessions), `helpers.py`, `state.py` (in-memory data), `config.py` (settings), `database.py` (PostgreSQL).
+  - `schemas.py` (request/response models), `security.py` (passwords and sessions), `helpers.py`, `state.py` (in-memory data), `config.py` (settings), `database.py` (SQLite/PostgreSQL).
 - `docker-compose.yml` and this README remain at the project root.
 
 ## Local development
@@ -45,13 +45,31 @@ need `python back-end/migrations/apply_016_guest_support.py` after migration 015
 
 ## Run with Llama
 
-Create a root `.env` file with the database password before starting the API, database, and Ollama service:
+SQLite is the default persistent database. PostgreSQL is available only as a migration source profile. For a PostgreSQL-to-SQLite migration, keep the current database password in the root `.env` file:
 
 ```dotenv
 DB_PASSWORD=your-database-password
 ```
 
-For an existing database, use the same password already configured for it. Compose now reports a clear error if this required value is missing rather than starting with an empty password.
+The PostgreSQL source service requires the same password already configured for the existing database.
+
+### PostgreSQL to SQLite
+
+The migration copies all PostgreSQL `public` tables into a fresh SQLite file, checks source/target columns, row counts, and foreign keys, and leaves PostgreSQL unchanged. Stop the API and welcome worker before taking the final copy so no records change during cutover. Keep a PostgreSQL backup until the SQLite app has been verified.
+
+Start the existing PostgreSQL volume using the migration-only profile, then run the copy from the API image on the Compose network:
+
+```powershell
+docker compose stop api welcome-worker
+docker compose --profile postgres-source up -d db
+docker compose build api
+docker compose run --rm --no-deps -e DATABASE_URL=postgresql://black@db:5432/dietitian_db api python migrations/migrate_postgres_to_sqlite.py --sqlite-path /data/nutricare.sqlite
+docker compose up --build -d
+```
+
+The resulting file is `data/nutricare.sqlite` on the host and is excluded from Git. Verify every table count printed by the migration before starting services. The PostgreSQL source profile is not started by the normal command, and its `postgres_data` volume is retained as a rollback source. Keep all other writers to this database paused until the copy completes.
+
+For a fresh local persistent database without Docker, set `DATABASE_URL=sqlite:///./data/nutricare.sqlite` before starting the API. The SQLite schema is initialized automatically on first connection. Use `APP_USE_IN_MEMORY_DB=1` for the existing in-memory development/test mode.
 
 Start the services:
 
@@ -97,7 +115,7 @@ The generated-plan endpoint is `POST /api/v1/ai/generate-plan` with a JSON body 
 
 The API sends the goal and any recorded allergies and medical conditions to Ollama. Recommendations remain `PENDING_REVIEW` until approved by a dietitian. These suggestions are not a substitute for clinical judgment.
 
-AI workflows use LangGraph `StateGraph`s: chat loads recent context, routes greetings directly or invokes the tool-enabled LangChain agent, and saves the turn; plan generation loads the client profile, drafts a plan with `ChatOllama`, and stores the recommendation as `PENDING_REVIEW`; and a separate review graph applies the dietitian's decision. Chat history remains in process memory and is cleared when the API restarts; recommendation and review state use PostgreSQL when configured. The routes and response shapes stay the same; LangChain and LangGraph dependencies are installed from `back-end/requirements.txt`.
+AI workflows use LangGraph `StateGraph`s: chat loads recent context, routes greetings directly or invokes the tool-enabled LangChain agent, and saves the turn; plan generation loads the client profile, drafts a plan with `ChatOllama`, and stores the recommendation as `PENDING_REVIEW`; and a separate review graph applies the dietitian's decision. Chat history remains in process memory and is cleared when the API restarts; recommendation and review state use the configured persistent database. The routes and response shapes stay the same; LangChain and LangGraph dependencies are installed from `back-end/requirements.txt`.
 
 The Oracle Cloud deployment workflow applies the client health schema repair and dietitian document-branch association before starting the API. It creates any missing client health tables, adds the missing lactation end date column, and associates existing verification documents with each dietitian's current branch without replacing existing records. For other deployments, run `python back-end/migrations/apply_002_client_health_schema.py` and `python back-end/migrations/apply_003_dietitian_document_branch.py` once with `DATABASE_URL` configured.
 
@@ -113,6 +131,6 @@ To provision three local admin accounts, run `python back-end/seed_admin_account
 
 ## Prototype limits
 
-When `DATABASE_URL` is configured, accounts, patient health records, verification documents, progress, appointments, food catalog entries, meal plans, recipes, and AI reviews use PostgreSQL. For local development, set `DATABASE_URL` in the ignored `.env` file. URL-encode reserved characters in usernames or passwords (for example, encode `@` as `%40`). Docker Compose passes the same variable to the API container; without it, Compose uses the local database service.
+When `DATABASE_URL` is configured, accounts, patient health records, verification documents, progress, appointments, food catalog entries, meal plans, recipes, and AI reviews use SQLite or PostgreSQL according to the URL. Docker Compose defaults to SQLite at `data/nutricare.sqlite`; the `postgres-source` profile exists for migration and rollback only.
 
 Without `DATABASE_URL`, the API uses in-memory data for development and tests. Dietitian document and admin approval endpoints require process-local bearer sessions; other API areas still use prototype authentication. The app is not ready for real patient or clinical data until full authentication and access control are completed.

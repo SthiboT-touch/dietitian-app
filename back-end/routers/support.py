@@ -190,8 +190,14 @@ def guest_ticket(data: GuestTicket):
         with database.cursor() as cursor:
             # Serialize limits for the same contact address across API workers.
             cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (data.contact_email,))
+            rate_limit_window = (
+                "datetime(created_at) > datetime('now', '-1 hour')"
+                if database.is_sqlite()
+                else "created_at > NOW() - INTERVAL '1 hour'"
+            )
             cursor.execute(
-                "SELECT COUNT(*) AS total FROM support_ticket WHERE contact_email = %s AND created_at > NOW() - INTERVAL '1 hour'",
+                "SELECT COUNT(*) AS total FROM support_ticket "
+                f"WHERE contact_email = %s AND {rate_limit_window}",
                 (data.contact_email,),
             )
             if cursor.fetchone()["total"] >= 5:
@@ -313,11 +319,12 @@ def find_accounts(q: str = Query(min_length=2, max_length=150), actor=Depends(ad
         with database.cursor() as cursor:
             for kind, (table, key, _, name) in ACCOUNT_TABLES.items():
                 if kind == "staff":
-                    cursor.execute("SELECT to_regclass('public.staff_account') AS relation")
-                    if not cursor.fetchone()["relation"]:
+                    if not database.table_exists(cursor, "staff_account"):
                         continue
                 cursor.execute(
-                    f"SELECT {key} AS id, {name} AS full_name, email FROM {table} WHERE POSITION(LOWER(%s) IN LOWER(email)) > 0 OR POSITION(LOWER(%s) IN LOWER({name})) > 0 ORDER BY email LIMIT 50",
+                    f"SELECT {key} AS id, {name} AS full_name, email FROM {table} "
+                    f"WHERE INSTR(LOWER(email), LOWER(%s)) > 0 "
+                    f"OR INSTR(LOWER({name}), LOWER(%s)) > 0 ORDER BY email LIMIT 50",
                     (q.strip(), q.strip()),
                 )
                 result.extend({**dict(row), "account_type": kind} for row in cursor.fetchall())

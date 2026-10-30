@@ -76,9 +76,10 @@ def _load_candidate_recipes(recipe_ids: List[str]) -> list[dict]:
         raise HTTPException(status_code=422, detail="Duplicate recipe IDs are not allowed")
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+            placeholders = ", ".join(["%s"] * len(recipe_ids))
             cursor.execute(
-                "SELECT recipe_id, name, instructions FROM recipe WHERE recipe_id = ANY(%s)",
-                (recipe_ids,),
+                f"SELECT recipe_id, name, instructions FROM recipe WHERE recipe_id IN ({placeholders})",
+                tuple(recipe_ids),
             )
             rows = cursor.fetchall()
         recipes = []
@@ -372,7 +373,6 @@ def create_meal_plan(request: MealPlanRequest, dietitian_id: str = Depends(requi
         status_code=409,
         detail="Sample-meal generation is disabled pending reviewed recipes, clinical context and dietitian approval. Use /api/v1/meal-plans/screen for preflight checks.",
     )
-
 
 # Legacy meal-plan endpoints are retained for compatibility with dietitian screens,
 # but cannot be used as an unauthenticated client data lookup.

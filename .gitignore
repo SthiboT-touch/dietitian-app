@@ -19,3 +19,10 @@ server.stderr.log
 
 # Local source exports
 exports/
+
+# SQLite database files (contain real client health data)
+data/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm

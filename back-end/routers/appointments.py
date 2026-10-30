@@ -142,8 +142,13 @@ def decide_appointment(
     ]
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+            future_expression = (
+                "datetime(date_time) > CURRENT_TIMESTAMP"
+                if database.is_sqlite()
+                else "date_time > CURRENT_TIMESTAMP"
+            )
             cursor.execute(
-                "SELECT status, client_id, dietitian_id, date_time > CURRENT_TIMESTAMP AS is_future "
+                f"SELECT status, client_id, dietitian_id, {future_expression} AS is_future "
                 "FROM appointment WHERE appointment_id = %s FOR UPDATE",
                 (appointment_id,),
             )

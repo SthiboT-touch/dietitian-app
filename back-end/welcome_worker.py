@@ -17,10 +17,15 @@ def run_once():
     if not smtp_is_configured():
         return False
     with database.cursor() as cursor:
+        due_check = (
+            "datetime(next_attempt_at) <= CURRENT_TIMESTAMP"
+            if database.is_sqlite()
+            else "next_attempt_at <= NOW()"
+        )
         cursor.execute(
             "SELECT message_id, recipient_email, recipient_name, attempts "
             "FROM registration_welcome_outbox "
-            "WHERE state IN ('PENDING', 'RETRY') AND next_attempt_at <= NOW() "
+            f"WHERE state IN ('PENDING', 'RETRY') AND {due_check} "
             "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED"
         )
         row = cursor.fetchone()
@@ -36,9 +41,14 @@ def run_once():
         except Exception:
             attempt = row["attempts"] + 1
             delay = min(300, 30 * (2 ** min(attempt, 3)))
+            retry_expression = (
+                "datetime('now', '+' || %s || ' seconds')"
+                if database.is_sqlite()
+                else "NOW() + (%s * INTERVAL '1 second')"
+            )
             cursor.execute(
                 "UPDATE registration_welcome_outbox SET state='RETRY', attempts=%s, "
-                "next_attempt_at=NOW()+(%s * INTERVAL '1 second') WHERE message_id=%s",
+                f"next_attempt_at={retry_expression} WHERE message_id=%s",
                 (attempt, delay, row["message_id"]),
             )
             logger.warning("Welcome email delivery failed; retry scheduled")

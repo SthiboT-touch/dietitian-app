@@ -54,9 +54,15 @@ def new_client_checkin_code(
     token, digest = new_checkin_credential()
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+            expiry_expression = (
+                "datetime('now', '+10 minutes')"
+                if database.is_sqlite()
+                else "NOW() + INTERVAL '10 minutes'"
+            )
             cursor.execute(
                 "INSERT INTO client_checkin_credential (client_id, token_hash) VALUES (%s,%s) "
-                "ON CONFLICT (client_id) DO UPDATE SET token_hash=EXCLUDED.token_hash, rotated_at=NOW(), expires_at=NOW()+INTERVAL '10 minutes'",
+                "ON CONFLICT (client_id) DO UPDATE SET token_hash=EXCLUDED.token_hash, "
+                f"rotated_at=NOW(), expires_at={expiry_expression}",
                 (client_id, digest),
             )
     else:
@@ -94,8 +100,14 @@ def scan_checkin(
             staff = cursor.fetchone()
             if not staff or not staff["is_active"] or not staff["branch_id"]:
                 raise HTTPException(403, "An active branch assignment is required")
+            expiry_check = (
+                "datetime(expires_at) > CURRENT_TIMESTAMP"
+                if database.is_sqlite()
+                else "expires_at > NOW()"
+            )
             cursor.execute(
-                "SELECT client_id FROM client_checkin_credential WHERE token_hash=%s AND expires_at > NOW() FOR UPDATE",
+                "SELECT client_id FROM client_checkin_credential "
+                f"WHERE token_hash=%s AND {expiry_check} FOR UPDATE",
                 (digest,),
             )
             credential = cursor.fetchone()
