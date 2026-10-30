@@ -862,13 +862,6 @@
                     >
                     <button
                         class="nav-item"
-                        data-view="staff-profile"
-                        data-staff-only
-                        type="button"
-                        ><span class="nav-glyph">&#9787;</span>My Staff Profile</button
-                    >
-                    <button
-                        class="nav-item"
                         data-view="staff-access-events"
                         data-compliance-only
                         type="button"
@@ -880,13 +873,6 @@
                         data-client-only
                         type="button"
                         ><span class="nav-glyph">&#9636;</span>My QR Check-In</button
-                    >
-                    <button
-                        class="nav-item"
-                        data-view="my-profile"
-                        data-standard-only
-                        type="button"
-                        ><span class="nav-glyph">&#9787;</span>My Profile</button
                     >
                     <div
                         class="nav-section-label"
@@ -1074,13 +1060,23 @@
                             class="header-date"
                         ></span
                     ></div>
-                    <div class="profile-chip"
-                        ><span
-                            id="profileInitials"
-                            class="profile-avatar"
-                            >FN</span
-                        ><span id="profileName">Your account</span></div
-                    >
+                    <div class="account-menu" id="accountMenu">
+                        <button id="accountMenuButton" class="profile-chip account-menu-trigger"
+                                type="button" aria-haspopup="true" aria-expanded="false"
+                                aria-controls="accountMenuPanel" aria-label="Open account menu">
+                            <span id="profileInitials" class="profile-avatar" aria-hidden="true">FN</span>
+                            <span id="profileName">Your account</span>
+                            <span class="account-chevron" aria-hidden="true">▾</span>
+                        </button>
+                        <div id="accountMenuPanel" class="account-menu-panel" hidden>
+                            <div class="account-menu-heading">
+                                <strong id="accountMenuFullName">Your account</strong>
+                                <span id="accountMenuRole">Account</span>
+                            </div>
+                            <button id="accountProfileButton" class="account-menu-item" type="button">My Profile</button>
+                            <button id="accountSignOutButton" class="account-menu-item account-menu-signout" type="button">Sign out</button>
+                        </div>
+                    </div>
                     <button
                         id="mobileSignOutButton"
                         class="mobile-signout"

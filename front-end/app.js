@@ -157,13 +157,18 @@ function showWorkspace(user, initialView = "overview") {
     sessionStorage.setItem(sessionKey, JSON.stringify(user));
     authScreen.hidden = true;
     workspace.hidden = false;
-    const firstName = user.full_name.split(" ")[0];
+    closeAccountMenu();
+    const accountName = user.full_name || user.name || "Your account";
+    const firstName = accountName.split(" ")[0];
     document.querySelector("#profileName").textContent = firstName;
-    document.querySelector("#profileInitials").textContent = user.full_name
+    document.querySelector("#profileInitials").textContent = accountName
         .split(/\s+/)
         .slice(0, 2)
         .map((part) => part[0].toUpperCase())
         .join("");
+    document.querySelector("#accountMenuFullName").textContent = accountName;
+    document.querySelector("#accountMenuRole").textContent =
+        staffRoleNames[user.type] || ({ client: "Patient", dietitian: "Dietitian", admin: "Administrator" }[user.type] || "Account");
     document.querySelector("#headerDate").textContent = new Intl.DateTimeFormat(undefined, {
         weekday: "long",
         month: "long",
@@ -220,7 +225,24 @@ function showWorkspace(user, initialView = "overview") {
     }
 }
 
+// One account menu, shared by every role. Profile permissions remain enforced by the API.
+function closeAccountMenu() {
+    const panel = document.querySelector("#accountMenuPanel");
+    const trigger = document.querySelector("#accountMenuButton");
+    panel.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+}
+
+function openAccountProfile() {
+    closeAccountMenu();
+    if (!currentUser) return;
+    const role = currentUser.type;
+    navTo(Object.hasOwn(staffRoleNames, role) ? "staff-profile" :
+        role === "admin" ? "admin-profile" : "my-profile");
+}
+
 function signOut() {
+    closeAccountMenu();
     sessionStorage.removeItem(sessionKey);
     sessionStorage.removeItem(adminTokenKey);
     sessionStorage.removeItem(dietitianTokenKey);
@@ -965,7 +987,6 @@ async function renderClientDashboard(firstName) {
     </section>
     <div class="section-heading"><h2>My workspace</h2><span>QUICK ACCESS</span></div>
     <div class="quick-grid client-quick-grid">
-      <button class="quick-link" data-go="my-profile" type="button"><strong>My Profile</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="health-conditions" type="button"><strong>Health Information</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-goals" type="button"><strong>My Goals</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-meal-plan" type="button"><strong>My Meal Plan</strong><span aria-hidden="true">&#8599;</span></button>
@@ -1001,6 +1022,20 @@ async function renderClientDashboard(firstName) {
             navTo("client-appointments");
         });
     });
+}
+
+function renderAdminProfile() {
+    if (!currentUser || currentUser.type !== "admin") return;
+    const fields = [
+        ["Full name", currentUser.full_name],
+        ["Email", currentUser.email],
+        ["Role", "Administrator"],
+    ];
+    workspaceContent.innerHTML = `
+        ${pageHeading("MY PROFILE", "Administrator profile.", "Your signed-in account details.")}
+        <section class="content-panel"><dl class="profile-details">
+            ${fields.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "Not provided")}</dd></div>`).join("")}
+        </dl></section>`;
 }
 
 async function renderMyProfile() {
@@ -2004,6 +2039,8 @@ async function loadView(view, initialAIPanel = "coach") {
             await renderReceptionCheckin();
         } else if (view === "my-profile") {
             await renderMyProfile();
+        } else if (view === "admin-profile") {
+            renderAdminProfile();
         } else if (view === "health-lactation") {
             await renderLactationTracking(clientId);
         } else if (view.startsWith("health-")) {
@@ -2756,7 +2793,6 @@ async function renderStaffDashboard() {
           <div class="quick-grid">
             <button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong><span aria-hidden="true">&#8599;</span></button>
             <button class="quick-link" data-go="reception-checkin" type="button"><strong>Patient check-in</strong><span aria-hidden="true">&#8599;</span></button>
-            <button class="quick-link" data-go="staff-profile" type="button"><strong>My profile</strong><span aria-hidden="true">&#8599;</span></button>
           </div>
         </section>`;
         bindGoButtons();
@@ -2768,7 +2804,7 @@ async function renderStaffDashboard() {
     <section class="admin-stat"><span>Account</span><strong class="staff-role-card">${profile.is_active ? "Active" : "Inactive"}</strong></section></div>
     <section class="content-panel"><h2 class="compact-heading">Secure staff access</h2>
     <p>Your practice role controls available tasks. Clinical records and administrative settings remain restricted.</p>
-    <div class="quick-grid"><button class="quick-link" type="button" data-go="staff-profile"><strong>View my staff profile</strong><span aria-hidden="true">&#8599;</span></button>
+    <div class="quick-grid">
     ${profile.role === "reception" ? '<button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong></button><button class="quick-link" data-go="reception-checkin" type="button"><strong>Check in a patient</strong></button>' : ""}
     ${profile.role === "compliance_officer" ? '<button class="quick-link" type="button" data-go="staff-access-events"><strong>View access audit</strong><span aria-hidden="true">&#8599;</span></button>' : ""}</div></section>`;
     bindGoButtons();
@@ -3202,6 +3238,21 @@ function escapeHtml(value) {
             })[character],
     );
 }
+
+// Accessible dropdown behavior: click, outside click and Escape.
+document.querySelector("#accountMenuButton").addEventListener("click", () => {
+    const panel = document.querySelector("#accountMenuPanel");
+    panel.hidden = !panel.hidden;
+    document.querySelector("#accountMenuButton").setAttribute("aria-expanded", String(!panel.hidden));
+});
+document.querySelector("#accountProfileButton").addEventListener("click", openAccountProfile);
+document.querySelector("#accountSignOutButton").addEventListener("click", signOut);
+document.addEventListener("click", (event) => {
+    if (!document.querySelector("#accountMenu").contains(event.target)) closeAccountMenu();
+});
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeAccountMenu();
+});
 
 document.querySelector("#loginTab").addEventListener("click", () => setAuthMode("login"));
 document.querySelector("#signupTab").addEventListener("click", () => setAuthMode("signup"));
