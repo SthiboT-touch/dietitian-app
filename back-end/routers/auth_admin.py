@@ -620,7 +620,7 @@ def login(data: LoginRequest):
         "compliance",
         "executive",
         "content_manager",
-    } and not user.get("staff_id"):
+    } and user["type"] == "admin":
         access_token = secrets.token_urlsafe(32)
         admin_sessions_db[access_token] = user["id"]
     elif user["type"] == "dietitian":

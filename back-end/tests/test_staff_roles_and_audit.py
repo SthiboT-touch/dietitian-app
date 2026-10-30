@@ -221,3 +221,21 @@ def test_access_events_are_paginated_and_filterable():
         ).status_code
         == 422
     )
+
+
+def test_branch_manager_overview_is_branch_scoped_and_restricted():
+    manager = new_staff(role="branch_manager", email="manager@example.test")
+    assert create_staff(manager).status_code == 201
+    token = login_staff("manager@example.test").json()["access_token"]
+    assert create_staff(new_staff(email="frontdesk@example.test")).status_code == 201
+    state.branches_db["branch-2"] = {"branch_id": "branch-2", "name": "Second Branch"}
+    assert create_staff(new_staff(email="other@example.test", branch_id="branch-2")).status_code == 201
+    result = api.get("/api/v1/branch-manager/overview", headers=bearer(token))
+    assert result.status_code == 200, result.text
+    assert result.json() == {
+        "branch_id": "branch-1", "branch_name": "Main Branch",
+        "active_staff": 2, "reception_staff": 1, "branch_managers": 1,
+    }
+    assert api.get("/api/v1/branch-manager/overview").status_code == 401
+    assert api.get("/api/v1/branch-manager/overview", headers=bearer("admin-token")).status_code == 403
+    assert api.get("/api/v1/admin/staff", headers=bearer(token)).status_code == 403

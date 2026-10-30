@@ -103,6 +103,49 @@ def my_staff_profile(identity=Depends(require_roles(*sorted(STAFF_ROLES)))):
     return _present(record)
 
 
+@router.get("/api/v1/branch-manager/overview")
+def branch_manager_overview(identity=Depends(require_roles("branch_manager"))):
+    """Branch-scoped, nonclinical summary for the assigned manager only."""
+    _, staff_id = identity
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT s.branch_id, b.name AS branch_name "
+                "FROM staff_account s JOIN branch b ON b.branch_id = s.branch_id "
+                "WHERE s.staff_id = %s AND s.is_active = TRUE AND s.role = 'branch_manager'",
+                (staff_id,),
+            )
+            branch = cursor.fetchone()
+            if not branch:
+                raise HTTPException(status_code=403, detail="No active branch assignment")
+            cursor.execute(
+                "SELECT role, COUNT(*) AS total FROM staff_account "
+                "WHERE branch_id = %s AND is_active = TRUE GROUP BY role",
+                (branch["branch_id"],),
+            )
+            role_counts = {row["role"]: row["total"] for row in cursor.fetchall()}
+    else:
+        manager = staff_accounts_db.get(staff_id)
+        if not manager or not manager.get("is_active") or manager.get("role") != "branch_manager":
+            raise HTTPException(status_code=403, detail="No active branch assignment")
+        branch = branches_db.get(manager.get("branch_id"))
+        if not branch:
+            raise HTTPException(status_code=403, detail="No active branch assignment")
+        role_counts = {}
+        for member in staff_accounts_db.values():
+            if member.get("is_active") and member.get("branch_id") == manager["branch_id"]:
+                role = member["role"]
+                role_counts[role] = role_counts.get(role, 0) + 1
+        branch = {"branch_id": manager["branch_id"], "branch_name": branch.get("name", "Branch")}
+    return {
+        "branch_id": branch["branch_id"],
+        "branch_name": branch["branch_name"],
+        "active_staff": sum(role_counts.values()),
+        "reception_staff": role_counts.get("reception", 0),
+        "branch_managers": role_counts.get("branch_manager", 0),
+    }
+
+
 @router.get("/api/v1/admin/staff")
 def list_staff(identity=Depends(require_roles("admin"))):
     if config.DATABASE_ENABLED:

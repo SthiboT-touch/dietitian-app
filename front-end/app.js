@@ -2741,14 +2741,35 @@ async function renderAdminDashboard() {
 async function renderStaffDashboard() {
     const profile = await request("/api/v1/staff/me");
     const role = staffRoleNames[profile.role] || profile.role;
+    if (profile.role === "branch_manager") {
+        const overview = await request("/api/v1/branch-manager/overview");
+        workspaceContent.innerHTML = `
+        ${pageHeading("BRANCH MANAGEMENT", `Welcome, ${escapeHtml(profile.full_name)}.`, `Managing ${escapeHtml(overview.branch_name)}.`)}
+        <div class="admin-stat-grid">
+          <section class="admin-stat"><span>Assigned branch</span><strong class="staff-role-card">${escapeHtml(overview.branch_name)}</strong></section>
+          <section class="admin-stat"><span>Active branch staff</span><strong>${Number(overview.active_staff)}</strong></section>
+          <section class="admin-stat"><span>Reception staff</span><strong>${Number(overview.reception_staff)}</strong></section>
+          <section class="admin-stat"><span>Branch managers</span><strong>${Number(overview.branch_managers)}</strong></section>
+        </div>
+        <section class="content-panel"><h2 class="compact-heading">Branch operations</h2>
+          <p>Manage patient onboarding and check-in at your assigned branch. Staff statistics only cover this branch; confidential clinical records and system administration remain restricted.</p>
+          <div class="quick-grid">
+            <button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="reception-checkin" type="button"><strong>Patient check-in</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="staff-profile" type="button"><strong>My profile</strong><span aria-hidden="true">&#8599;</span></button>
+          </div>
+        </section>`;
+        bindGoButtons();
+        return;
+    }
     workspaceContent.innerHTML = `
     ${pageHeading("TEAM WORKSPACE", `Welcome, ${escapeHtml(profile.full_name)}.`, "Your access is controlled by your assigned practice role.")}
     <div class="admin-stat-grid"><section class="admin-stat"><span>Assigned role</span><strong class="staff-role-card">${escapeHtml(role)}</strong></section>
     <section class="admin-stat"><span>Account</span><strong class="staff-role-card">${profile.is_active ? "Active" : "Inactive"}</strong></section></div>
     <section class="content-panel"><h2 class="compact-heading">Secure staff access</h2>
-    <p>Staff roles have been introduced, with least-privilege permissions. Branch operations and additional tools will become available after they pass authorization testing.</p>
+    <p>Your practice role controls available tasks. Clinical records and administrative settings remain restricted.</p>
     <div class="quick-grid"><button class="quick-link" type="button" data-go="staff-profile"><strong>View my staff profile</strong><span aria-hidden="true">&#8599;</span></button>
-    ${["reception", "branch_manager"].includes(profile.role) ? '<button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong></button><button class="quick-link" data-go="reception-checkin" type="button"><strong>Check in a patient</strong></button>' : ""}
+    ${profile.role === "reception" ? '<button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong></button><button class="quick-link" data-go="reception-checkin" type="button"><strong>Check in a patient</strong></button>' : ""}
     ${profile.role === "compliance_officer" ? '<button class="quick-link" type="button" data-go="staff-access-events"><strong>View access audit</strong><span aria-hidden="true">&#8599;</span></button>' : ""}</div></section>`;
     bindGoButtons();
 }
