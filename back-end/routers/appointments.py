@@ -6,7 +6,12 @@ from typing import Optional
 from datetime import datetime
 import database
 import config
-from state import appointments_db, goals_db, users_db
+
+from state import (
+ appointments_db,goals_db,
+users_db, clients_db, checkin_events_db,
+)
+from zoneinfo import ZoneInfo
 from schemas import AppointmentCreate, AppointmentDecision, GoalCreate
 from security import current_identity, authorize_client_access
 
@@ -76,6 +81,125 @@ def create_appointment(
     }
     appointments_db[appt_id] = appointment
     return {"message": "Appointment scheduled", "appointment": appointment}
+
+@router.get("/api/v1/appointments/calendar", tags=["4. Appointments & Goals"])
+def get_appointment_calendar(
+    authorization: Optional[str] = Header(default=None),
+):
+    role, dietitian_id = current_identity(authorization)
+
+    if role != "dietitian":
+        raise HTTPException(
+            status_code=403,
+            detail="Only dietitians can view their appointment calendar",
+        )
+
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    a.appointment_id,
+                    a.client_id,
+                    a.dietitian_id,
+                    a.date_time AS appointment_date,
+                    a.status,
+                    c.name AS client_name,
+                    checkin.checked_in_at
+                FROM appointment a
+                JOIN client c
+                    ON c.client_id = a.client_id
+                JOIN dietitian d
+                    ON d.dietitian_id = a.dietitian_id
+                LEFT JOIN LATERAL (
+                    SELECT e.checked_in_at
+                    FROM client_checkin_event e
+                    WHERE e.client_id = a.client_id
+                      AND e.branch_id = d.branch_id
+                      AND (e.checked_in_at AT TIME ZONE 'Africa/Johannesburg')::date
+                          = a.date_time::date
+                    ORDER BY e.checked_in_at DESC
+                    LIMIT 1
+                ) checkin ON TRUE
+                WHERE a.dietitian_id = %s
+                ORDER BY a.date_time
+                """,
+                (dietitian_id,),
+            )
+
+            return [
+                {
+                    **dict(row),
+                    "appointment_date": row["appointment_date"].isoformat(),
+                    "checked_in_at": (
+                        row["checked_in_at"].isoformat()
+                        if row["checked_in_at"]
+                        else None
+                    ),
+                }
+                for row in cursor.fetchall()
+            ]
+
+    # In-memory fallback for tests and development.
+    dietitian = users_db.get(dietitian_id, {})
+    branch_id = dietitian.get("branch_id")
+    results = []
+
+    for appointment in appointments_db.values():
+        if appointment.get("dietitian_id") != dietitian_id:
+            continue
+
+        patient = clients_db.get(appointment["client_id"]) or users_db.get(
+            appointment["client_id"], {}
+        )
+
+        appointment_date = datetime.fromisoformat(
+            appointment["appointment_date"].replace("Z", "+00:00")
+        )
+        local_date = appointment_date.astimezone(
+            ZoneInfo("Africa/Johannesburg")
+        ).date() if appointment_date.tzinfo else appointment_date.date()
+
+        checked_in_at = None
+
+        for event in checkin_events_db:
+            if event.get("client_id") != appointment["client_id"]:
+                continue
+            if not branch_id or event.get("branch_id") != branch_id:
+                continue
+
+            event_time = event.get("checked_in_at")
+            if not event_time:
+                continue
+
+            if isinstance(event_time, str):
+                event_time = datetime.fromisoformat(
+                    event_time.replace("Z", "+00:00")
+                )
+
+            event_date = (
+                event_time.astimezone(ZoneInfo("Africa/Johannesburg")).date()
+                if event_time.tzinfo
+                else event_time.date()
+            )
+
+            if event_date == local_date:
+                if checked_in_at is None or event_time > checked_in_at:
+                    checked_in_at = event_time
+
+        results.append(
+            {
+                **appointment,
+                "client_name": patient.get("name")
+                or patient.get("full_name")
+                or appointment["client_id"],
+                "checked_in_at": (
+                    checked_in_at.isoformat() if checked_in_at else None
+                ),
+            }
+        )
+
+    return sorted(results, key=lambda item: item["appointment_date"])
 
 
 @router.get("/api/v1/appointments", tags=["4. Appointments & Goals"])

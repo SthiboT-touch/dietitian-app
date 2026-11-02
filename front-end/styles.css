@@ -892,6 +892,109 @@ select:focus {
 .appointment-booking-form {
     margin-top: 16px;
 }
+
+/* Dietitian appointments calendar */
+.appointment-calendar-panel {
+    margin-bottom: 18px;
+    padding: 18px;
+}
+
+.calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.calendar-header h2 {
+    margin: 0;
+    color: var(--green-deep);
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 500;
+}
+
+.calendar-weekdays,
+.appointment-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.calendar-weekdays span {
+    padding: 8px 0;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.calendar-day {
+    display: flex;
+    min-height: 76px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--white);
+    color: var(--ink);
+    cursor: pointer;
+    text-align: left;
+}
+
+.calendar-day:hover {
+    border-color: var(--green-deep);
+}
+
+.calendar-day.is-selected {
+    border-color: var(--green-deep);
+    background: var(--green-pale);
+}
+
+.calendar-day.is-today .calendar-day-number {
+    color: var(--green-deep);
+    font-weight: 800;
+}
+
+.calendar-day-empty {
+    min-height: 76px;
+}
+
+.calendar-day-number {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.calendar-day-count {
+    color: var(--muted);
+    font-size: 9px;
+    line-height: 1.3;
+}
+
+.appointment-day-agenda {
+    display: grid;
+    gap: 15px;
+}
+
+.appointment-queue-section {
+    padding: 18px;
+}
+
+.appointment-queue-section h3 {
+    margin: 0 0 5px;
+    color: var(--green-deep);
+    font-family: var(--serif);
+    font-size: 19px;
+    font-weight: 500;
+}
+
+.appointment-queue-section > .appointment-note {
+    margin-bottom: 12px;
+}
+
 .appointment-tabs {
     max-width: 100%;
 }
@@ -2574,4 +2677,46 @@ textarea {
 :where(button, input, select, textarea):disabled {
     cursor: not-allowed;
     opacity: 0.65;
+}
+
+/* Appointment calendar mobile layout */
+@media (max-width: 720px) {
+    .appointment-calendar-panel {
+        padding: 12px;
+    }
+
+    .calendar-header {
+        gap: 6px;
+    }
+
+    .calendar-header h2 {
+        font-size: 17px;
+        text-align: center;
+    }
+
+    .calendar-header .button {
+        padding: 8px;
+    }
+
+    .calendar-weekdays,
+    .appointment-calendar-grid {
+        gap: 4px;
+    }
+
+    .calendar-day {
+        min-height: 60px;
+        padding: 7px 5px;
+    }
+
+    .calendar-day-count {
+        font-size: 8px;
+    }
+
+    .calendar-day-empty {
+        min-height: 60px;
+    }
+
+    .appointment-queue-section {
+        padding: 13px;
+    }
 }

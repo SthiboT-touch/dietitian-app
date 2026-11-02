@@ -1,4 +1,4 @@
-const authScreen = document.querySelector("#authScreen");
+﻿const authScreen = document.querySelector("#authScreen");
 const workspace = document.querySelector("#workspace");
 const loginForm = document.querySelector("#loginForm");
 const signupForm = document.querySelector("#signupForm");
@@ -75,7 +75,7 @@ function markConnectionUnavailable() {
 }
 
 async function refreshConnectionStatus() {
-    setConnectionState("checking", "Checking connection…");
+    setConnectionState("checking", "Checking connectionâ€¦");
     try {
         const response = await fetch("/health", { cache: "no-store" });
         if (!response.ok) throw new Error("Health check failed");
@@ -206,6 +206,41 @@ function showWorkspace(user, initialView = "overview") {
     document.querySelectorAll("[data-admin-only]").forEach((item) => {
         item.hidden = !isAdmin;
     });
+    // Keep the Dietitian sidebar limited to the six requested menu items.
+if (isDietitian) {
+    const nav = document.querySelector(".side-nav");
+
+    const dietitianMenu = [
+        "overview",
+        "appointment-requests",
+        "reviews",
+        "clients",
+        "support",
+        "dietitian-settings",
+    ];
+
+    const menuItems = new Map(
+        [...nav.querySelectorAll(".nav-item")].map((item) => [
+            item.dataset.view,
+            item,
+        ]),
+    );
+
+    // Hide all existing navigation items for the Dietitian only.
+    nav.querySelectorAll(".nav-item").forEach((item) => {
+        item.hidden = true;
+    });
+
+    // Show and arrange the six requested items.
+    dietitianMenu.forEach((view) => {
+        const item = menuItems.get(view);
+
+        if (item) {
+            item.hidden = false;
+            nav.appendChild(item);
+        }
+    });
+}
     document.querySelector('[data-view="overview"]').innerHTML =
         '<span class="nav-glyph">&#9633;</span>Dashboard';
     document.querySelector('[data-view="clients"]').innerHTML =
@@ -296,7 +331,7 @@ function setPatientSignupStep(nextStep, { focus = false } = {}) {
     signupSubmit.hidden = isClient && patientSignupStep !== signupSteps.length;
     if (isClient) {
         document.querySelector("#patientSignupStepLabel").textContent =
-            `Step ${patientSignupStep} of ${signupSteps.length} · ${signupStepNames[patientSignupStep - 1]}`;
+            `Step ${patientSignupStep} of ${signupSteps.length} Â· ${signupStepNames[patientSignupStep - 1]}`;
         document.querySelector("#patientSignupProgressBar").style.width =
             `${(patientSignupStep / signupSteps.length) * 100}%`;
         patientSignupProgress
@@ -551,7 +586,7 @@ function patientContextMarkup(client, profile, lactation = {}, documents = []) {
         Object.entries(entry)
             .filter(([key, value]) => key !== "log_date" && value !== null && value !== undefined)
             .map(([key, value]) => `${escapeHtml(key.replaceAll("_", " "))}: ${escapeHtml(value)}`)
-            .join(" · "),
+            .join(" Â· "),
     );
     const lactationGroups = [
         ["Status", lactation.status],
@@ -578,7 +613,7 @@ function patientContextMarkup(client, profile, lactation = {}, documents = []) {
                                       .map(
                                           ([key, value]) => `${key.replaceAll("_", " ")}: ${value}`,
                                       )
-                                      .join(" · "),
+                                      .join(" Â· "),
                               ),
                           )
                           .join("<br>")}</div></div>`,
@@ -589,19 +624,19 @@ function patientContextMarkup(client, profile, lactation = {}, documents = []) {
         ? documents
               .map(
                   (document) =>
-                      `<li class="result-item"><a href="/api/v1/clients/${encodeURIComponent(client.id)}/medical-documents/${encodeURIComponent(document.document_id)}" data-private-medical-document="/api/v1/clients/${encodeURIComponent(client.id)}/medical-documents/${encodeURIComponent(document.document_id)}">${escapeHtml(document.file_name)}</a> · ${escapeHtml(document.condition_name || "Medical condition")} · Dr ${escapeHtml(document.doctor_name || "not provided")}<br>${escapeHtml(document.doctor_information || "")}</li>`,
+                      `<li class="result-item"><a href="/api/v1/clients/${encodeURIComponent(client.id)}/medical-documents/${encodeURIComponent(document.document_id)}" data-private-medical-document="/api/v1/clients/${encodeURIComponent(client.id)}/medical-documents/${encodeURIComponent(document.document_id)}">${escapeHtml(document.file_name)}</a> Â· ${escapeHtml(document.condition_name || "Medical condition")} Â· Dr ${escapeHtml(document.doctor_name || "not provided")}<br>${escapeHtml(document.doctor_information || "")}</li>`,
               )
               .join("")
         : '<li class="result-item">No supporting medical documents uploaded.</li>';
     return `
     <section class="content-panel patient-context-preview">
       <h3>${escapeHtml(client.name)}</h3>
-      <div class="form-field full-width"><label>Client details</label><div class="text-input">${clientDetails.length ? clientDetails.map(([label, value]) => `<strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}`).join(" · ") : "No demographic details recorded"}</div></div>
-      <p class="stat-caption">${escapeHtml(client.id)} · ${escapeHtml(client.status || "Patient")}</p>
+      <div class="form-field full-width"><label>Client details</label><div class="text-input">${clientDetails.length ? clientDetails.map(([label, value]) => `<strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}`).join(" Â· ") : "No demographic details recorded"}</div></div>
+      <p class="stat-caption">${escapeHtml(client.id)} Â· ${escapeHtml(client.status || "Patient")}</p>
       <div class="form-grid">
         <div class="form-field"><label>Allergies</label><div class="text-input">${allergies.length ? allergies.map((item) => `${escapeHtml(item.allergen)} (${escapeHtml(item.severity)})`).join(", ") : "No allergy information recorded"}</div></div>
         <div class="form-field"><label>Medical conditions</label><div class="text-input">${conditions.length ? conditions.map((item) => escapeHtml(item.condition_name)).join(", ") : "No conditions recorded"}</div></div>
-        <div class="form-field"><label>Recorded metrics</label><div class="text-input">${metrics.length ? metrics.map((item) => `${escapeHtml(item.metric_type)}: ${escapeHtml(item.value)}`).join(" · ") : "No metrics recorded"}</div></div>
+        <div class="form-field"><label>Recorded metrics</label><div class="text-input">${metrics.length ? metrics.map((item) => `${escapeHtml(item.metric_type)}: ${escapeHtml(item.value)}`).join(" Â· ") : "No metrics recorded"}</div></div>
         <div class="form-field"><label>Progress history</label><div class="text-input">${progress.length ? progressRows.join("<br>") : "No progress recorded"}</div></div>
         <div class="form-field full-width"><label>Lactation details</label><div class="form-grid">${lactationMarkup}</div></div>
         <div class="form-field full-width"><label>Medical documents and doctor information</label><ul class="result-list">${documentsMarkup}</ul></div>
@@ -711,7 +746,7 @@ async function renderDietitianDashboard() {
                   .map((part) => part[0])
                   .join(""),
           )}</div>
-          <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} · ${escapeHtml(client.status)}</p></div>
+          <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} Â· ${escapeHtml(client.status)}</p></div>
           <div class="review-actions">
             <button class="button button-small button-approve" data-open-client="${escapeHtml(client.id)}" type="button">View</button>
           </div>
@@ -883,8 +918,111 @@ async function renderClientManagementProfile(clientId) {
     const { client, profile, lactation, documents } = await fetchPatientContext(clientId);
     workspaceContent.innerHTML = `
     ${pageHeading("PATIENT PROFILE", client.name, "Current information recorded for this patient.")}
+    <div data-message class="workspace-message" hidden></div>
     ${patientContextMarkup(client, profile, lactation, documents)}
+    <section class="content-panel health-edit-panel">
+      <p class="subsection-label">ADD MEDICAL CONDITION</p>
+      <button class="button button-primary" id="showDietitianConditionForm" type="button">Add Medical Condition</button>
+      <form id="dietitianMedicalConditionForm" class="form-grid" hidden>
+        <div class="form-field">
+          <label for="dietitianConditionName">Condition</label>
+          <input class="text-input" id="dietitianConditionName" name="condition_name" required>
+        </div>
+        <div class="form-field">
+          <label for="dietitianConditionCode">ICD code (optional)</label>
+          <input class="text-input" id="dietitianConditionCode" name="icd_code">
+        </div>
+        <div class="form-field full-width form-actions">
+          <button class="button button-primary" type="submit">Save condition</button>
+          <button class="button" id="cancelDietitianConditionForm" type="button">Cancel</button>
+        </div>
+      
+      </form>
+    </section>
+
+    <section class="content-panel health-edit-panel">
+      <p class="subsection-label">MEDICAL DOCUMENTS AND DOCTOR INFORMATION</p>
+
+      <p class="progress-edit-copy">
+        Upload lab results or another document supporting your medical condition.
+        Your dietitian can review these records.
+      </p>
+
+      <form id="dietitianMedicalDocumentForm" class="form-grid" enctype="multipart/form-data">
+        <div class="form-field">
+          <label for="dietitianDocumentCondition">Condition supported</label>
+          <input class="text-input" id="dietitianDocumentCondition"
+            name="condition_name" required>
+        </div>
+
+        <div class="form-field">
+          <label for="dietitianDocumentDoctor">Doctor name</label>
+          <input class="text-input" id="dietitianDocumentDoctor"
+            name="doctor_name" required>
+        </div>
+
+        <div class="form-field full-width">
+          <label for="dietitianDocumentDoctorInfo">Doctor information</label>
+          <textarea class="text-input" id="dietitianDocumentDoctorInfo"
+            name="doctor_information"
+            placeholder="Practice, phone number, email, or other relevant details"
+            required></textarea>
+        </div>
+
+        <div class="form-field full-width">
+          <label for="dietitianDocumentFile">
+            Supporting document (PDF, JPEG, or PNG)
+          </label>
+          <input class="text-input file-input" id="dietitianDocumentFile"
+            name="file" type="file"
+            accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
+            required>
+        </div>
+
+        <div class="form-field full-width form-actions">
+          <button class="button button-primary" type="submit">
+            Upload medical document
+          </button>
+        </div>
+      </form>
+    </section>
   `;
+
+
+    const showButton = workspaceContent.querySelector("#showDietitianConditionForm");
+    const conditionForm = workspaceContent.querySelector("#dietitianMedicalConditionForm");
+    const cancelButton = workspaceContent.querySelector("#cancelDietitianConditionForm");
+
+    showButton.addEventListener("click", () => {
+        conditionForm.hidden = false;
+        showButton.hidden = true;
+        workspaceContent.querySelector("#dietitianConditionName").focus();
+    });
+
+    cancelButton.addEventListener("click", () => {
+        conditionForm.reset();
+        conditionForm.hidden = true;
+        showButton.hidden = false;
+    });
+
+    conditionForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const submitButton = conditionForm.querySelector('button[type="submit"]');
+        const values = Object.fromEntries(new FormData(conditionForm));
+        submitButton.disabled = true;
+
+        try {
+            await request(`/api/v1/clients/${encodeURIComponent(clientId)}/medical-conditions`, {
+                method: "POST",
+                body: JSON.stringify(values),
+            });
+            await renderClientManagementProfile(clientId);
+            showWorkspaceMessage("Medical condition added.");
+        } catch (error) {
+            showWorkspaceMessage(error.message, true);
+            submitButton.disabled = false;
+        }
+    });
 }
 
 async function renderClientManagementList() {
@@ -910,7 +1048,7 @@ async function renderClientManagementList() {
                   .map((part) => part[0])
                   .join(""),
           )}</div>
-          <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} · ${escapeHtml(client.status)}</p></div>
+          <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} Â· ${escapeHtml(client.status)}</p></div>
           <div class="review-actions">
             <button class="button button-small button-approve" data-open-client="${escapeHtml(client.id)}" type="button">View</button>
             <button class="button button-small" data-draft-plan="${escapeHtml(client.id)}" type="button">Draft plan</button>
@@ -968,7 +1106,7 @@ function renderDietitianRows(dietitians) {
               .join("")
               .toUpperCase(),
       )}</div>
-      <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
+      <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` Â· ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` Â· ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
       <span class="dietitian-status status-${escapeHtml(dietitian.status.toLowerCase())}">${escapeHtml(dietitian.status.replaceAll("_", " "))}</span>
     </article>`,
         )
@@ -1008,7 +1146,7 @@ async function renderClientDashboard(firstName) {
                 .join("")
                 .toUpperCase(),
         )}</div>
-        <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
+        <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` Â· ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` Â· ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
         <button class="button button-small button-approve" data-book-dietitian="${escapeHtml(dietitian.id)}" type="button">Book appointment</button>
       </article>`,
                   )
@@ -1091,8 +1229,31 @@ async function renderMyProfile() {
       `,
           )
           .join("")}</dl>
-    </section>`;
+
+          
+       </section>
+    ${user.type === "dietitian" ? `
+    <div class="section-heading">
+      <h2>Practice information</h2>
+      <span>ACCOUNT MANAGEMENT</span>
+    </div>
+
+    <div class="quick-grid">
+      <button class="quick-link" data-go="dietitian-branches" type="button">
+        <strong>My branches</strong>
+        <span>View and manage your practice locations.</span>
+        <span aria-hidden="true">&#8599;</span>
+      </button>
+
+      <button class="quick-link" data-go="verification-documents" type="button">
+        <strong>Verification documents</strong>
+        <span>Upload and review your professional documents.</span>
+        <span aria-hidden="true">&#8599;</span>
+      </button>
+    </div>
+    ` : ""}`;
     if (approval) bindApprovalResubmission();
+    if (user.type === "dietitian") bindGoButtons();
 }
 
 function dietitianApprovalMarkup(approval) {
@@ -1186,7 +1347,7 @@ async function renderClientHealth(clientId, section) {
           <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Upload medical document</button></div>
         </form>
         <div class="section-heading"><h2>Previous documents</h2><span>${documents.length} SAVED</span></div>
-        <div class="document-list">${documents.length ? documents.map((document) => `<article class="document-row"><div class="document-details"><h3><a href="/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}" data-private-medical-document="/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}">${escapeHtml(document.file_name)}</a></h3><p>${escapeHtml(document.condition_name || "Medical condition")} · ${escapeHtml(document.doctor_name || "Doctor not provided")}</p><p>${escapeHtml(document.doctor_information || "")}</p></div></article>`).join("") : '<p class="empty-state">No supporting medical documents uploaded yet.</p>'}</div>
+        <div class="document-list">${documents.length ? documents.map((document) => `<article class="document-row"><div class="document-details"><h3><a href="/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}" data-private-medical-document="/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}">${escapeHtml(document.file_name)}</a></h3><p>${escapeHtml(document.condition_name || "Medical condition")} Â· ${escapeHtml(document.doctor_name || "Doctor not provided")}</p><p>${escapeHtml(document.doctor_information || "")}</p></div></article>`).join("") : '<p class="empty-state">No supporting medical documents uploaded yet.</p>'}</div>
       </section>`,
         );
         document.querySelector("#medicalDocumentForm").addEventListener("submit", async (event) => {
@@ -1662,7 +1823,7 @@ async function renderClientProgress(clientId) {
         <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Save meal</button></div>
       </form>
       <div class="section-heading"><h2>Meal history</h2><span>${meals.length} SAVED</span></div>
-      <div class="result-list">${meals.length ? meals.map((meal) => `<article class="result-item"><span><strong>${escapeHtml(String(meal.log_date).slice(0, 10))}${meal.meal_time ? ` · ${escapeHtml(meal.meal_time)}` : ""} · ${escapeHtml(meal.meal_type)}</strong><br>${escapeHtml(meal.description)}${meal.calories != null ? ` · ${escapeHtml(meal.calories)} kcal` : ""}${meal.notes ? `<br>${escapeHtml(meal.notes)}` : ""}</span></article>`).join("") : '<p class="empty-state">No meals recorded yet.</p>'}</div>
+      <div class="result-list">${meals.length ? meals.map((meal) => `<article class="result-item"><span><strong>${escapeHtml(String(meal.log_date).slice(0, 10))}${meal.meal_time ? ` Â· ${escapeHtml(meal.meal_time)}` : ""} Â· ${escapeHtml(meal.meal_type)}</strong><br>${escapeHtml(meal.description)}${meal.calories != null ? ` Â· ${escapeHtml(meal.calories)} kcal` : ""}${meal.notes ? `<br>${escapeHtml(meal.notes)}` : ""}</span></article>`).join("") : '<p class="empty-state">No meals recorded yet.</p>'}</div>
     </section>`,
     );
     document.querySelector("#mealLogDate").value = new Date().toISOString().slice(0, 10);
@@ -1755,7 +1916,7 @@ async function renderClientMealPlan(clientId, selectedTab = "today") {
                 const entries = meals.map((meal) =>
                     typeof meal === "string"
                         ? meal
-                        : [meal.name, meal.recipe_name, meal.meal_type].filter(Boolean).join(" — "),
+                        : [meal.name, meal.recipe_name, meal.meal_type].filter(Boolean).join(" â€” "),
                 );
                 return `<article class="meal-plan-row"><h3>Day ${escapeHtml(day.day || index + 1)}</h3><ul class="meal-summary">${entries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></article>`;
             })
@@ -1766,7 +1927,7 @@ async function renderClientMealPlan(clientId, selectedTab = "today") {
               .map((item) => {
                   const plan = item.plan || {};
                   return `<section class="content-panel"><h2>${escapeHtml(plan.diet_type || "Dietitian-approved meal plan")}</h2>
-      <p class="appointment-note">Status: ${escapeHtml(item.status)} · ${escapeHtml(plan.days || "")} days</p>
+      <p class="appointment-note">Status: ${escapeHtml(item.status)} Â· ${escapeHtml(plan.days || "")} days</p>
       ${selectedTab === "details" ? `<p>Plan reviewed by your dietitian.</p>${renderSchedule(plan, "week")}` : renderSchedule(plan, selectedTab)}
     </section>`;
               })
@@ -1831,7 +1992,7 @@ async function renderClientAppointments(
                   dietitians.length
                       ? `
       <form id="appointmentForm" class="form-grid appointment-booking-form">
-        <div class="form-field"><label for="appointmentDietitian">Dietitian</label><select class="text-input" id="appointmentDietitian" name="dietitian_id" required><option value="">Choose a Dietitian</option>${dietitians.map((dietitian) => `<option value="${escapeHtml(dietitian.id)}" ${dietitian.id === preferredDietitianId ? "selected" : ""}>${escapeHtml(dietitian.full_name)}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` · ${escapeHtml(dietitian.branch_address)}` : ""}</option>`).join("")}</select></div>
+        <div class="form-field"><label for="appointmentDietitian">Dietitian</label><select class="text-input" id="appointmentDietitian" name="dietitian_id" required><option value="">Choose a Dietitian</option>${dietitians.map((dietitian) => `<option value="${escapeHtml(dietitian.id)}" ${dietitian.id === preferredDietitianId ? "selected" : ""}>${escapeHtml(dietitian.full_name)}${dietitian.practice_name ? ` Â· ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` Â· ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` Â· ${escapeHtml(dietitian.branch_address)}` : ""}</option>`).join("")}</select></div>
         <div class="form-field"><label for="appointmentDate">Preferred date and time</label><input class="text-input" id="appointmentDate" name="appointment_date" type="datetime-local" min="${minDate}" required></div>
         <div class="form-field form-actions"><button class="button button-primary" type="submit">Send request <span class="button-arrow" aria-hidden="true">&#8594;</span></button></div>
       </form>
@@ -1890,58 +2051,344 @@ async function renderClientAppointments(
 }
 
 async function renderAppointmentRequests() {
-    const appointments = await request(
-        `/api/v1/appointments?dietitian_id=${encodeURIComponent(currentUser.id)}`,
+    const appointments = await request("/api/v1/appointments/calendar");
+
+    const selectedDate = new Date();
+    selectedDate.setHours(0, 0, 0, 0);
+
+    let calendarMonth = new Date(
+        selectedDate.getFullYear(),
+        selectedDate.getMonth(),
+        1,
     );
-    const pending = appointments.filter((appointment) => appointment.status === "PENDING");
-    workspaceContent.innerHTML = `
-    ${pageHeading("APPOINTMENT REQUESTS", "Requests awaiting your review.", "Approve a request to confirm the appointment, or reject it.")}
-    <div data-message class="workspace-message" hidden></div>
-    <div class="appointment-list">${
-        pending.length
-            ? pending
-                  .map(
-                      (appointment) => `
-      <article class="appointment-request-row" data-appointment-id="${escapeHtml(appointment.appointment_id)}" data-patient-card>
-        <div class="appointment-request-details"><span class="appointment-status status-pending">PENDING</span><h2>${escapeHtml(appointment.client_id)}</h2><p>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</p></div>
-        <div class="review-actions"><button class="button button-small" data-patient-context="${escapeHtml(appointment.client_id)}" aria-expanded="false" type="button">View patient info</button><button class="button button-small button-reject" data-appointment-decision="REJECTED" type="button">Reject</button><button class="button button-small button-approve" data-appointment-decision="APPROVED" type="button">Approve</button></div>
-        <div data-patient-preview hidden></div>
-      </article>`,
-                  )
-                  .join("")
-            : '<p class="empty-state">No appointment requests need review.</p>'
-    }</div>`;
-    bindPatientContextButtons();
-    workspaceContent.querySelectorAll("[data-appointment-decision]").forEach((button) => {
-        button.addEventListener("click", async () => {
-            const card = button.closest("[data-appointment-id]");
-            card.querySelectorAll("button").forEach((item) => {
-                item.disabled = true;
-            });
-            const action = button.dataset.appointmentDecision;
-            try {
-                await request(
-                    `/api/v1/appointments/${encodeURIComponent(card.dataset.appointmentId)}`,
-                    {
-                        method: "PATCH",
-                        body: JSON.stringify({ action }),
-                    },
-                );
-                await renderAppointmentRequests();
-                showWorkspaceMessage(
-                    action === "APPROVED"
-                        ? "Appointment confirmed."
-                        : "Appointment request rejected.",
-                );
-            } catch (error) {
-                card.querySelectorAll("button").forEach((item) => {
-                    item.disabled = false;
-                });
-                showWorkspaceMessage(error.message, true);
-            }
+
+    const dateKey = (date) =>
+        `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+    const appointmentDate = (appointment) =>
+        new Date(appointment.appointment_date);
+
+    const sameDay = (first, second) =>
+        dateKey(first) === dateKey(second);
+
+    const selectedAppointments = () =>
+        appointments.filter((appointment) =>
+            sameDay(appointmentDate(appointment), selectedDate),
+        );
+
+    const formatTime = (value) =>
+        new Date(value).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
         });
-    });
+
+    const formatDate = (value) =>
+        new Date(value).toLocaleDateString([], {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+        });
+
+    function renderCalendar() {
+        const monthName = calendarMonth.toLocaleDateString([], {
+            month: "long",
+            year: "numeric",
+        });
+
+        const firstDay = new Date(
+            calendarMonth.getFullYear(),
+            calendarMonth.getMonth(),
+            1,
+        );
+
+        const startOffset = (firstDay.getDay() + 6) % 7;
+
+        const daysInMonth = new Date(
+            calendarMonth.getFullYear(),
+            calendarMonth.getMonth() + 1,
+            0,
+        ).getDate();
+
+        const calendarCells = [];
+
+        for (let i = 0; i < startOffset; i++) {
+            calendarCells.push('<div class="calendar-day calendar-day-empty"></div>');
+        }
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            const date = new Date(
+                calendarMonth.getFullYear(),
+                calendarMonth.getMonth(),
+                day,
+            );
+
+            const key = dateKey(date);
+
+            const dayAppointments = appointments.filter((appointment) =>
+                sameDay(appointmentDate(appointment), date),
+            );
+
+            const isSelected = sameDay(date, selectedDate);
+            const isToday = sameDay(date, new Date());
+
+            calendarCells.push(`
+                <button
+                    type="button"
+                    class="calendar-day ${isSelected ? "is-selected" : ""} ${isToday ? "is-today" : ""}"
+                    data-calendar-date="${key}"
+                    aria-pressed="${isSelected}"
+                >
+                    <span class="calendar-day-number">${day}</span>
+                    ${
+                        dayAppointments.length
+                            ? `<span class="calendar-day-count">${dayAppointments.length} appointment${dayAppointments.length === 1 ? "" : "s"}</span>`
+                            : ""
+                    }
+                </button>
+            `);
+        }
+
+        const dayAppointments = selectedAppointments();
+
+        const pending = dayAppointments.filter(
+            (appointment) => appointment.status === "PENDING",
+        );
+
+        const scheduled = dayAppointments.filter(
+            (appointment) =>
+                ["CONFIRMED", "SCHEDULED"].includes(appointment.status) &&
+                !appointment.checked_in_at,
+        );
+
+        const waiting = dayAppointments.filter(
+            (appointment) =>
+                ["CONFIRMED", "SCHEDULED"].includes(appointment.status) &&
+                appointment.checked_in_at,
+        );
+
+        const patientName = (appointment) =>
+            escapeHtml(
+                appointment.client_name || appointment.client_id,
+            );
+
+        const appointmentCard = (appointment, showActions = false) => `
+            <article
+                class="appointment-request-row"
+                data-appointment-id="${escapeHtml(appointment.appointment_id)}"
+                data-patient-card
+            >
+                <div class="appointment-request-details">
+                    <span class="appointment-status ${
+                        appointment.status === "PENDING"
+                            ? "status-pending"
+                            : "status-confirmed"
+                    }">${escapeHtml(appointment.status)}</span>
+                    <h2>${patientName(appointment)}</h2>
+                    <p>${escapeHtml(formatTime(appointment.appointment_date))}</p>
+                </div>
+                <div class="review-actions">
+                    <button
+                        class="button button-small"
+                        data-patient-context="${escapeHtml(appointment.client_id)}"
+                        aria-expanded="false"
+                        type="button"
+                    >View patient info</button>
+                    ${
+                        showActions
+                            ? `
+                                <button class="button button-small button-reject"
+                                    data-appointment-decision="REJECTED"
+                                    type="button">Reject</button>
+                                <button class="button button-small button-approve"
+                                    data-appointment-decision="APPROVED"
+                                    type="button">Approve</button>
+                            `
+                            : ""
+                    }
+                </div>
+                <div data-patient-preview hidden></div>
+            </article>
+        `;
+
+        workspaceContent.innerHTML = `
+            ${pageHeading(
+                "APPOINTMENTS AND QUEUES",
+                "Your daily appointment calendar.",
+                "Select a date to review new requests, scheduled appointments and patients who have checked in.",
+            )}
+
+            <div data-message class="workspace-message" hidden></div>
+
+            <section class="content-panel appointment-calendar-panel">
+                <div class="calendar-header">
+                    <button type="button" class="button button-small"
+                        data-calendar-nav="previous">Previous</button>
+                    <h2>${escapeHtml(monthName)}</h2>
+                    <button type="button" class="button button-small"
+                        data-calendar-nav="next">Next</button>
+                </div>
+
+                <div class="calendar-weekdays">
+                    ${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                        .map((day) => `<span>${day}</span>`)
+                        .join("")}
+                </div>
+
+                <div class="appointment-calendar-grid">
+                    ${calendarCells.join("")}
+                </div>
+
+                <button type="button" class="button button-small"
+                    data-calendar-today>Today</button>
+            </section>
+
+            <section class="appointment-day-agenda">
+                <div class="section-heading">
+                    <h2>${escapeHtml(formatDate(selectedDate))}</h2>
+                    <span>${dayAppointments.length} APPOINTMENTS</span>
+                </div>
+
+                <section class="content-panel appointment-queue-section">
+                    <h3>New appointment requests</h3>
+                    <p class="appointment-note">Requests waiting for your approval.</p>
+                    <div class="appointment-list">
+                        ${
+                            pending.length
+                                ? pending.map((appointment) =>
+                                    appointmentCard(appointment, true),
+                                ).join("")
+                                : '<p class="empty-state">No new requests for this day.</p>'
+                        }
+                    </div>
+                </section>
+
+                <section class="content-panel appointment-queue-section">
+                    <h3>Scheduled appointments</h3>
+                    <p class="appointment-note">Confirmed appointments for this day.</p>
+                    <div class="appointment-list">
+                        ${
+                            scheduled.length
+                                ? scheduled.map((appointment) =>
+                                    appointmentCard(appointment),
+                                ).join("")
+                                : '<p class="empty-state">No scheduled appointments for this day.</p>'
+                        }
+                    </div>
+                </section>
+
+                <section class="content-panel appointment-queue-section">
+                    <h3>Waiting for the dietitian</h3>
+                    <p class="appointment-note">Patients who have checked in at your branch.</p>
+                    <div class="appointment-list">
+                        ${
+                            waiting.length
+                                ? waiting.map((appointment) => `
+                                    <article class="appointment-request-row" data-patient-card>
+                                        <div class="appointment-request-details">
+                                            <span class="appointment-status status-confirmed">CHECKED IN</span>
+                                            <h2>${patientName(appointment)}</h2>
+                                            <p>Appointment: ${escapeHtml(formatTime(appointment.appointment_date))}</p>
+                                            <p>Checked in: ${escapeHtml(formatTime(appointment.checked_in_at))}</p>
+                                        </div>
+                                        <div class="review-actions">
+                                            <button
+                                                class="button button-small"
+                                                data-patient-context="${escapeHtml(appointment.client_id)}"
+                                                aria-expanded="false"
+                                                type="button"
+                                            >View patient info</button>
+                                        </div>
+                                        <div data-patient-preview hidden></div>
+                                    </article>
+                                `).join("")
+                                : '<p class="empty-state">No checked-in patients waiting for this day.</p>'
+                        }
+                    </div>
+                </section>
+            </section>
+        `;
+
+        workspaceContent.querySelectorAll("[data-calendar-date]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const [year, month, day] = button.dataset.calendarDate
+                    .split("-")
+                    .map(Number);
+
+                selectedDate.setFullYear(year, month - 1, day);
+                calendarMonth = new Date(year, month - 1, 1);
+                renderCalendar();
+            });
+        });
+
+        workspaceContent.querySelectorAll("[data-calendar-nav]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const direction =
+                    button.dataset.calendarNav === "next" ? 1 : -1;
+
+                calendarMonth = new Date(
+                    calendarMonth.getFullYear(),
+                    calendarMonth.getMonth() + direction,
+                    1,
+                );
+
+                renderCalendar();
+            });
+        });
+
+        workspaceContent.querySelector("[data-calendar-today]")
+            ?.addEventListener("click", () => {
+                selectedDate.setTime(new Date().setHours(0, 0, 0, 0));
+                calendarMonth = new Date(
+                    selectedDate.getFullYear(),
+                    selectedDate.getMonth(),
+                    1,
+                );
+                renderCalendar();
+            });
+
+        bindPatientContextButtons();
+
+        workspaceContent.querySelectorAll("[data-appointment-decision]").forEach((button) => {
+            button.addEventListener("click", async () => {
+                const card = button.closest("[data-appointment-id]");
+
+                card.querySelectorAll("button").forEach((item) => {
+                    item.disabled = true;
+                });
+
+                const action = button.dataset.appointmentDecision;
+
+                try {
+                    await request(
+                        `/api/v1/appointments/${encodeURIComponent(card.dataset.appointmentId)}`,
+                        {
+                            method: "PATCH",
+                            body: JSON.stringify({ action }),
+                        },
+                    );
+
+                    await renderAppointmentRequests();
+
+                    showWorkspaceMessage(
+                        action === "APPROVED"
+                            ? "Appointment confirmed."
+                            : "Appointment request rejected.",
+                    );
+                } catch (error) {
+                    card.querySelectorAll("button").forEach((item) => {
+                        item.disabled = false;
+                    });
+
+                    showWorkspaceMessage(error.message, true);
+                }
+            });
+        });
+    }
+
+    renderCalendar();
 }
+
 
 async function renderClientRecommendations(clientId) {
     const recommendations = await request(
@@ -2012,7 +2459,7 @@ async function loadView(view, initialAIPanel = "coach") {
           <section class="feature-panel">
             <span class="eyebrow">PLAN STUDIO</span>
             <h2>Build a starting point for better habits.</h2>
-            <p>Draft a nutrition plan around a patient’s goals and health context. Every draft stays with you for review.</p>
+            <p>Draft a nutrition plan around a patientâ€™s goals and health context. Every draft stays with you for review.</p>
             <button class="button button-lime" data-go="ai-workspace" data-ai-panel="plan" type="button">Start a plan <span aria-hidden="true">&#8594;</span></button>
           </section>
           <section class="stat-panel">
@@ -2090,6 +2537,8 @@ async function loadView(view, initialAIPanel = "coach") {
             await renderAdminAuditLogs();
         } else if (view === "admin-settings") {
             await renderAdminSettings();
+            } else if (view === "dietitian-settings") {
+            await renderDietitianSettings();
         } else if (view === "client-recommendations") {
             await renderClientRecommendations(clientId);
         } else if (view === "verification-documents") {
@@ -2156,8 +2605,8 @@ async function renderAIStudio(clientId = "") {
     <section class="content-panel">
       <form id="aiForm" class="form-grid">
         <div class="form-field"><label for="aiClientId">Search patient ID or name</label><input class="text-input" id="aiClientId" name="client_id" list="aiClientOptions" placeholder="Start typing a patient ID" value="${escapeHtml(clientId)}" required><datalist id="aiClientOptions">${clients.map((client) => `<option value="${escapeHtml(client.id)}" label="${escapeHtml(client.name)}"></option>`).join("")}</datalist></div>
-        <div class="form-field"><label for="dietaryGoal">Patient priority / nutrition need</label><input class="text-input" id="dietaryGoal" name="dietary_goal" list="aiGoalOptions" placeholder="Choose or describe the patient’s nutrition needs" required><datalist id="aiGoalOptions">${goalSuggestions.map((goal) => `<option value="${escapeHtml(goal)}"></option>`).join("")}</datalist></div>
-        <div class="form-field full-width"><span class="notice">Consider the patient’s stated priority, life stage, cultural foods, preferences, access and budget, allergies, and recorded medical conditions. Drafts are suggestions only and must be clinically reviewed before sharing.</span></div>
+        <div class="form-field"><label for="dietaryGoal">Patient priority / nutrition need</label><input class="text-input" id="dietaryGoal" name="dietary_goal" list="aiGoalOptions" placeholder="Choose or describe the patientâ€™s nutrition needs" required><datalist id="aiGoalOptions">${goalSuggestions.map((goal) => `<option value="${escapeHtml(goal)}"></option>`).join("")}</datalist></div>
+        <div class="form-field full-width"><span class="notice">Consider the patientâ€™s stated priority, life stage, cultural foods, preferences, access and budget, allergies, and recorded medical conditions. Drafts are suggestions only and must be clinically reviewed before sharing.</span></div>
         <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Generate draft <span aria-hidden="true">&#8594;</span></button></div>
       </form>
       <div id="planResult" aria-live="polite"></div>
@@ -2203,7 +2652,7 @@ async function renderDietitianDocuments() {
             ? documents
                   .map(
                       (document) => `
-      <article class="document-row"><span class="document-icon" aria-hidden="true">&#9636;</span><div class="document-details"><h3>${escapeHtml(document.file_name)}</h3><p>${escapeHtml(document.content_type)} · ${new Date(document.uploaded_at).toLocaleDateString()}</p><p>${escapeHtml(document.branch_name)} · ${escapeHtml(document.branch_address)}</p></div><span class="plan-status">SUBMITTED</span></article>`,
+      <article class="document-row"><span class="document-icon" aria-hidden="true">&#9636;</span><div class="document-details"><h3>${escapeHtml(document.file_name)}</h3><p>${escapeHtml(document.content_type)} Â· ${new Date(document.uploaded_at).toLocaleDateString()}</p><p>${escapeHtml(document.branch_name)} Â· ${escapeHtml(document.branch_address)}</p></div><span class="plan-status">SUBMITTED</span></article>`,
                   )
                   .join("")
             : '<p class="empty-state">No documents submitted. Add a license or identity document to continue approval.</p>'
@@ -2334,7 +2783,7 @@ function retrievedSourcesMarkup(references) {
         return `<p class="notice">No local nutrition references were retrieved for this draft. Verify the guidance independently before approving.</p>`;
     return `<details class="review-sources"><summary>Review retrieved references (${sources.length})</summary>
     <p class="stat-caption">These excerpts are supporting context, not verified clinical conclusions. Check the original documents.</p>
-    <ol>${sources.map((ref) => `<li><strong>${escapeHtml(ref.source || "Unknown source")}</strong>${ref.paragraph != null ? ` · Paragraph ${escapeHtml(ref.paragraph)}` : ""}<blockquote>${escapeHtml(ref.excerpt || "")}</blockquote></li>`).join("")}</ol>
+    <ol>${sources.map((ref) => `<li><strong>${escapeHtml(ref.source || "Unknown source")}</strong>${ref.paragraph != null ? ` Â· Paragraph ${escapeHtml(ref.paragraph)}` : ""}<blockquote>${escapeHtml(ref.excerpt || "")}</blockquote></li>`).join("")}</ol>
   </details>`;
 }
 
@@ -2523,7 +2972,7 @@ async function renderRecipes() {
                       (recipe) => `
       <article class="recipe-row">
         <div class="recipe-row-top"><h3>${escapeHtml(recipe.title)}</h3><span>${escapeHtml(recipe.recipe_id)}</span></div>
-        <p class="recipe-ingredients">${recipe.ingredients.map(escapeHtml).join(" · ") || "No ingredients recorded"}</p>
+        <p class="recipe-ingredients">${recipe.ingredients.map(escapeHtml).join(" Â· ") || "No ingredients recorded"}</p>
         <p class="recipe-instructions">${escapeHtml(recipe.instructions)}</p>
       </article>`,
                   )
@@ -2589,6 +3038,11 @@ async function renderMealPlans() {
         .join("");
     workspaceContent.innerHTML = `
     ${pageHeading("MEAL PLANNING", "Review meal plans.", "Prepare screened drafts and approve them before client delivery.")}
+<div class="section-heading">
+    <button class="button button-lime" data-go="ai-workspace" type="button">
+        AI Coach
+    </button>
+</div>
     ${problemsHtml}
     <div data-message class="workspace-message" hidden></div>
     <section class="content-panel"><div class="section-heading"><h2>New draft</h2><span>DIETITIAN ONLY</span></div>
@@ -2621,7 +3075,7 @@ async function renderMealPlans() {
                             )
                             .join("");
                         return `<article class="meal-plan-row"><div class="meal-plan-heading"><h3>${escapeHtml(draft.diet_type || "Meal plan")}</h3><span class="plan-status">${escapeHtml(d.status)}</span></div>
-          <p>Patient: ${escapeHtml(d.client_id)} · ${escapeHtml(draft.days || "")} days</p>
+          <p>Patient: ${escapeHtml(d.client_id)} Â· ${escapeHtml(draft.days || "")} days</p>
           <ul class="meal-summary">${schedule}</ul>
           <p><strong>Screening cautions:</strong> ${escapeHtml((draft.cautions || []).join("; ") || "None recorded; independent clinical review still required.")}</p>
           ${
@@ -2631,7 +3085,7 @@ async function renderMealPlans() {
             <div class="form-field"><label>Review note (required)</label><textarea class="text-input" name="review_note" required maxlength="2000"></textarea></div>
             <div class="form-field"><label>Revised schedule JSON (only when modifying; include each day)</label><textarea class="text-input" name="revised_schedule" placeholder='[{"day":1,"candidate_recipe":{"title":"..."}}]'></textarea></div>
             <button class="button button-primary" type="submit">Submit review</button></form>`
-                  : `<p>Review note: ${escapeHtml(d.review_note || "—")}</p>`
+                  : `<p>Review note: ${escapeHtml(d.review_note || "â€”")}</p>`
           }
         </article>`;
                     })
@@ -2640,6 +3094,7 @@ async function renderMealPlans() {
       }
     </section>
     <section class="content-panel"><h2>Existing legacy plans</h2><p>${legacyPlans.length} plans from the previous meal-planning system. These are separate from the new approval queue.</p></section>`;
+    bindGoButtons();
     const form = document.querySelector("#mealDraftForm");
     if (form) {
         const selectedClient = sessionStorage.getItem("meal-plan-client");
@@ -2747,7 +3202,7 @@ async function refreshAdminApprovalCount() {
 
 function renderAdminTable(headers, rows, emptyMessage) {
     if (!rows.length) return `<p class="empty-state">${emptyMessage}</p>`;
-    return `<div class="admin-table-wrap"><table class="admin-data-table"><thead><tr>${headers.map((header) => `<th scope="col">${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((value) => `<td>${escapeHtml(value ?? "—")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    return `<div class="admin-table-wrap"><table class="admin-data-table"><thead><tr>${headers.map((header) => `<th scope="col">${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((value) => `<td>${escapeHtml(value ?? "â€”")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 
 async function renderAdminDashboard() {
@@ -2831,7 +3286,7 @@ async function renderAccessEvents() {
     ${renderAdminTable(
         ["Timestamp", "Actor role", "Account ID", "Action", "Resource", "HTTP status"],
         events.map((event) => [
-            event.occurred_at ? new Date(event.occurred_at).toLocaleString() : "—",
+            event.occurred_at ? new Date(event.occurred_at).toLocaleString() : "â€”",
             event.actor_role,
             event.actor_id || "Anonymous",
             event.http_method,
@@ -3073,6 +3528,78 @@ async function renderAdminAuditLogs() {
     )}`;
 }
 
+async function renderDietitianSettings() {
+    const approval = await request("/api/v1/dietitians/me/approval");
+
+    const status = String(approval.status || "UNKNOWN").toUpperCase();
+
+    const statusLabel = {
+        APPROVED: "Approved",
+        PENDING: "Pending review",
+        REJECTED: "Registration rejected",
+    }[status] || "Status unavailable";
+
+    const feedback = approval.rejection_reason
+        ? `<p><strong>Admin feedback:</strong> ${escapeHtml(approval.rejection_reason)}</p>`
+        : "";
+
+    workspaceContent.innerHTML = `
+    ${pageHeading(
+        "PRACTICE",
+        "Settings.",
+        "Manage your professional information and practice details."
+    )}
+
+    <section class="content-panel">
+        <div class="section-heading">
+            <h2>Professional registration</h2>
+            <span>VERIFICATION STATUS</span>
+        </div>
+
+        <dl class="profile-details">
+            <div>
+                <dt>Registration status</dt>
+                <dd>${escapeHtml(statusLabel)}</dd>
+            </div>
+        </dl>
+
+        ${feedback}
+    </section>
+
+    <div class="section-heading">
+        <h2>Account management</h2>
+        <span>YOUR PRACTICE</span>
+    </div>
+
+    <div class="quick-grid">
+        <button class="quick-link" data-go="my-profile" type="button">
+            <strong>My Profile</strong>
+            <span>View your personal and professional information.</span>
+            <span aria-hidden="true">&#8599;</span>
+        </button>
+
+        <button class="quick-link" data-go="verification-documents" type="button">
+            <strong>Professional Verification</strong>
+            <span>View and manage your verification documents.</span>
+            <span aria-hidden="true">&#8599;</span>
+        </button>
+
+        <button class="quick-link" data-go="dietitian-branches" type="button">
+            <strong>My Practice Branches</strong>
+            <span>View and manage your practice locations.</span>
+            <span aria-hidden="true">&#8599;</span>
+        </button>
+
+        <button class="quick-link" data-go="support" type="button">
+            <strong>Support & Tickets</strong>
+            <span>Get assistance with your account and practice.</span>
+            <span aria-hidden="true">&#8599;</span>
+        </button>
+    </div>`;
+
+    bindGoButtons();
+}
+
 async function renderAdminSettings() {
     const [health, setup] = await Promise.all([
         request("/health"),
@@ -3084,7 +3611,7 @@ async function renderAdminSettings() {
       <div><dt>API status</dt><dd>${escapeHtml(health.status)}</dd></div>
       <div><dt>Database</dt><dd>${escapeHtml(health.database)}</dd></div>
       <div><dt>Recommendation model</dt><dd>${escapeHtml("Configured on server")}</dd></div>
-      <div><dt>Administrator</dt><dd>${escapeHtml(currentUser.full_name)} · ${escapeHtml(currentUser.email)}</dd></div>
+      <div><dt>Administrator</dt><dd>${escapeHtml(currentUser.full_name)} Â· ${escapeHtml(currentUser.email)}</dd></div>
       <div><dt>Initial setup</dt><dd>${setup.available ? "Available" : "Complete"}</dd></div>
     </dl></section>`;
 }
@@ -3109,7 +3636,7 @@ async function renderAdminApprovals() {
                   .join("")
                   .toUpperCase(),
           )}</div>
-          <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.email)} · License ${escapeHtml(dietitian.license_number)}</p><p>${escapeHtml(dietitian.practice_name || "Nutrition practice")} · ${escapeHtml(dietitian.branch_name || "Branch not provided")} · ${escapeHtml(dietitian.branch_address || "Address not provided")}</p><p class="document-hint">Branch ID: ${escapeHtml(dietitian.branch_id || "—")} · Business ID: ${escapeHtml(dietitian.business_id || "—")}</p></div>
+          <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.email)} Â· License ${escapeHtml(dietitian.license_number)}</p><p>${escapeHtml(dietitian.practice_name || "Nutrition practice")} Â· ${escapeHtml(dietitian.branch_name || "Branch not provided")} Â· ${escapeHtml(dietitian.branch_address || "Address not provided")}</p><p class="document-hint">Branch ID: ${escapeHtml(dietitian.branch_id || "â€”")} Â· Business ID: ${escapeHtml(dietitian.business_id || "â€”")}</p></div>
           <span class="dietitian-status status-pending">PENDING</span>
         </div>
         <div class="admin-document-list">${
@@ -3117,7 +3644,7 @@ async function renderAdminApprovals() {
                 ? dietitian.documents
                       .map(
                           (document) => `
-          <div class="admin-document-row"><div><span>${escapeHtml(document.file_name)} · ${escapeHtml(document.content_type)}</span><p class="document-hint">${escapeHtml(document.practice_name || "Practice")} · ${escapeHtml(document.branch_name || "Branch")} · ${escapeHtml(document.branch_address || "Address not provided")}</p><p class="document-hint">Branch ID: ${escapeHtml(document.branch_id || "—")} · Business ID: ${escapeHtml(document.business_id || "—")}</p></div><button class="button quiet-button button-small" data-document-id="${escapeHtml(document.document_id)}" data-file-name="${escapeHtml(document.file_name)}" type="button">View document</button></div>`,
+          <div class="admin-document-row"><div><span>${escapeHtml(document.file_name)} Â· ${escapeHtml(document.content_type)}</span><p class="document-hint">${escapeHtml(document.practice_name || "Practice")} Â· ${escapeHtml(document.branch_name || "Branch")} Â· ${escapeHtml(document.branch_address || "Address not provided")}</p><p class="document-hint">Branch ID: ${escapeHtml(document.branch_id || "â€”")} Â· Business ID: ${escapeHtml(document.business_id || "â€”")}</p></div><button class="button quiet-button button-small" data-document-id="${escapeHtml(document.document_id)}" data-file-name="${escapeHtml(document.file_name)}" type="button">View document</button></div>`,
                       )
                       .join("")
                 : '<p class="document-hint">No verification documents submitted yet.</p>'
@@ -3620,3 +4147,5 @@ try {
     sessionStorage.removeItem(sessionKey);
     sessionStorage.removeItem(adminTokenKey);
 }
+
+
