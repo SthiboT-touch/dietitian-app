@@ -1086,3 +1086,42 @@ CREATE INDEX IF NOT EXISTS idx_support_message_ticket ON support_message(ticket_
 
 ALTER TABLE support_ticket ADD COLUMN IF NOT EXISTS contact_email VARCHAR(150);
 CREATE INDEX IF NOT EXISTS idx_support_contact_time ON support_ticket(contact_email, created_at);
+
+-- Care workflow
+ALTER TABLE appointment ADD COLUMN IF NOT EXISTS branch_id VARCHAR(50);
+ALTER TABLE appointment ADD COLUMN IF NOT EXISTS consultation_type VARCHAR(20) NOT NULL DEFAULT 'INITIAL';
+CREATE TABLE IF NOT EXISTS client_care_event (
+    event_id VARCHAR(50) PRIMARY KEY,
+    client_id VARCHAR(50) NOT NULL REFERENCES client(client_id),
+    kind VARCHAR(30) NOT NULL,
+    author_id VARCHAR(50) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    payload JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS client_care_event_client_idx ON client_care_event(client_id, created_at);
+
+-- Appointment-specific care and check-in
+ALTER TABLE nutrition_goal ADD COLUMN IF NOT EXISTS appointment_id VARCHAR(36) REFERENCES appointment(appointment_id);
+ALTER TABLE client_checkin_credential ADD COLUMN IF NOT EXISTS appointment_id VARCHAR(36) REFERENCES appointment(appointment_id);
+ALTER TABLE client_checkin_event ADD COLUMN IF NOT EXISTS appointment_id VARCHAR(36) REFERENCES appointment(appointment_id);
+CREATE INDEX IF NOT EXISTS nutrition_goal_appointment_idx ON nutrition_goal(appointment_id);
+CREATE INDEX IF NOT EXISTS client_checkin_event_appointment_idx ON client_checkin_event(appointment_id);
+
+-- Google Meet and Calendar
+CREATE TABLE IF NOT EXISTS dietitian_google_connection (
+    dietitian_id VARCHAR(36) PRIMARY KEY REFERENCES dietitian(dietitian_id),
+    encrypted_tokens TEXT NOT NULL,
+    meeting_mode VARCHAR(16) NOT NULL DEFAULT 'calendar' CHECK (meeting_mode IN ('calendar','meet')),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS appointment_meeting (
+    appointment_id VARCHAR(36) PRIMARY KEY REFERENCES appointment(appointment_id),
+    dietitian_id VARCHAR(36) NOT NULL REFERENCES dietitian(dietitian_id),
+    meeting_mode VARCHAR(16) NOT NULL CHECK (meeting_mode IN ('calendar','meet')),
+    meeting_url TEXT,
+    google_event_id TEXT,
+    google_space_name TEXT,
+    status VARCHAR(24) NOT NULL,
+    message VARCHAR(300),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

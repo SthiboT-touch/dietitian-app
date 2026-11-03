@@ -652,7 +652,7 @@ def get_dietitians():
             cursor.execute(
                 "SELECT d.dietitian_id AS id, TRIM(d.first_name || ' ' || d.last_name) AS full_name, "
                 "d.registration_number AS license_number, d.specialisation, d.status, "
-                "b.name AS branch_name, b.address AS branch_address, bus.name AS practice_name "
+                "b.branch_id, b.name AS branch_name, b.address AS branch_address, bus.name AS practice_name "
                 "FROM dietitian d JOIN branch b ON b.branch_id = d.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
                 "WHERE d.status = 'APPROVED' "
@@ -666,6 +666,7 @@ def get_dietitians():
             "license_number": user["license_number"],
             "specialisation": user.get("specialisation"),
             "status": user.get("status", "APPROVED"),
+            "branch_id": user.get("branch_id"),
             "branch_name": branches_db.get(user.get("branch_id"), {}).get("name"),
             "branch_address": branches_db.get(user.get("branch_id"), {}).get("address"),
             "practice_name": branches_db.get(user.get("branch_id"), {}).get("business_name"),

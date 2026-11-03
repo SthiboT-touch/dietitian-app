@@ -19,3 +19,6 @@ server.stderr.log
 
 # Local source exports
 exports/
+.uv-cache/
+qa/.deps/
+qa/artifacts/

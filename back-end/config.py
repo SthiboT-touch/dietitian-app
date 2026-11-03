@@ -19,3 +19,9 @@ STYTCH_ENABLED = bool(
     STYTCH_PROJECT_ID and STYTCH_SECRET and os.getenv("STYTCH_ENABLED", "1") != "0"
 )
 STYTCH_API_BASE_URL = os.getenv("STYTCH_API_BASE_URL", "https://api.stytch.com/v1").rstrip("/")
+
+# Google OAuth credentials stay on the API server. Do not put them in browser code.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "").strip()
+GOOGLE_TOKEN_ENCRYPTION_KEY = os.getenv("GOOGLE_TOKEN_ENCRYPTION_KEY", "").strip()

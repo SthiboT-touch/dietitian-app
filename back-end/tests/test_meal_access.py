@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+import state
 import sys
 from pathlib import Path
 import pytest
@@ -18,7 +20,11 @@ def isolated(monkeypatch):
     mp._draft_store.clear()
     users_db["a"] = {"id": "c1", "type": "client", "dietitian_id": "d1"}
     users_db["b"] = {"id": "c2", "type": "client", "dietitian_id": "d2"}
+    prior_appointments = dict(state.appointments_db)
+    state.appointments_db["completed"] = {"appointment_id": "completed", "client_id": "c1", "dietitian_id": "d1", "status": "COMPLETED", "appointment_date": (datetime.now() - timedelta(days=1)).isoformat()}
     yield
+    state.appointments_db.clear()
+    state.appointments_db.update(prior_appointments)
     users_db.clear()
     users_db.update(old_users)
     meal_plans_db.clear()

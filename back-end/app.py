@@ -22,6 +22,8 @@ from routers import (
     onboarding,
     cms,
     support,
+    care,
+    meetings,
 )
 from audit import audit_sensitive_requests
 from diagnostics import request_diagnostics
@@ -32,7 +34,7 @@ API_DOCS_ENABLED = os.getenv("NUTRICARE_ENABLE_API_DOCS", "0") == "1"
 
 app = FastAPI(
     title="NutriCare — Dietitian & Nutrition Management API",
-    description="Nutrition management, appointments, meal planning, and AI support.",
+    description="Nutrition management, appointments, meal planning, and automated nutrition support.",
     version="1.0.0",
     docs_url="/api/docs" if API_DOCS_ENABLED else None,
     redoc_url=None,
@@ -86,5 +88,7 @@ for _router in (
     onboarding.router,
     cms.router,
     support.router,
+    care.router,
+    meetings.router,
 ):
     app.include_router(_router)

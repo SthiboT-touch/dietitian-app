@@ -122,6 +122,13 @@ assert r.status_code == 409
 
 # FR-1.7: only patient owner can request QR; reception can scan and record.
 assert api.post(f"/api/v1/clients/{client_id}/checkin-code").status_code == 401
+assert api.post(f"/api/v1/clients/{client_id}/checkin-code", headers=headers).status_code == 409
+from datetime import datetime, timedelta
+state.appointments_db["qr-test-appointment"] = {
+    "appointment_id": "qr-test-appointment", "client_id": client_id,
+    "dietitian_id": "qr-test-dietitian", "branch_id": "branch-test",
+    "status": "CONFIRMED", "appointment_date": (datetime.now() + timedelta(days=1)).isoformat(),
+}
 qr = api.post(f"/api/v1/clients/{client_id}/checkin-code", headers=headers)
 assert qr.status_code == 200, qr.text
 code = qr.json()["checkin_code"]

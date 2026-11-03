@@ -7,11 +7,70 @@ The browser app is served by the API at `http://localhost:8000` when running wit
 - `front-end/` contains the HTML, CSS, and JavaScript browser app.
 - `back-end/` contains the FastAPI app, database access, SQL schema, Python requirements, tests, and Dockerfiles. It is one API service, organised by area:
   - `app.py` is the entry point: it serves the browser app, `/health`, and includes every router below.
-  - `routers/auth_admin.py` (auth, admin, branches, dietitian documents), `routers/clients.py` (health history, metrics, progress), `routers/appointments.py` (appointments, goals), `routers/meal_planning.py` (foods, recipes, meal plans), `routers/ai.py` (AI chat, plan generation, recommendation review).
+  - `routers/auth_admin.py` (auth, admin, branches, dietitian documents), `routers/clients.py` (health history, metrics, progress), `routers/appointments.py` (appointments, goals), `routers/meal_planning.py` (foods, recipes, meal plans), `routers/ai.py` (automated nutrition chat, plan generation, recommendation review).
   - `schemas.py` (request/response models), `security.py` (passwords and sessions), `helpers.py`, `state.py` (in-memory data), `config.py` (settings), `database.py` (PostgreSQL).
 - `docker-compose.yml` and this README remain at the project root.
 
 ## Local development
+
+Google Calendar and Meet integration is available for virtual appointments. See
+[GOOGLE_MEET_SETUP.md](GOOGLE_MEET_SETUP.md) for OAuth configuration, manual database
+migration 019, connection steps and local validation. Without Google credentials,
+booking and approval continue to work, and the app shows that Google setup is
+required instead of inventing a meeting link. The deployment pipeline is unchanged.
+
+### Medical history and care workflow
+
+Patients use **Medical Conditions** to save medications, surgeries, family and
+dietary history, lifestyle, and consultation concerns. Each submission keeps a
+history version. **Appointments → Book Appointment** offers a branch, a dietitian
+at that branch, a consultation type, and a future date/time. Existing appointment
+approval and cancellation behavior is preserved.
+
+Dietitians open a patient's **care record** from the patient information preview
+or patient record screen. They can review history, approve progress or request
+changes with feedback, share recommendations, and set goals. The meal-plan
+button opens the existing screened draft and approval workflow with that patient
+selected. Patients see review feedback in **Progress** and shared guidance in
+**Recommendations**. Editing reviewed measurements requires another review.
+**My Goals** is read-only for patients. Only the assigned dietitian can create
+goals and targets; the API enforces this restriction as well as the interface.
+Medical conditions and ICD codes are also recorded only by the assigned
+dietitian. Patients can view recorded conditions, submit their history and
+upload supporting documents without adding diagnoses to their clinical record.
+QR check-in is available only after an appointment is confirmed, for today's or
+upcoming visits. Reception scans recheck confirmation and branch assignment;
+cancelling the appointment also prevents use of a previously generated QR.
+Each QR credential and reception event is now tied to the selected appointment.
+Codes issued before this update must be regenerated. A cancelled appointment's
+QR cannot be used for a different confirmed booking.
+
+In the patient's care record, the appointment's dietitian marks the consultation
+completed after its scheduled time has arrived. Goals, meal-plan drafts and
+approvals, manual/generated recommendations, and progress reviews then require a
+completed consultation with that dietitian. Forms select the appointment that
+the care relates to; each new record retains that appointment ID. API clients
+that omit the ID are bound to the most recent completed consultation. Existing
+history and already published records are preserved; old records are not
+retroactively assigned to an appointment.
+
+Existing PostgreSQL databases also require
+`python back-end/migrations/apply_018_appointment_care_links.py` **after migration
+017 and before deploying this update**. Run both manually; the deployment
+pipeline is unchanged. The new migration adds nullable appointment references
+to goals, QR credentials, and check-in events. Meal plans and recommendations
+retain their appointment reference in the existing JSON payloads.
+
+Before updating an existing PostgreSQL installation, run
+`python back-end/migrations/apply_017_care_workflow.py`. This additive migration
+keeps existing records; fresh installations include it in the base schema.
+Run this migration manually before deploying the updated app to an existing database.
+
+Run workflow API tests with
+`python -m pytest -q back-end/tests/test_care_workflow.py`. For desktop/mobile UI
+checks, install Playwright (`pip install playwright`), install Chrome, and run
+`python qa/verify_care_browser.py`. Browser checks use synthetic API responses;
+they do not access production. Screenshots are saved under `qa/artifacts/`.
 
 Run the API and browser app with in-memory data (no PostgreSQL or Ollama required):
 
@@ -62,7 +121,7 @@ docker compose exec ollama ollama pull llama3.2
 
 The model download is several gigabytes and is stored in the `ollama_data` volume. The API uses `llama3.2` by default. To select another model, set `OLLAMA_MODEL` in a `.env` file before starting Compose, then pull that model with `docker compose exec ollama ollama pull <model>`.
 
-The API container connects to Ollama at `http://ollama:11434` over the Compose network and waits for the Ollama service to become healthy. If the AI still cannot reply, confirm the model is installed with `docker compose exec ollama ollama list`, then pull it if needed with `docker compose exec ollama ollama pull llama3.2`. Rebuild and restart the API after changing its configuration with `docker compose up --build -d api`.
+The API container connects to Ollama at `http://ollama:11434` over the Compose network and waits for the Ollama service to become healthy. If the nutrition assistant still cannot reply, confirm the model is installed with `docker compose exec ollama ollama list`, then pull it if needed with `docker compose exec ollama ollama pull llama3.2`. Rebuild and restart the API after changing its configuration with `docker compose up --build -d api`.
 
 LangSmith tracing is optional. The root `.env.example` has a blank `LANGSMITH_API_KEY` slot. Copy it to `.env` if you do not already have a `.env`, keep your existing database password, paste your LangSmith key into that slot, and set tracing to `true`:
 
@@ -97,7 +156,7 @@ The generated-plan endpoint is `POST /api/v1/ai/generate-plan` with a JSON body 
 
 The API sends the goal and any recorded allergies and medical conditions to Ollama. Recommendations remain `PENDING_REVIEW` until approved by a dietitian. These suggestions are not a substitute for clinical judgment.
 
-AI workflows use LangGraph `StateGraph`s: chat loads recent context, routes greetings directly or invokes the tool-enabled LangChain agent, and saves the turn; plan generation loads the client profile, drafts a plan with `ChatOllama`, and stores the recommendation as `PENDING_REVIEW`; and a separate review graph applies the dietitian's decision. Chat history remains in process memory and is cleared when the API restarts; recommendation and review state use PostgreSQL when configured. The routes and response shapes stay the same; LangChain and LangGraph dependencies are installed from `back-end/requirements.txt`.
+Automated workflows use LangGraph `StateGraph`s: chat loads recent context, routes greetings directly or invokes the tool-enabled LangChain agent, and saves the turn; plan generation loads the client profile, drafts a plan with `ChatOllama`, and stores the recommendation as `PENDING_REVIEW`; and a separate review graph applies the dietitian's decision. Chat history remains in process memory and is cleared when the API restarts; recommendation and review state use PostgreSQL when configured. The routes and response shapes stay the same; LangChain and LangGraph dependencies are installed from `back-end/requirements.txt`.
 
 The Oracle Cloud deployment workflow applies the client health schema repair and dietitian document-branch association before starting the API. It creates any missing client health tables, adds the missing lactation end date column, and associates existing verification documents with each dietitian's current branch without replacing existing records. For other deployments, run `python back-end/migrations/apply_002_client_health_schema.py` and `python back-end/migrations/apply_003_dietitian_document_branch.py` once with `DATABASE_URL` configured.
 
@@ -113,6 +172,6 @@ To provision three local admin accounts, run `python back-end/seed_admin_account
 
 ## Prototype limits
 
-When `DATABASE_URL` is configured, accounts, patient health records, verification documents, progress, appointments, food catalog entries, meal plans, recipes, and AI reviews use PostgreSQL. For local development, set `DATABASE_URL` in the ignored `.env` file. URL-encode reserved characters in usernames or passwords (for example, encode `@` as `%40`). Docker Compose passes the same variable to the API container; without it, Compose uses the local database service.
+When `DATABASE_URL` is configured, accounts, patient health records, verification documents, progress, appointments, food catalog entries, meal plans, recipes, and recommendation reviews use PostgreSQL. For local development, set `DATABASE_URL` in the ignored `.env` file. URL-encode reserved characters in usernames or passwords (for example, encode `@` as `%40`). Docker Compose passes the same variable to the API container; without it, Compose uses the local database service.
 
 Without `DATABASE_URL`, the API uses in-memory data for development and tests. Dietitian document and admin approval endpoints require process-local bearer sessions; other API areas still use prototype authentication. The app is not ready for real patient or clinical data until full authentication and access control are completed.
