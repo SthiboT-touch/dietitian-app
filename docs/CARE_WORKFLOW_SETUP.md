@@ -21,22 +21,22 @@ review while the original review remains in the history.
 
 ## Existing PostgreSQL installations
 
-The deployment pipeline is unchanged. Before deploying this code to an existing
-database, back up the database and run the additive migration:
+The deployment pipeline applies migrations 017 and 020 before restarting the
+API. Migration 020 expects the check-in tables from migration 013, which the
+deployment pipeline applies earlier. For a manual deployment, back up the
+database, ensure migration 013 has run, then run:
 
 ```bash
 docker compose build api
+docker compose run --rm --no-deps api python migrations/apply_017_virtual_appointments.py
 docker compose run --rm --no-deps api python migrations/apply_020_care_workflow.py
 ```
 
-Run these commands from the server's project directory after placing the updated
-code there, with the existing database running and its normal server environment
-configured. Do not run an in-memory configuration for this migration. Migration
-020 expects the check-in tables from migration 013 to exist; apply
-`back-end/migrations/013_client_qr_checkin.sql` first if that migration has not
-already been applied. Migration 020 is safe to rerun, preserves existing
-records, and includes compatibility for the existing appointment format and
-manually supplied meeting link fields.
+Run these commands from the server's project directory with the existing
+database running and its normal server environment configured. Do not run an
+in-memory configuration for these migrations. Both migrations are safe to
+rerun, preserve existing records, and retain compatibility with manually
+supplied meeting links.
 Fresh databases include the same schema in `back-end/dietitainDB.sql`.
 
 ## Validation
