@@ -69,3 +69,28 @@ jobs:
               fi
               sleep 3
             done
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --max-time 5 http://127.0.0.1/health >/dev/null; then
+                break
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                echo "Frontend/API health check through Nginx did not pass" >&2
+                docker compose ps
+                docker compose logs --tail=100 frontend api
+                exit 1
+              fi
+              sleep 3
+            done
+      - name: Verify public application endpoint
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+        run: |
+          for attempt in $(seq 1 10); do
+            if curl --fail --silent --max-time 10 "http://${SERVER_HOST}/health" >/dev/null; then
+              echo "Public health check passed"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Public health check failed; verify server ingress/firewall and deployment logs" >&2
+          exit 1
