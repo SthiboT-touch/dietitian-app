@@ -219,11 +219,29 @@ def test_appointment_approval_and_cancellation_enforce_participant_roles():
     )
 
 
+def test_medical_conditions_can_only_be_recorded_by_assigned_dietitian():
+    path = "/api/v1/clients/c1/medical-conditions"
+    payload = {"condition_name": "Asthma", "icd_code": "J45"}
+    assert api.post(path, json=payload).status_code == 401
+    for token in ("client-1", "client-2", "admin-1", "dietitian-2"):
+        assert api.post(path, json=payload, headers=headers(token)).status_code == 403
+    assert state.clients_db["c1"]["conditions"] == []
+    assert api.post(path, json=payload, headers=headers("dietitian-1")).status_code == 200
+    profile = api.get("/api/v1/clients/c1/profile", headers=headers("client-1")).json()
+    assert profile["conditions"] == [payload]
+
+
 def test_goals_require_authenticated_owner_or_assigned_dietitian():
+    state.appointments_db["completed"] = {"appointment_id": "completed", "client_id": "c1", "dietitian_id": "d1", "status": "COMPLETED", "appointment_date": (datetime.now() - timedelta(days=1)).isoformat()}
     payload = {"client_id": "c1", "target_metric": "Water", "target_value": "2"}
     assert api.get("/api/v1/goals", params={"client_id": "c1"}).status_code == 401
     assert api.post("/api/v1/goals", json=payload, headers=headers("client-2")).status_code == 403
-    assert api.post("/api/v1/goals", json=payload, headers=headers("client-1")).status_code == 200
+    assert api.post("/api/v1/goals", json=payload, headers=headers("client-1")).status_code == 403
+    assert api.post("/api/v1/goals", json=payload).status_code == 401
+    assert api.post("/api/v1/goals", json=payload, headers=headers("admin-1")).status_code == 403
+    assert api.post("/api/v1/goals", json=payload, headers=headers("dietitian-2")).status_code == 403
+    assert api.post("/api/v1/goals", json=payload, headers=headers("dietitian-1")).status_code == 200
+    assert len(api.get("/api/v1/goals", params={"client_id": "c1"}, headers=headers("client-1")).json()) == 1
     assert (
         api.get(
             "/api/v1/goals", params={"client_id": "c1"}, headers=headers("dietitian-1")

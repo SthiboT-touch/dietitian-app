@@ -496,7 +496,11 @@ def add_allergy(client_id: str, data: AllergyEntry):
     dependencies=[Depends(require_client_record_access)],
     tags=["2. Patient Health & History"],
 )
-def add_medical_condition(client_id: str, data: MedicalConditionEntry):
+def add_medical_condition(client_id: str, data: MedicalConditionEntry, authorization: Optional[str] = Header(default=None)):
+    identity = current_identity(authorization)
+    if identity[0] != "dietitian":
+        raise HTTPException(status_code=403, detail="Only the assigned dietitian can record medical conditions")
+    authorize_client_access(client_id, identity)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -593,6 +597,8 @@ def get_metrics(client_id: str):
     tags=["3. Clinical Labs & Progress"],
 )
 def log_progress(client_id: str, data: ProgressLog):
+    if all(value is None for value in data.model_dump().values()):
+        raise HTTPException(422, "Enter at least one progress measurement")
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(

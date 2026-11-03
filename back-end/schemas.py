@@ -229,13 +229,13 @@ class MetricLog(BaseModel):
 
 
 class ProgressLog(BaseModel):
-    weight_kg: Optional[float] = None
-    body_fat_pct: Optional[float] = None
-    waist_cm: Optional[float] = None
-    calories: Optional[int] = None
-    water_ml: Optional[int] = None
-    steps: Optional[int] = None
-    sleep_hours: Optional[float] = None
+    weight_kg: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    body_fat_pct: Optional[float] = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    waist_cm: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    calories: Optional[int] = Field(default=None, ge=0)
+    water_ml: Optional[int] = Field(default=None, ge=0)
+    steps: Optional[int] = Field(default=None, ge=0)
+    sleep_hours: Optional[float] = Field(default=None, ge=0, le=24, allow_inf_nan=False)
 
 
 class MealLog(BaseModel):
@@ -267,6 +267,8 @@ class AppointmentCreate(BaseModel):
     client_id: str
     dietitian_id: str
     appointment_date: str
+    branch_id: Optional[str] = None
+    consultation_type: Literal["INITIAL", "FOLLOW_UP", "VIRTUAL"] = "INITIAL"
     appointment_type: Literal["IN_PERSON", "VIRTUAL"] = "IN_PERSON"
 
 
@@ -299,6 +301,7 @@ class AppointmentDecision(BaseModel):
 
 class GoalCreate(BaseModel):
     client_id: str
+    appointment_id: Optional[str] = None
     target_metric: str
     target_value: float
 
@@ -346,6 +349,7 @@ class MealPlanResponse(BaseModel):
 
 class AIGenerateRequest(BaseModel):
     client_id: str
+    appointment_id: Optional[str] = None
     dietary_goal: str
 
 

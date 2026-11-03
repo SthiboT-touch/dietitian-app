@@ -803,7 +803,7 @@ def test_ai_chat_returns_clear_fallback_when_ollama_is_unavailable(caplog):
     with patch("routers.ai._create_chat_agent", return_value=RunnableLambda(fail_model)):
         reply = ai.generate_llama_chat_reply("What should I eat after a workout?", "client")
 
-    assert "can't reach the ai model" in reply.lower()
+    assert "can't reach the nutrition assistant" in reply.lower()
     assert "LangChain AI chat request failed" in caplog.text
 
 
@@ -819,6 +819,7 @@ def ollama_response(plan):
 
 
 def test_generate_plan_returns_pending_recommendation():
+    seed_completed_visit("client-1", "dietitian-1")
     state.clients_db["client-1"] = {
         "id": "client-1",
         "dietitian_id": "dietitian-1",
@@ -844,6 +845,7 @@ def test_generate_plan_returns_pending_recommendation():
 
 
 def test_generate_plan_forwards_allergies_and_conditions():
+    seed_completed_visit("client-2", "dietitian-1")
     state.clients_db["client-2"] = {
         "id": "client-2",
         "dietitian_id": "dietitian-1",
@@ -881,6 +883,7 @@ def test_generate_plan_forwards_allergies_and_conditions():
 
 
 def test_generate_plan_returns_503_when_ollama_is_unreachable():
+    seed_completed_visit("client-3", "dietitian-1")
     state.clients_db["client-3"] = {
         "id": "client-3",
         "dietitian_id": "dietitian-1",
@@ -906,6 +909,7 @@ def test_generate_plan_returns_503_when_ollama_is_unreachable():
 
 
 def test_generate_plan_returns_503_for_malformed_model_response():
+    seed_completed_visit("client-4", "dietitian-1")
     state.clients_db["client-4"] = {
         "id": "client-4",
         "dietitian_id": "dietitian-1",
@@ -1050,7 +1054,9 @@ def test_appointments_can_be_filtered_by_client():
     assert response.json()[0]["client_id"] == "client-a"
 
 
-def test_goals_can_be_created_and_listed_by_client():
+def test_goals_are_created_by_assigned_dietitian_and_viewed_by_client():
+    seed_completed_visit("client-goal-test", "goal-dietitian")
+    state.users_db["client-goal-test"] = {"id": "client-goal-test", "type": "client", "dietitian_id": "goal-dietitian"}
     created = client.post(
         "/api/v1/goals",
         json={
@@ -1058,7 +1064,7 @@ def test_goals_can_be_created_and_listed_by_client():
             "target_metric": "Weight",
             "target_value": 72.5,
         },
-        headers=authenticated_client_headers("client-goal-test"),
+        headers=authenticated_dietitian_headers("goal-dietitian"),
     )
 
     assert created.status_code == 200, created.text
@@ -1277,6 +1283,7 @@ def test_client_health_profile_loads_conditions_allergies_and_pregnancy():
 
 
 def test_health_history_entries_save_for_a_client():
+    state.users_db["client-health"] = {"id": "client-health", "type": "client", "dietitian_id": "health-dietitian"}
     state.clients_db["client-health"] = {
         "allergies": [],
         "conditions": [],
@@ -1292,7 +1299,7 @@ def test_health_history_entries_save_for_a_client():
     condition = client.post(
         "/api/v1/clients/client-health/medical-conditions",
         json={"condition_name": "Asthma"},
-        headers=authenticated_client_headers("client-health"),
+        headers=authenticated_dietitian_headers("health-dietitian"),
     )
     pregnancy = client.post(
         "/api/v1/clients/client-health/pregnancy",
@@ -1313,6 +1320,7 @@ def test_health_history_entries_save_for_a_client():
 
 
 def test_review_recommendation_updates_status_and_notes():
+    seed_completed_visit("client-review", "dietitian-1")
     state.clients_db["client-review"] = {
         "id": "client-review",
         "dietitian_id": "dietitian-1",
@@ -1494,3 +1502,8 @@ def test_admin_setup_login_and_audited_dietitian_approval():
     )
     assert approved_directory_entry["branch_name"] == "Later Clinic"
     assert approved_directory_entry["branch_address"] == "99 New Street"
+
+
+def seed_completed_visit(client_id, dietitian_id):
+    appointment_id = "visit-" + client_id
+    state.appointments_db[appointment_id] = {"appointment_id": appointment_id, "client_id": client_id, "dietitian_id": dietitian_id, "status": "COMPLETED", "appointment_date": (datetime.now() - timedelta(days=1)).isoformat()}

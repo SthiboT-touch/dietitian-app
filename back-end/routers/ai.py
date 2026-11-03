@@ -1,6 +1,6 @@
-"""NutriCare AI workflows built with LangGraph and local Ollama models.
+"""NutriCare automated nutrition workflows built with LangGraph and local Ollama models.
 
-AI suggestions support dietitian review; they are not clinical approval.
+Generated suggestions support dietitian review; they are not clinical approval.
 """
 
 import json
@@ -55,6 +55,7 @@ class ChatWorkflowState(TypedDict, total=False):
 
 class PlanWorkflowState(TypedDict, total=False):
     client_id: str
+    appointment_id: str
     dietary_goal: str
     client_profile: Optional[dict]
     dietitian_id: Optional[str]
@@ -247,11 +248,11 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
         logger.error("LangChain AI chat request failed (error_type=%s)", type(error).__name__)
         return {
             "reply": (
-                "I can't reach the AI model right now, so I don't want to guess at an answer. "
+                "I can't reach the nutrition assistant right now, so I don't want to guess at an answer. "
                 "Please try again shortly, or ask your dietitian for guidance on a personal medical concern."
             )
         }
-    return {"reply": "I couldn't get a usable answer from the AI model. Please try again shortly."}
+    return {"reply": "I couldn't get a usable answer from the nutrition assistant. Please try again shortly."}
 
 
 def _persist_chat_turn(state: ChatWorkflowState) -> dict:
@@ -323,7 +324,7 @@ def _create_chat_agent(role: str):
         else "The user is a dietitian; provide concise support for general nutrition discussions."
     )
     system_prompt = (
-        "You are an AI nutrition and exercise assistant for a dietitian and patient platform. "
+        "You are an automated nutrition and exercise assistant for a dietitian and patient platform. "
         f"{audience_context} "
         "Provide practical, general guidance focused on food, hydration, meal timing, workout recovery, "
         "exercise habits, and healthy routines. Keep it brief, supportive, and actionable. "
@@ -405,6 +406,7 @@ def _generate_plan_node(state: PlanWorkflowState) -> dict:
 def _persist_recommendation_node(state: PlanWorkflowState) -> dict:
     recommendation_id = f"rec_{uuid.uuid4().hex[:8]}"
     recommendation = {
+        "appointment_id": state.get("appointment_id"),
         "recommendation_id": recommendation_id,
         "client_id": state["client_id"],
         "dietary_goal": state["dietary_goal"],
@@ -416,6 +418,7 @@ def _persist_recommendation_node(state: PlanWorkflowState) -> dict:
     if config.DATABASE_ENABLED:
         recommendation_text = json.dumps(
             {
+                "appointment_id": state.get("appointment_id"),
                 "dietary_goal": state["dietary_goal"],
                 "generated_plan": state["generated_plan"],
                 "retrieved_references": state.get("retrieved_references", []),
@@ -523,7 +526,7 @@ def _chat_identity(role: str, user_id: str, authorization: Optional[str]) -> str
     raise HTTPException(status_code=422, detail="Unsupported chat role")
 
 
-@router.post("/api/v1/ai/chat", tags=["6. AI Engine & HITL Workflow"])
+@router.post("/api/v1/ai/chat", tags=["6. Nutrition Assistant & Review Workflow"])
 def chat_with_ai(data: AIChatRequest, authorization: Optional[str] = Header(default=None)):
     identity = _chat_identity(data.role, data.user_id, authorization)
     result = _create_chat_workflow().invoke(
@@ -538,7 +541,7 @@ def chat_with_ai(data: AIChatRequest, authorization: Optional[str] = Header(defa
     return {"reply": result["reply"], "messages": result["conversation"]}
 
 
-@router.get("/api/v1/ai/chat", tags=["6. AI Engine & HITL Workflow"])
+@router.get("/api/v1/ai/chat", tags=["6. Nutrition Assistant & Review Workflow"])
 def get_ai_chat(
     user_id: str, role: str = "client", authorization: Optional[str] = Header(default=None)
 ):
@@ -599,20 +602,23 @@ def _assert_recommendation_owner(recommendation_id: str, dietitian_id: str) -> N
             )
 
 
-@router.post("/api/v1/ai/generate-plan", tags=["6. AI Engine & HITL Workflow"])
+@router.post("/api/v1/ai/generate-plan", tags=["6. Nutrition Assistant & Review Workflow"])
 def trigger_ai_plan(data: AIGenerateRequest, dietitian_id: str = Depends(require_dietitian)):
     _assert_assigned_dietitian(data.client_id, dietitian_id)
+    from consultations import completed_consultation
+    appointment_id = completed_consultation(data.client_id, dietitian_id, data.appointment_id)
     result = _create_plan_workflow().invoke(
         {
             "client_id": data.client_id,
+            "appointment_id": appointment_id,
             "dietary_goal": data.dietary_goal,
         },
         config=_langsmith_trace_config("plan"),
     )
-    return {"message": "AI recommendation drafted", "recommendation": result["recommendation"]}
+    return {"message": "Recommendation drafted", "recommendation": result["recommendation"]}
 
 
-@router.get("/api/v1/ai/recommendations/pending", tags=["6. AI Engine & HITL Workflow"])
+@router.get("/api/v1/ai/recommendations/pending", tags=["6. Nutrition Assistant & Review Workflow"])
 def get_pending_recommendations(dietitian_id: str = Depends(require_dietitian)):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -630,7 +636,7 @@ def get_pending_recommendations(dietitian_id: str = Depends(require_dietitian)):
     return pending
 
 
-@router.get("/api/v1/ai/recommendations", tags=["6. AI Engine & HITL Workflow"])
+@router.get("/api/v1/ai/recommendations", tags=["6. Nutrition Assistant & Review Workflow"])
 def get_client_recommendations(client_id: str, authorization: Optional[str] = Header(default=None)):
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer":
@@ -666,7 +672,7 @@ def get_client_recommendations(client_id: str, authorization: Optional[str] = He
 
 
 @router.patch(
-    "/api/v1/ai/recommendations/{recommendation_id}", tags=["6. AI Engine & HITL Workflow"]
+    "/api/v1/ai/recommendations/{recommendation_id}", tags=["6. Nutrition Assistant & Review Workflow"]
 )
 def review_ai_recommendation(
     recommendation_id: str,
@@ -674,6 +680,23 @@ def review_ai_recommendation(
     dietitian_id: str = Depends(require_dietitian),
 ):
     _assert_recommendation_owner(recommendation_id, dietitian_id)
+    if data.action != "REJECTED":
+        from consultations import completed_consultation
+        if config.DATABASE_ENABLED:
+            with database.cursor() as cursor:
+                cursor.execute("SELECT client_id, recommendation_text FROM ai_recommendation WHERE recommendation_id=%s", (recommendation_id,))
+                row = cursor.fetchone()
+                try:
+                    details = json.loads(row["recommendation_text"])
+                    if not isinstance(details, dict):
+                        details = {"generated_plan": [row["recommendation_text"]]}
+                except (ValueError, TypeError):
+                    details = {"generated_plan": [row["recommendation_text"]]}
+                details["appointment_id"] = completed_consultation(row["client_id"], dietitian_id, details.get("appointment_id"))
+                cursor.execute("UPDATE ai_recommendation SET recommendation_text=%s WHERE recommendation_id=%s AND status='PENDING_REVIEW'", (json.dumps(details), recommendation_id))
+        else:
+            record = ai_recommendations_db[recommendation_id]
+            record["appointment_id"] = completed_consultation(record["client_id"], dietitian_id, record.get("appointment_id"))
     if data.action == "MODIFIED" and not (data.notes or "").strip():
         raise HTTPException(
             status_code=422,

@@ -2720,3 +2720,12 @@ textarea {
         padding: 13px;
     }
 }
+/* Care workflow uses the existing panel, form and button system. */
+.care-workflow { margin-top: 1.5rem; }
+.care-workflow h3 { margin-top: 1.75rem; }
+.care-history { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+.care-history dt { font-weight: 600; }
+.care-history dd { margin: .4rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.care-entry { padding: 1rem 0; border-bottom: 1px solid #dfe4da; }
+.care-entry p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.care-workflow [data-care-message]:not(:empty) { padding: .75rem; background: #fff0e5; margin-bottom: 1rem; }

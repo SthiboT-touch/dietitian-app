@@ -14,6 +14,7 @@ users_db, clients_db, checkin_events_db,
 from zoneinfo import ZoneInfo
 from schemas import AppointmentCreate, AppointmentDecision, GoalCreate
 from security import current_identity, authorize_client_access
+from consultations import completed_consultation
 
 router = APIRouter()
 
@@ -66,6 +67,17 @@ def create_appointment(
             detail="Appointment date must be in the future",
         )
 
+    if data.branch_id:
+        if config.DATABASE_ENABLED:
+            with database.cursor() as cursor:
+                cursor.execute("SELECT branch_id, status FROM dietitian WHERE dietitian_id=%s", (data.dietitian_id,))
+                dietitian = cursor.fetchone()
+        else:
+            dietitian = users_db.get(data.dietitian_id)
+        if not dietitian or dietitian.get("status") != "APPROVED":
+            raise HTTPException(422, "Choose an approved dietitian")
+        if str(dietitian.get("branch_id")) != data.branch_id:
+            raise HTTPException(422, "Dietitian does not practice at the selected branch")
     appt_id = f"appt_{uuid.uuid4().hex[:8]}"
 
     if config.DATABASE_ENABLED:
@@ -80,10 +92,12 @@ def create_appointment(
                     duration,
                     status,
                     appointment_type,
-                    meeting_link
+                    meeting_link,
+                    branch_id,
+                    consultation_type
                 )
-                VALUES (%s, %s, %s, %s, %s, 'PENDING', %s, NULL)
-                RETURNING status, date_time, appointment_type, meeting_link
+                VALUES (%s, %s, %s, %s, %s, 'PENDING', %s, NULL, %s, %s)
+                RETURNING status, date_time, appointment_type, meeting_link, branch_id, consultation_type
                 """,
                 (
                     appt_id,
@@ -92,6 +106,8 @@ def create_appointment(
                     data.appointment_date,
                     30,
                     data.appointment_type,
+                    data.branch_id,
+                    data.consultation_type,
                 ),
             )
             row = cursor.fetchone()
@@ -104,6 +120,8 @@ def create_appointment(
             "status": row["status"],
             "appointment_type": row["appointment_type"],
             "meeting_link": row["meeting_link"],
+            "branch_id": row["branch_id"],
+            "consultation_type": row["consultation_type"],
         }
 
         return {
@@ -119,6 +137,8 @@ def create_appointment(
         "appointment_date": appointment_date.isoformat(),
         "appointment_type": data.appointment_type,
         "meeting_link": None,
+        "branch_id": data.branch_id,
+        "consultation_type": data.consultation_type,
     }
 
     appointments_db[appt_id] = appointment
@@ -150,6 +170,8 @@ def get_appointment_calendar(
                     a.dietitian_id,
                     a.date_time AS appointment_date,
                     a.status,
+                    a.branch_id,
+                    a.consultation_type,
                     a.appointment_type,
                     a.meeting_link,
                     c.name AS client_name,
@@ -163,7 +185,8 @@ def get_appointment_calendar(
                     SELECT e.checked_in_at
                     FROM client_checkin_event e
                     WHERE e.client_id = a.client_id
-                      AND e.branch_id = d.branch_id
+                      AND e.appointment_id = a.appointment_id
+                      AND e.branch_id = COALESCE(a.branch_id, d.branch_id)
                       AND (e.checked_in_at AT TIME ZONE 'Africa/Johannesburg')::date
                           = a.date_time::date
                     ORDER BY e.checked_in_at DESC
@@ -211,9 +234,12 @@ def get_appointment_calendar(
         checked_in_at = None
 
         for event in checkin_events_db:
+            if event.get("appointment_id") != appointment["appointment_id"]:
+                continue
             if event.get("client_id") != appointment["client_id"]:
                 continue
-            if not branch_id or event.get("branch_id") != branch_id:
+            visit_branch = appointment.get("branch_id") or branch_id
+            if not visit_branch or event.get("branch_id") != visit_branch:
                 continue
 
             event_time = event.get("checked_in_at")
@@ -294,6 +320,8 @@ def get_appointments(
                     dietitian_id,
                     date_time AS appointment_date,
                     status,
+                    branch_id,
+                    consultation_type,
                     appointment_type,
                     meeting_link
                 FROM appointment
@@ -404,7 +432,7 @@ def decide_appointment(
                 WHERE appointment_id = %s
                 RETURNING appointment_id, client_id, dietitian_id,
                           date_time AS appointment_date, status,
-                          appointment_type, meeting_link
+                          appointment_type, meeting_link, branch_id, consultation_type
                 """,
                 (new_status, new_status, data.meeting_link, appointment_id),
             )
@@ -478,15 +506,51 @@ def decide_appointment(
 
     return {"message": "Appointment status updated", "appointment": appointment}
 
+@router.post("/api/v1/appointments/{appointment_id}/complete", tags=["4. Appointments & Goals"])
+def complete_appointment(appointment_id: str, authorization: Optional[str] = Header(default=None)):
+    role, account_id = current_identity(authorization)
+    if role != "dietitian":
+        raise HTTPException(403, "Only the appointment's dietitian can complete the consultation")
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute("SELECT client_id, dietitian_id, status, date_time <= (NOW() AT TIME ZONE 'Africa/Johannesburg') AS has_started FROM appointment WHERE appointment_id=%s FOR UPDATE", (appointment_id,))
+            appointment = cursor.fetchone()
+            if not appointment:
+                raise HTTPException(404, "Appointment not found")
+            if str(appointment["dietitian_id"]) != account_id:
+                raise HTTPException(403, "Not your appointment")
+            if appointment["status"] not in {"CONFIRMED", "SCHEDULED"} or not appointment["has_started"]:
+                raise HTTPException(409, "Only a confirmed consultation whose scheduled time has arrived can be completed")
+            cursor.execute("UPDATE appointment SET status='COMPLETED' WHERE appointment_id=%s", (appointment_id,))
+    else:
+        appointment = appointments_db.get(appointment_id)
+        if not appointment:
+            raise HTTPException(404, "Appointment not found")
+        if appointment["dietitian_id"] != account_id:
+            raise HTTPException(403, "Not your appointment")
+        when = datetime.fromisoformat(appointment["appointment_date"].replace("Z", "+00:00"))
+        from datetime import timezone, timedelta
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone(timedelta(hours=2)))
+        if appointment["status"] not in {"CONFIRMED", "SCHEDULED"} or when > datetime.now(timezone.utc):
+            raise HTTPException(409, "Only a confirmed consultation whose scheduled time has arrived can be completed")
+        appointment["status"] = "COMPLETED"
+    return {"message": "Consultation completed", "appointment_id": appointment_id, "status": "COMPLETED"}
+
+
 @router.post("/api/v1/goals", tags=["4. Appointments & Goals"])
 def set_goal(data: GoalCreate, authorization: Optional[str] = Header(default=None)):
-    authorize_client_access(data.client_id, current_identity(authorization))
+    identity = current_identity(authorization)
+    if identity[0] != "dietitian":
+        raise HTTPException(status_code=403, detail="Only the assigned dietitian can set goals")
+    authorize_client_access(data.client_id, identity)
+    data.appointment_id = completed_consultation(data.client_id, identity[1], data.appointment_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO nutrition_goal (client_id, goal_type, target_value) VALUES (%s, %s, %s) "
+                "INSERT INTO nutrition_goal (client_id, goal_type, target_value, appointment_id) VALUES (%s, %s, %s, %s) "
                 "RETURNING goal_id",
-                (data.client_id, data.target_metric, data.target_value),
+                (data.client_id, data.target_metric, data.target_value, data.appointment_id),
             )
             goal_id = cursor.fetchone()["goal_id"]
     else:
@@ -504,7 +568,7 @@ def get_goals(client_id: str, authorization: Optional[str] = Header(default=None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT goal_id, goal_type AS target_metric, current_value, target_value, target_date "
+                "SELECT goal_id, appointment_id, goal_type AS target_metric, current_value, target_value, target_date "
                 "FROM nutrition_goal WHERE client_id = %s ORDER BY target_date NULLS LAST, goal_id",
                 (client_id,),
             )

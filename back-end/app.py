@@ -22,6 +22,7 @@ from routers import (
     onboarding,
     cms,
     support,
+    care,
 )
 from audit import audit_sensitive_requests
 from diagnostics import request_diagnostics
@@ -86,5 +87,6 @@ for _router in (
     onboarding.router,
     cms.router,
     support.router,
+    care.router,
 ):
     app.include_router(_router)
