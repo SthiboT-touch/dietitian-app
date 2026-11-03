@@ -1968,9 +1968,26 @@ async function renderClientAppointments(
               .map(
                   (appointment) => `
     <article class="appointment-row">
-      <div><span class="appointment-status status-${escapeHtml((appointment.status || "scheduled").toLowerCase())}">${escapeHtml(appointment.status || "SCHEDULED")}</span><h3>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</h3></div>
-      <span>${escapeHtml(dietitians.find((dietitian) => dietitian.id === appointment.dietitian_id)?.full_name || `Dietitian ${appointment.dietitian_id}`)}</span>
-      ${activeTab === "upcoming" ? `<button class="button button-small button-reject" data-cancel-appointment="${escapeHtml(appointment.appointment_id)}" type="button">Cancel appointment</button>` : ""}
+  <div>
+    <span class="appointment-status status-${escapeHtml((appointment.status || "scheduled").toLowerCase())}">
+      ${escapeHtml(appointment.status || "SCHEDULED")}
+    </span>
+    <h3>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</h3>
+    <p>Appointment type: <strong>${
+        appointment.appointment_type === "VIRTUAL" ? "Virtual" : "In-person"
+    }</strong></p>
+    ${
+        appointment.appointment_type === "VIRTUAL" &&
+        appointment.meeting_link &&
+        ["CONFIRMED", "SCHEDULED"].includes(appointment.status)
+            ? `<p><a href="${escapeHtml(appointment.meeting_link)}" target="_blank" rel="noopener noreferrer">Join virtual appointment</a></p>`
+            : ""
+    }
+  </div>
+
+  <span>${escapeHtml(dietitians.find((dietitian) => dietitian.id === appointment.dietitian_id)?.full_name || `Dietitian ${appointment.dietitian_id}`)}</span>
+
+  ${activeTab === "upcoming" ? `<button class="button button-small button-reject" data-cancel-appointment="${escapeHtml(appointment.appointment_id)}" type="button">Cancel appointment</button>` : ""}
     </article>`,
               )
               .join("")
@@ -1993,7 +2010,14 @@ async function renderClientAppointments(
                       ? `
       <form id="appointmentForm" class="form-grid appointment-booking-form">
         <div class="form-field"><label for="appointmentDietitian">Dietitian</label><select class="text-input" id="appointmentDietitian" name="dietitian_id" required><option value="">Choose a Dietitian</option>${dietitians.map((dietitian) => `<option value="${escapeHtml(dietitian.id)}" ${dietitian.id === preferredDietitianId ? "selected" : ""}>${escapeHtml(dietitian.full_name)}${dietitian.practice_name ? ` Â· ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` Â· ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` Â· ${escapeHtml(dietitian.branch_address)}` : ""}</option>`).join("")}</select></div>
-        <div class="form-field"><label for="appointmentDate">Preferred date and time</label><input class="text-input" id="appointmentDate" name="appointment_date" type="datetime-local" min="${minDate}" required></div>
+    <div class="form-field">
+  <label for="appointmentType">Appointment type</label>
+  <select class="text-input" id="appointmentType" name="appointment_type" required>
+    <option value="IN_PERSON">In-person</option>
+    <option value="VIRTUAL">Virtual</option>
+  </select>
+</div>
+    <div class="form-field"><label for="appointmentDate">Preferred date and time</label><input class="text-input" id="appointmentDate" name="appointment_date" type="datetime-local" min="${minDate}" required></div>
         <div class="form-field form-actions"><button class="button button-primary" type="submit">Send request <span class="button-arrow" aria-hidden="true">&#8594;</span></button></div>
       </form>
       <p class="appointment-note">Your request stays pending until the selected Dietitian approves or rejects it.</p>`
@@ -2172,44 +2196,67 @@ async function renderAppointmentRequests() {
                 appointment.client_name || appointment.client_id,
             );
 
-        const appointmentCard = (appointment, showActions = false) => `
-            <article
-                class="appointment-request-row"
-                data-appointment-id="${escapeHtml(appointment.appointment_id)}"
-                data-patient-card
-            >
-                <div class="appointment-request-details">
-                    <span class="appointment-status ${
-                        appointment.status === "PENDING"
-                            ? "status-pending"
-                            : "status-confirmed"
-                    }">${escapeHtml(appointment.status)}</span>
-                    <h2>${patientName(appointment)}</h2>
-                    <p>${escapeHtml(formatTime(appointment.appointment_date))}</p>
-                </div>
-                <div class="review-actions">
-                    <button
-                        class="button button-small"
-                        data-patient-context="${escapeHtml(appointment.client_id)}"
-                        aria-expanded="false"
-                        type="button"
-                    >View patient info</button>
-                    ${
-                        showActions
-                            ? `
-                                <button class="button button-small button-reject"
-                                    data-appointment-decision="REJECTED"
-                                    type="button">Reject</button>
-                                <button class="button button-small button-approve"
-                                    data-appointment-decision="APPROVED"
-                                    type="button">Approve</button>
-                            `
-                            : ""
-                    }
-                </div>
-                <div data-patient-preview hidden></div>
-            </article>
-        `;
+      const appointmentCard = (appointment, showActions = false) => `
+    <article
+        class="appointment-request-row"
+        data-appointment-id="${escapeHtml(appointment.appointment_id)}"
+        data-appointment-type="${escapeHtml(appointment.appointment_type || "IN_PERSON")}"
+        data-patient-card
+    >
+        <div class="appointment-request-details">
+            <span class="appointment-status ${
+                appointment.status === "PENDING"
+                    ? "status-pending"
+                    : "status-confirmed"
+            }">${escapeHtml(appointment.status)}</span>
+
+            <h2>${patientName(appointment)}</h2>
+            <p>${escapeHtml(formatTime(appointment.appointment_date))}</p>
+
+            <p>
+                Appointment type:
+                <strong>${
+                    appointment.appointment_type === "VIRTUAL"
+                        ? "Virtual"
+                        : "In-person"
+                }</strong>
+            </p>
+
+            ${
+                appointment.appointment_type === "VIRTUAL" &&
+                appointment.meeting_link &&
+                ["CONFIRMED", "SCHEDULED"].includes(appointment.status)
+                    ? `<p><a href="${escapeHtml(appointment.meeting_link)}" target="_blank" rel="noopener noreferrer">Join virtual appointment</a></p>`
+                    : ""
+            }
+        </div>
+
+        <div class="review-actions">
+            <button
+                class="button button-small"
+                data-patient-context="${escapeHtml(appointment.client_id)}"
+                aria-expanded="false"
+                type="button"
+            >View patient info</button>
+
+            ${
+                showActions
+                    ? `
+                        <button class="button button-small button-reject"
+                            data-appointment-decision="REJECTED"
+                            type="button">Reject</button>
+
+                        <button class="button button-small button-approve"
+                            data-appointment-decision="APPROVED"
+                            type="button">Approve</button>
+                    `
+                    : ""
+            }
+        </div>
+
+        <div data-patient-preview hidden></div>
+    </article>
+`;
 
         workspaceContent.innerHTML = `
             ${pageHeading(
@@ -2349,41 +2396,80 @@ async function renderAppointmentRequests() {
 
         bindPatientContextButtons();
 
-        workspaceContent.querySelectorAll("[data-appointment-decision]").forEach((button) => {
-            button.addEventListener("click", async () => {
-                const card = button.closest("[data-appointment-id]");
+       workspaceContent.querySelectorAll("[data-appointment-decision]").forEach((button) => {
+    button.addEventListener("click", async () => {
+        const card = button.closest("[data-appointment-id]");
+        const action = button.dataset.appointmentDecision;
+        let meetingLink = "";
 
-                card.querySelectorAll("button").forEach((item) => {
-                    item.disabled = true;
-                });
+               if (
+            action === "APPROVED" &&
+            card.dataset.appointmentType === "VIRTUAL"
+        ) {
+            const enteredLink = window.prompt(
+                "Before approving this virtual appointment:\n\n" +
+                "1. Create a meeting using Google Meet or Zoom.\n" +
+                "2. Copy the meeting invitation link.\n" +
+                "3. Paste the link below.\n\n" +
+                "Enter the HTTPS meeting link:"
+            );
 
-                const action = button.dataset.appointmentDecision;
+            if (enteredLink === null) {
+                return;
+            }
 
-                try {
-                    await request(
-                        `/api/v1/appointments/${encodeURIComponent(card.dataset.appointmentId)}`,
-                        {
-                            method: "PATCH",
-                            body: JSON.stringify({ action }),
-                        },
-                    );
+            meetingLink = enteredLink.trim();
 
-                    await renderAppointmentRequests();
+            let validMeetingLink = false;
 
-                    showWorkspaceMessage(
-                        action === "APPROVED"
-                            ? "Appointment confirmed."
-                            : "Appointment request rejected.",
-                    );
-                } catch (error) {
-                    card.querySelectorAll("button").forEach((item) => {
-                        item.disabled = false;
-                    });
+            try {
+                const parsedLink = new URL(meetingLink);
+                validMeetingLink = parsedLink.protocol === "https:";
+            } catch {
+                validMeetingLink = false;
+            }
 
-                    showWorkspaceMessage(error.message, true);
-                }
-            });
+            if (!validMeetingLink) {
+                showWorkspaceMessage(
+                    "Please enter a valid HTTPS meeting link.",
+                    true,
+                );
+                return;
+            }
+        }
+
+        card.querySelectorAll("button").forEach((item) => {
+            item.disabled = true;
         });
+
+        try {
+            await request(
+                `/api/v1/appointments/${encodeURIComponent(card.dataset.appointmentId)}`,
+                {
+                    method: "PATCH",
+                    body: JSON.stringify({
+                        action,
+                        ...(meetingLink ? { meeting_link: meetingLink } : {}),
+                    }),
+                },
+            );
+
+            await renderAppointmentRequests();
+
+            showWorkspaceMessage(
+                action === "APPROVED"
+                    ? "Appointment confirmed."
+                    : "Appointment request rejected.",
+            );
+        } catch (error) {
+            card.querySelectorAll("button").forEach((item) => {
+                item.disabled = false;
+            });
+
+            showWorkspaceMessage(error.message, true);
+        }
+    });
+});
     }
 
     renderCalendar();
