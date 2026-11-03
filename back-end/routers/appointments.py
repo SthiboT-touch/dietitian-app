@@ -1,9 +1,9 @@
 """4. Appointments and goals."""
 
 import uuid
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Response
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import database
 import config
 
@@ -11,12 +11,15 @@ from state import (
  appointments_db,goals_db,
 users_db, clients_db, checkin_events_db,
 )
-from zoneinfo import ZoneInfo
 from schemas import AppointmentCreate, AppointmentDecision, GoalCreate
 from security import current_identity, authorize_client_access
 from consultations import completed_consultation
+from virtual_meetings import (
+    ACTIVE_MEETING_STATUSES, ensure_meeting_link, is_virtual, meeting_lock, public_appointment,
+)
 
 router = APIRouter()
+SOUTH_AFRICA = timezone(timedelta(hours=2))
 
 
 # --- 4. APPOINTMENTS & GOALS ---
@@ -200,7 +203,7 @@ def get_appointment_calendar(
 
             return [
                 {
-                    **dict(row),
+                    **public_appointment(row, (role, dietitian_id)),
                     "appointment_date": row["appointment_date"].isoformat(),
                     "checked_in_at": (
                         row["checked_in_at"].isoformat()
@@ -228,7 +231,7 @@ def get_appointment_calendar(
             appointment["appointment_date"].replace("Z", "+00:00")
         )
         local_date = appointment_date.astimezone(
-            ZoneInfo("Africa/Johannesburg")
+            SOUTH_AFRICA
         ).date() if appointment_date.tzinfo else appointment_date.date()
 
         checked_in_at = None
@@ -252,7 +255,7 @@ def get_appointment_calendar(
                 )
 
             event_date = (
-                event_time.astimezone(ZoneInfo("Africa/Johannesburg")).date()
+                event_time.astimezone(SOUTH_AFRICA).date()
                 if event_time.tzinfo
                 else event_time.date()
             )
@@ -263,7 +266,7 @@ def get_appointment_calendar(
 
         results.append(
             {
-                **appointment,
+                **public_appointment(appointment, (role, dietitian_id)),
                 "client_name": patient.get("name")
                 or patient.get("full_name")
                 or appointment["client_id"],
@@ -337,7 +340,7 @@ def get_appointments(
 
             return [
                 {
-                    **dict(row),
+                    **public_appointment(row, (role, account_id)),
                     "appointment_date": row["appointment_date"].isoformat(),
                 }
                 for row in cursor.fetchall()
@@ -359,7 +362,7 @@ def get_appointments(
             if appointment["dietitian_id"] == dietitian_id
         ]
 
-    return appointments
+    return [public_appointment(a, (role, account_id)) for a in appointments]
 
 @router.patch("/api/v1/appointments/{appointment_id}", tags=["4. Appointments & Goals"])
 def decide_appointment(
@@ -379,7 +382,7 @@ def decide_appointment(
         with database.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT status, client_id, dietitian_id, appointment_type,
+                SELECT status, client_id, dietitian_id, appointment_type, consultation_type, meeting_link,
                        date_time > CURRENT_TIMESTAMP AS is_future
                 FROM appointment
                 WHERE appointment_id = %s
@@ -411,30 +414,21 @@ def decide_appointment(
                     detail="Only pending appointment requests can be reviewed",
                 )
 
-            if (
-                data.action == "APPROVED"
-                and appointment["appointment_type"] == "VIRTUAL"
-                and not data.meeting_link
-            ):
-                raise HTTPException(
-                    status_code=422,
-                    detail="A meeting link is required for virtual appointments",
-                )
+            meeting_link = (
+                ensure_meeting_link(appointment, data.meeting_link)
+                if new_status == "CONFIRMED" else None
+            )
 
             cursor.execute(
                 """
                 UPDATE appointment
-                SET status = %s,
-                    meeting_link = CASE
-                        WHEN %s = 'CONFIRMED' THEN %s
-                        ELSE meeting_link
-                    END
+                SET status = %s, meeting_link = %s
                 WHERE appointment_id = %s
                 RETURNING appointment_id, client_id, dietitian_id,
                           date_time AS appointment_date, status,
                           appointment_type, meeting_link, branch_id, consultation_type
                 """,
-                (new_status, new_status, data.meeting_link, appointment_id),
+                (new_status, meeting_link, appointment_id),
             )
 
             updated = cursor.fetchone()
@@ -448,63 +442,115 @@ def decide_appointment(
         return {
             "message": "Appointment status updated",
             "appointment": {
-                **dict(updated),
+                **public_appointment(updated, identity),
                 "appointment_date": updated["appointment_date"].isoformat(),
             },
         }
 
-    appointment = appointments_db.get(appointment_id)
+    with meeting_lock:
+        appointment = appointments_db.get(appointment_id)
 
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Appointment not found")
+        if not appointment:
+            raise HTTPException(status_code=404, detail="Appointment not found")
 
-    _authorize_appointment_decision(appointment, data.action, identity)
+        _authorize_appointment_decision(appointment, data.action, identity)
 
-    current_status = appointment["status"]
+        current_status = appointment["status"]
 
-    if data.action == "CANCELLED":
-        appointment_date = datetime.fromisoformat(
-            appointment["appointment_date"].replace("Z", "+00:00")
-        )
-        now = (
-            datetime.now(appointment_date.tzinfo)
-            if appointment_date.tzinfo
-            else datetime.now()
-        )
+        if data.action == "CANCELLED":
+            appointment_date = datetime.fromisoformat(
+                appointment["appointment_date"].replace("Z", "+00:00")
+            )
+            now = (
+                datetime.now(appointment_date.tzinfo)
+                if appointment_date.tzinfo
+                else datetime.now()
+            )
 
-        if (
-            current_status not in {"PENDING", "CONFIRMED", "SCHEDULED"}
-            or appointment_date <= now
-        ):
+            if (
+                current_status not in {"PENDING", "CONFIRMED", "SCHEDULED"}
+                or appointment_date <= now
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Only future pending or confirmed appointments can be cancelled",
+                )
+        elif current_status != "PENDING":
             raise HTTPException(
                 status_code=409,
-                detail="Only future pending or confirmed appointments can be cancelled",
+                detail="Only pending appointment requests can be reviewed",
             )
-    elif current_status != "PENDING":
-        raise HTTPException(
-            status_code=409,
-            detail="Only pending appointment requests can be reviewed",
+
+        appointment["meeting_link"] = (
+            ensure_meeting_link(appointment, data.meeting_link)
+            if new_status == "CONFIRMED" else None
         )
+        appointment["status"] = new_status
+        if new_status == "CONFIRMED":
+            client = users_db.get(appointment["client_id"])
+            if client:
+                client["dietitian_id"] = appointment["dietitian_id"]
 
-    if (
-        data.action == "APPROVED"
-        and appointment.get("appointment_type") == "VIRTUAL"
-        and not data.meeting_link
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail="A meeting link is required for virtual appointments",
-        )
+        return {"message": "Appointment status updated", "appointment": public_appointment(appointment, identity)}
 
-    appointment["status"] = new_status
 
-    if new_status == "CONFIRMED":
-        appointment["meeting_link"] = data.meeting_link
-        client = users_db.get(appointment["client_id"])
-        if client:
-            client["dietitian_id"] = appointment["dietitian_id"]
+def _authorize_meeting(appointment, identity, create=False):
+    role, account_id = identity
+    doctor = role == "dietitian" and str(appointment["dietitian_id"]) == account_id
+    patient = role == "client" and str(appointment["client_id"]) == account_id
+    if not doctor and (create or not patient):
+        raise HTTPException(403, "Only the appointment participants can access this meeting; only its dietitian can create the link")
+    if not is_virtual(appointment) or appointment["status"] not in ACTIVE_MEETING_STATUSES:
+        raise HTTPException(409, "A confirmed virtual appointment is required")
 
-    return {"message": "Appointment status updated", "appointment": appointment}
+
+@router.get("/api/v1/appointments/{appointment_id}/meeting", tags=["4. Appointments & Goals"])
+def get_appointment_meeting(appointment_id: str, response: Response, authorization: Optional[str] = Header(default=None)):
+    identity = current_identity(authorization)
+    response.headers["Cache-Control"] = "no-store"
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT appointment_id, client_id, dietitian_id, status, appointment_type, consultation_type, meeting_link "
+                "FROM appointment WHERE appointment_id=%s", (appointment_id,),
+            )
+            appointment = cursor.fetchone()
+    else:
+        appointment = appointments_db.get(appointment_id)
+    if not appointment:
+        raise HTTPException(404, "Appointment not found")
+    _authorize_meeting(appointment, identity)
+    return {"appointment_id": appointment_id, "meeting_link": appointment.get("meeting_link")}
+
+
+@router.post("/api/v1/appointments/{appointment_id}/meeting", tags=["4. Appointments & Goals"])
+def create_appointment_meeting(appointment_id: str, response: Response, authorization: Optional[str] = Header(default=None)):
+    """Backfill missing links on existing confirmed visits; retries reuse the room."""
+    identity = current_identity(authorization)
+    if identity[0] != "dietitian":
+        raise HTTPException(403, "Only the appointment's dietitian can create its meeting link")
+    response.headers["Cache-Control"] = "no-store"
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT appointment_id, client_id, dietitian_id, status, appointment_type, consultation_type, meeting_link "
+                "FROM appointment WHERE appointment_id=%s FOR UPDATE", (appointment_id,),
+            )
+            appointment = cursor.fetchone()
+            if not appointment:
+                raise HTTPException(404, "Appointment not found")
+            _authorize_meeting(appointment, identity, create=True)
+            link = ensure_meeting_link(appointment)
+            cursor.execute("UPDATE appointment SET meeting_link=%s WHERE appointment_id=%s", (link, appointment_id))
+    else:
+        with meeting_lock:
+            appointment = appointments_db.get(appointment_id)
+            if not appointment:
+                raise HTTPException(404, "Appointment not found")
+            _authorize_meeting(appointment, identity, create=True)
+            link = ensure_meeting_link(appointment)
+    return {"appointment_id": appointment_id, "meeting_link": link}
+
 
 @router.post("/api/v1/appointments/{appointment_id}/complete", tags=["4. Appointments & Goals"])
 def complete_appointment(appointment_id: str, authorization: Optional[str] = Header(default=None)):

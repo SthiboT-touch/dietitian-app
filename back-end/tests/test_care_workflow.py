@@ -96,7 +96,6 @@ def test_existing_appointment_format_and_manual_meeting_link_are_preserved():
     assert created.status_code == 200
     appointment_id = created.json()["appointment"]["appointment_id"]
     url = f"/api/v1/appointments/{appointment_id}"
-    assert api.patch(url, json={"action": "APPROVED"}, headers=auth("clinician")).status_code == 422
     approved = api.patch(url, json={"action": "APPROVED", "meeting_link": "https://meet.google.com/abc-defg-hij"}, headers=auth("clinician"))
     assert approved.status_code == 200
     stored = api.get("/api/v1/appointments", headers=auth("patient")).json()[0]

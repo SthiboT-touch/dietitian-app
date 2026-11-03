@@ -1972,9 +1972,15 @@ async function renderClientAppointments(
     ]);
     const branches = [...new Map(dietitians.filter(d => d.branch_id).map(d => [d.branch_id, d])).values()];
     const now = Date.now();
-    const isUpcoming = (appointment) =>
-        new Date(appointment.appointment_date).getTime() >= now &&
-        ["PENDING", "CONFIRMED", "SCHEDULED"].includes(appointment.status || "SCHEDULED");
+    const isUpcoming = (appointment) => {
+        const when = new Date(appointment.appointment_date);
+        const status = appointment.status || "SCHEDULED";
+        const ongoingVirtual = isVirtualAppointment(appointment)
+            && ["CONFIRMED", "SCHEDULED"].includes(status)
+            && when.toDateString() === new Date(now).toDateString();
+        return ["PENDING", "CONFIRMED", "SCHEDULED"].includes(status)
+            && (when.getTime() >= now || ongoingVirtual);
+    };
     const upcoming = appointments.filter(isUpcoming);
     const past = appointments.filter((appointment) => !isUpcoming(appointment));
     const activeTab = ["book", "upcoming", "past"].includes(selectedTab) ? selectedTab : "upcoming";
@@ -1992,15 +1998,9 @@ async function renderClientAppointments(
     <h3>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</h3>
     <p>${escapeHtml(appointment.consultation_type === "FOLLOW_UP" ? "Follow-up consultation" : "Initial consultation")} &middot; ${escapeHtml(dietitians.find(d => d.branch_id === appointment.branch_id)?.branch_name || "")}</p>
     <p>Appointment type: <strong>${
-        appointment.appointment_type === "VIRTUAL" ? "Virtual" : "In-person"
+        isVirtualAppointment(appointment) ? "Virtual" : "In-person"
     }</strong></p>
-    ${
-        appointment.appointment_type === "VIRTUAL" &&
-        appointment.meeting_link &&
-        ["CONFIRMED", "SCHEDULED"].includes(appointment.status)
-            ? `<p><a href="${escapeHtml(appointment.meeting_link)}" target="_blank" rel="noopener noreferrer">Join virtual appointment</a></p>`
-            : ""
-    }
+    ${appointmentMeetingMarkup(appointment)}
   </div>
 
   <span>${escapeHtml(dietitians.find((dietitian) => dietitian.id === appointment.dietitian_id)?.full_name || `Dietitian ${appointment.dietitian_id}`)}</span>
@@ -2016,6 +2016,7 @@ async function renderClientAppointments(
     workspaceContent.innerHTML = `
     ${pageHeading("MY APPOINTMENTS", "Time with your care team.", "Request a visit and track its status here.")}
     <div data-message class="workspace-message" hidden></div>
+    <div class="form-actions"><button class="button quiet-button" type="button" data-refresh-appointments>Refresh appointments</button></div>
     <div class="meal-view-tabs appointment-tabs" role="tablist" aria-label="Appointments">
       <button class="meal-view-tab${activeTab === "book" ? " is-active" : ""}" role="tab" aria-selected="${activeTab === "book"}" data-appointment-tab="book" type="button">Book Appointment</button>
       <button class="meal-view-tab${activeTab === "upcoming" ? " is-active" : ""}" role="tab" aria-selected="${activeTab === "upcoming"}" data-appointment-tab="upcoming" type="button">Upcoming</button>
@@ -2040,13 +2041,19 @@ async function renderClientAppointments(
     <div class="form-field"><label for="appointmentDate">Preferred date and time</label><input class="text-input" id="appointmentDate" name="appointment_date" type="datetime-local" min="${minDate}" required></div>
         <div class="form-field form-actions"><button class="button button-primary" type="submit">Send request <span class="button-arrow" aria-hidden="true">&#8594;</span></button></div>
       </form>
-      <p class="appointment-note">Your request stays pending until the selected Dietitian approves or rejects it.</p>`
+      <p class="appointment-note">Your request stays pending until the selected Dietitian approves or rejects it.</p>
+      <p class="appointment-note" data-virtual-booking-note hidden>For virtual visits, your dietitian confirms the appointment and prepares a meeting link. Join from this page when ready.</p>`
                       : '<p class="empty-state">No approved Dietitians are available for booking right now.</p>'
               }</section>`
             : `
       <div class="section-heading"><h2>${activeTab === "upcoming" ? "Upcoming Appointments" : "Past Appointments"}</h2><span>${rows.length} APPOINTMENTS</span></div>
       <div class="appointment-list">${appointmentRows}</div>`
     }`;
+    workspaceContent.querySelector('[data-refresh-appointments]').addEventListener('click', async event => {
+        event.currentTarget.disabled = true;
+        try { await renderClientAppointments(clientId, activeTab); }
+        catch (error) { showWorkspaceMessage(error.message, true); event.target.disabled = false; }
+    });
     workspaceContent.querySelectorAll("[data-appointment-tab]").forEach((button) => {
         button.addEventListener("click", () =>
             renderClientAppointments(
@@ -2071,6 +2078,11 @@ async function renderClientAppointments(
         };
         branch.addEventListener("change", filterDietitians);
         filterDietitians();
+        const format = form.querySelector('#appointmentType');
+        const note = workspaceContent.querySelector('[data-virtual-booking-note]');
+        const updateMeetingNote = () => { note.hidden = format.value !== 'VIRTUAL'; };
+        format.addEventListener('change', updateMeetingNote);
+        updateMeetingNote();
     }
 
     if (form)
@@ -2110,10 +2122,10 @@ async function renderClientAppointments(
     });
 }
 
-async function renderAppointmentRequests() {
+async function renderAppointmentRequests(initialDate = null) {
     const appointments = await request("/api/v1/appointments/calendar");
 
-    const selectedDate = new Date();
+    const selectedDate = new Date(initialDate || Date.now());
     selectedDate.setHours(0, 0, 0, 0);
 
     let calendarMonth = new Date(
@@ -2236,7 +2248,7 @@ async function renderAppointmentRequests() {
     <article
         class="appointment-request-row"
         data-appointment-id="${escapeHtml(appointment.appointment_id)}"
-        data-appointment-type="${escapeHtml(appointment.appointment_type || "IN_PERSON")}"
+        data-appointment-type="${isVirtualAppointment(appointment) ? "VIRTUAL" : "IN_PERSON"}"
         data-patient-card
     >
         <div class="appointment-request-details">
@@ -2252,19 +2264,14 @@ async function renderAppointmentRequests() {
             <p>
                 Appointment type:
                 <strong>${
-                    appointment.appointment_type === "VIRTUAL"
+                    isVirtualAppointment(appointment)
                         ? "Virtual"
                         : "In-person"
                 }</strong>
             </p>
 
-            ${
-                appointment.appointment_type === "VIRTUAL" &&
-                appointment.meeting_link &&
-                ["CONFIRMED", "SCHEDULED"].includes(appointment.status)
-                    ? `<p><a href="${escapeHtml(appointment.meeting_link)}" target="_blank" rel="noopener noreferrer">Join virtual appointment</a></p>`
-                    : ""
-            }
+            ${appointmentMeetingMarkup(appointment, true)}
+            ${showActions ? meetingChoiceMarkup(appointment) : ""}
         </div>
 
         <div class="review-actions">
@@ -2431,47 +2438,22 @@ async function renderAppointmentRequests() {
             });
 
         bindPatientContextButtons();
+        bindMeetingControls(workspaceContent, () => renderAppointmentRequests(selectedDate.toISOString()));
 
        workspaceContent.querySelectorAll("[data-appointment-decision]").forEach((button) => {
     button.addEventListener("click", async () => {
         const card = button.closest("[data-appointment-id]");
         const action = button.dataset.appointmentDecision;
         let meetingLink = "";
-
-               if (
-            action === "APPROVED" &&
-            card.dataset.appointmentType === "VIRTUAL"
-        ) {
-            const enteredLink = window.prompt(
-                "Before approving this virtual appointment:\n\n" +
-                "1. Create a meeting using Google Meet or Zoom.\n" +
-                "2. Copy the meeting invitation link.\n" +
-                "3. Paste the link below.\n\n" +
-                "Enter the HTTPS meeting link:"
-            );
-
-            if (enteredLink === null) {
+        if (action === "APPROVED" && card.querySelector('[data-meeting-mode]')?.value === 'manual') {
+            const input = card.querySelector('[data-manual-meeting-link]');
+            const url = safeMeetingUrl(input.value.trim());
+            if (!url) {
+                showWorkspaceMessage('Enter a valid HTTPS meeting link, or choose the automatic Jitsi option.', true);
+                input.focus();
                 return;
             }
-
-            meetingLink = enteredLink.trim();
-
-            let validMeetingLink = false;
-
-            try {
-                const parsedLink = new URL(meetingLink);
-                validMeetingLink = parsedLink.protocol === "https:";
-            } catch {
-                validMeetingLink = false;
-            }
-
-            if (!validMeetingLink) {
-                showWorkspaceMessage(
-                    "Please enter a valid HTTPS meeting link.",
-                    true,
-                );
-                return;
-            }
+            meetingLink = url.href;
         }
 
         card.querySelectorAll("button").forEach((item) => {
@@ -2490,7 +2472,7 @@ async function renderAppointmentRequests() {
                 },
             );
 
-            await renderAppointmentRequests();
+            await renderAppointmentRequests(selectedDate.toISOString());
 
             showWorkspaceMessage(
                 action === "APPROVED"
