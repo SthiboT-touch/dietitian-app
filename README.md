@@ -101,6 +101,8 @@ AI workflows use LangGraph `StateGraph`s: chat loads recent context, routes gree
 
 The Oracle Cloud deployment workflow applies the client health schema repair and dietitian document-branch association before starting the API. It creates any missing client health tables, adds the missing lactation end date column, and associates existing verification documents with each dietitian's current branch without replacing existing records. For other deployments, run `python back-end/migrations/apply_002_client_health_schema.py` and `python back-end/migrations/apply_003_dietitian_document_branch.py` once with `DATABASE_URL` configured.
 
+All signed-in account roles can upload, replace, or remove a JPEG/PNG profile picture (up to 1 MB) from **My Profile**. For an existing PostgreSQL database outside the deployment workflow, run `python back-end/migrations/apply_021_account_profile_photos.py` after `012_registration_uploads.sql`; existing patient registration photos are carried forward.
+
 Appointment requests are created as `PENDING`; dietitian decisions change them to `CONFIRMED` or `REJECTED`, and patients can cancel future pending or confirmed appointments. Patients may create an account before joining a dietitian. For an existing PostgreSQL database, apply the status migration once with `python back-end/migrations/apply_001_appointment_approval_states.py`.
 
 For running the API outside Compose, set `OLLAMA_BASE_URL` (default `http://localhost:11434`) and `OLLAMA_MODEL` (default `llama3.2`) to match an Ollama instance with the selected model downloaded.

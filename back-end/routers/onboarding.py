@@ -4,17 +4,96 @@ import secrets
 from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 import config
 import database
-from onboarding_services import new_checkin_credential, checkin_hash, qr_svg
+from onboarding_services import MAX_PHOTO_BYTES, new_checkin_credential, checkin_hash, qr_svg, validate_profile_photo
 from role_management import require_roles
 from security import current_identity, authorize_client_access
 from state import profile_photos_db, checkin_credentials_db, checkin_events_db, staff_accounts_db, appointments_db, users_db
 
 router = APIRouter(tags=["Digital Onboarding"])
+
+
+def profile_photo_record(role, account_id):
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT content_type, file_data FROM account_profile_photo "
+                "WHERE account_type=%s AND account_id=%s",
+                (role, account_id),
+            )
+            image = cursor.fetchone()
+            if not image and role == "client":
+                cursor.execute(
+                    "SELECT content_type, file_data FROM client_profile_photo WHERE client_id=%s",
+                    (account_id,),
+                )
+                image = cursor.fetchone()
+        return image
+    return profile_photos_db.get(f"{role}:{account_id}") or (
+        profile_photos_db.get(account_id) if role == "client" else None
+    )
+
+
+@router.get("/api/v1/profile/photo")
+def get_my_profile_photo(authorization: Optional[str] = Header(default=None)):
+    role, account_id = current_identity(authorization)
+    image = profile_photo_record(role, account_id)
+    if not image:
+        raise HTTPException(404, "No profile photo uploaded")
+    return Response(
+        content=bytes(image["file_data"] if "file_data" in image else image["bytes"]),
+        media_type=image["content_type"],
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.put("/api/v1/profile/photo")
+async def upload_my_profile_photo(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(default=None),
+):
+    role, account_id = current_identity(authorization)
+    raw = await file.read(MAX_PHOTO_BYTES + 1)
+    validate_profile_photo(file.content_type, raw)
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO account_profile_photo (account_type, account_id, file_name, content_type, file_data) "
+                "VALUES (%s,%s,%s,%s,%s) "
+                "ON CONFLICT (account_type, account_id) DO UPDATE SET "
+                "file_name=EXCLUDED.file_name, content_type=EXCLUDED.content_type, "
+                "file_data=EXCLUDED.file_data, uploaded_at=NOW()",
+                (role, account_id, "profile-photo", file.content_type, raw),
+            )
+    else:
+        profile_photos_db[f"{role}:{account_id}"] = {
+            "filename": "profile-photo",
+            "content_type": file.content_type,
+            "bytes": raw,
+        }
+    return {"message": "Profile photo saved"}
+
+
+@router.delete("/api/v1/profile/photo")
+def delete_my_profile_photo(authorization: Optional[str] = Header(default=None)):
+    role, account_id = current_identity(authorization)
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM account_profile_photo WHERE account_type=%s AND account_id=%s",
+                (role, account_id),
+            )
+            if role == "client":
+                cursor.execute("DELETE FROM client_profile_photo WHERE client_id=%s", (account_id,))
+    else:
+        profile_photos_db.pop(f"{role}:{account_id}", None)
+        if role == "client":
+            profile_photos_db.pop(account_id, None)
+    return {"message": "Profile photo removed"}
 
 
 def require_checkin_appointment(client_id, cursor=None, branch_id=None, appointment_id=None, lock=False):

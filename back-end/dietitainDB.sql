@@ -1043,6 +1043,22 @@ CREATE TABLE IF NOT EXISTS client_profile_photo (
     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Self-managed portraits for every authenticated account role.
+CREATE TABLE IF NOT EXISTS account_profile_photo (
+    account_type VARCHAR(30) NOT NULL CHECK (
+        account_type IN (
+            'client', 'dietitian', 'admin', 'reception',
+            'branch_manager', 'compliance_officer', 'executive', 'content_manager'
+        )
+    ),
+    account_id VARCHAR(36) NOT NULL,
+    file_name VARCHAR(120) NOT NULL,
+    content_type VARCHAR(30) NOT NULL CHECK (content_type IN ('image/jpeg', 'image/png')),
+    file_data BYTEA NOT NULL,
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (account_type, account_id)
+);
+
 
 -- Onboarding: 013_client_qr_checkin.sql
 -- FR-1.7: store only SHA256 of random check-in credential; never ID numbers.

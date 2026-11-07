@@ -19,6 +19,16 @@ const staffRoleNames = {
 };
 
 let currentUser = null;
+let profileAvatarObjectUrl = null;
+
+function sessionToken() {
+    return (
+        sessionStorage.getItem(adminTokenKey) ||
+        sessionStorage.getItem(dietitianTokenKey) ||
+        sessionStorage.getItem(clientTokenKey) ||
+        sessionStorage.getItem(staffTokenKey)
+    );
+}
 
 async function request(url, options = {}) {
     const headers = new Headers(options.headers || {});
@@ -26,11 +36,7 @@ async function request(url, options = {}) {
         headers.set("Content-Type", "application/json");
     }
 
-    const token =
-        sessionStorage.getItem(adminTokenKey) ||
-        sessionStorage.getItem(dietitianTokenKey) ||
-        sessionStorage.getItem(clientTokenKey) ||
-        sessionStorage.getItem(staffTokenKey);
+    const token = sessionToken();
     if (token && !headers.has("Authorization")) {
         headers.set("Authorization", `Bearer ${token}`);
     }
@@ -58,6 +64,41 @@ async function request(url, options = {}) {
         throw new Error(message + reference);
     }
     return payload;
+}
+
+async function fetchProfilePhoto() {
+    const token = sessionToken();
+    const response = await fetch("/api/v1/profile/photo", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        cache: "no-store",
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) {
+        throw new Error(`Could not load profile photo (${response.status}).`);
+    }
+    return response.blob();
+}
+
+async function refreshAccountAvatar() {
+    const image = document.querySelector("#profileAvatarImage");
+    const initials = document.querySelector("#profileInitials");
+    if (!image || !initials) return;
+    try {
+        const photo = await fetchProfilePhoto();
+        if (profileAvatarObjectUrl) URL.revokeObjectURL(profileAvatarObjectUrl);
+        profileAvatarObjectUrl = photo ? URL.createObjectURL(photo) : null;
+        image.hidden = !profileAvatarObjectUrl;
+        image.src = profileAvatarObjectUrl || "";
+        initials.hidden = Boolean(profileAvatarObjectUrl);
+    } catch (error) {
+        image.hidden = true;
+        initials.hidden = false;
+        const message = document.querySelector("[data-profile-photo-message]");
+        if (message) {
+            message.textContent = error.message;
+            message.dataset.kind = "error";
+        }
+    }
 }
 
 // The health indicator reflects the real API/database result, not a hardcoded
@@ -161,11 +202,16 @@ function showWorkspace(user, initialView = "overview") {
     const accountName = user.full_name || user.name || "Your account";
     const firstName = accountName.split(" ")[0];
     document.querySelector("#profileName").textContent = firstName;
+    if (profileAvatarObjectUrl) URL.revokeObjectURL(profileAvatarObjectUrl);
+    profileAvatarObjectUrl = null;
+    document.querySelector("#profileAvatarImage").hidden = true;
+    document.querySelector("#profileInitials").hidden = false;
     document.querySelector("#profileInitials").textContent = accountName
         .split(/\s+/)
         .slice(0, 2)
         .map((part) => part[0].toUpperCase())
         .join("");
+    void refreshAccountAvatar();
     document.querySelector("#accountMenuFullName").textContent = accountName;
     document.querySelector("#accountMenuRole").textContent =
         staffRoleNames[user.type] || ({ client: "Patient", dietitian: "Dietitian", admin: "Administrator" }[user.type] || "Account");
@@ -1205,7 +1251,9 @@ function renderAdminProfile() {
         ${pageHeading("MY PROFILE", "Administrator profile.", "Your signed-in account details.")}
         <section class="content-panel"><dl class="profile-details">
             ${fields.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "Not provided")}</dd></div>`).join("")}
-        </dl></section>`;
+        </dl></section>
+        ${profilePhotoSectionMarkup()}`;
+    bindProfilePhotoControls();
 }
 
 async function renderMyProfile() {
@@ -1264,6 +1312,7 @@ async function renderMyProfile() {
 
           
        </section>
+    ${profilePhotoSectionMarkup()}
     ${user.type === "dietitian" ? `
     <div class="section-heading">
       <h2>Practice information</h2>
@@ -1285,7 +1334,98 @@ async function renderMyProfile() {
     </div>
     ` : ""}`;
     if (approval) bindApprovalResubmission();
+    bindProfilePhotoControls();
     if (user.type === "dietitian") bindGoButtons();
+}
+
+function profilePhotoSectionMarkup() {
+    return `<section class="content-panel">
+      <h2 class="compact-heading">Profile picture</h2>
+      <p>Upload a JPEG or PNG image up to 1 MB. You can replace or remove it at any time.</p>
+      <img data-profile-photo-preview class="profile-photo-preview" alt="Your profile picture" hidden>
+      <p data-profile-photo-empty>No profile picture uploaded.</p>
+      <form data-profile-photo-form class="profile-photo-actions">
+        <div class="form-field"><label for="profilePhotoFile">Choose a picture</label><input class="text-input" id="profilePhotoFile" name="file" type="file" accept="image/jpeg,image/png" required></div>
+        <button class="button button-primary" type="submit">Upload picture</button>
+        <button class="button" data-profile-photo-remove type="button" hidden>Remove picture</button>
+      </form>
+      <p data-profile-photo-message role="status" aria-live="polite"></p>
+    </section>`;
+}
+
+function bindProfilePhotoControls() {
+    const form = workspaceContent.querySelector("[data-profile-photo-form]");
+    if (!form) return;
+    const preview = workspaceContent.querySelector("[data-profile-photo-preview]");
+    const emptyMessage = workspaceContent.querySelector("[data-profile-photo-empty]");
+    const removeButton = workspaceContent.querySelector("[data-profile-photo-remove]");
+    const status = workspaceContent.querySelector("[data-profile-photo-message]");
+    const setPhotoMessage = (message, isError = false) => {
+        status.textContent = message;
+        status.dataset.kind = isError ? "error" : "success";
+    };
+    const refreshPreview = async () => {
+        try {
+            const photo = await fetchProfilePhoto();
+            if (!photo) {
+                if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+                delete preview.dataset.objectUrl;
+                preview.hidden = true;
+                preview.removeAttribute("src");
+                emptyMessage.hidden = false;
+                removeButton.hidden = true;
+                return true;
+            }
+            if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+            preview.dataset.objectUrl = URL.createObjectURL(photo);
+            preview.src = preview.dataset.objectUrl;
+            preview.hidden = false;
+            emptyMessage.hidden = true;
+            removeButton.hidden = false;
+            return true;
+        } catch (error) {
+            setPhotoMessage(error.message, true);
+            return false;
+        }
+    };
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const file = form.elements.file.files[0];
+        if (!file) return;
+        if (!["image/jpeg", "image/png"].includes(file.type) || file.size > 1024 * 1024) {
+            setPhotoMessage("Choose a JPEG or PNG image up to 1 MB.", true);
+            return;
+        }
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        const data = new FormData();
+        data.append("file", file);
+        try {
+            await request("/api/v1/profile/photo", { method: "PUT", body: data });
+            const previewLoaded = await refreshPreview();
+            await refreshAccountAvatar();
+            if (previewLoaded) setPhotoMessage("Profile picture updated.");
+            form.reset();
+        } catch (error) {
+            setPhotoMessage(error.message, true);
+        } finally {
+            button.disabled = false;
+        }
+    });
+    removeButton.addEventListener("click", async () => {
+        removeButton.disabled = true;
+        try {
+            await request("/api/v1/profile/photo", { method: "DELETE" });
+            const previewLoaded = await refreshPreview();
+            await refreshAccountAvatar();
+            if (previewLoaded) setPhotoMessage("Profile picture removed.");
+        } catch (error) {
+            setPhotoMessage(error.message, true);
+        } finally {
+            removeButton.disabled = false;
+        }
+    });
+    void refreshPreview();
 }
 
 function dietitianApprovalMarkup(approval) {
@@ -3387,7 +3527,9 @@ async function renderStaffProfile() {
       <div><dt>Role</dt><dd>${escapeHtml(staffRoleNames[profile.role] || profile.role)}</dd></div>
       <div><dt>Branch ID</dt><dd>${escapeHtml(profile.branch_id || "Organization-wide")}</dd></div>
       <div><dt>Status</dt><dd>${profile.is_active ? "Active" : "Inactive"}</dd></div>
-    </dl></section>`;
+    </dl></section>
+    ${profilePhotoSectionMarkup()}`;
+    bindProfilePhotoControls();
 }
 
 async function renderAccessEvents() {
@@ -4273,5 +4415,3 @@ try {
     sessionStorage.removeItem(sessionKey);
     sessionStorage.removeItem(adminTokenKey);
 }
-
-
