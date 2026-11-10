@@ -1263,12 +1263,38 @@ def get_admin_dashboard(admin_id: str = Depends(require_admin)):
                 ("appointments", "appointment"),
                 ("meal_plans", "meal_plan"),
             ]:
+                # Existing deployments can have a live database that predates
+                # one of the dashboard's tables. Check first so a missing table
+                # does not abort the whole dashboard request.
+                cursor.execute("SELECT to_regclass(%s) AS table_name", (table,))
+                if cursor.fetchone()["table_name"] is None:
+                    counts[label] = 0
+                    continue
                 cursor.execute(f"SELECT COUNT(*) AS total FROM {table}")
                 counts[label] = cursor.fetchone()["total"]
-            cursor.execute("SELECT COUNT(*) AS total FROM dietitian WHERE status = 'PENDING'")
-            counts["pending_approvals"] = cursor.fetchone()["total"]
-            cursor.execute("SELECT COUNT(*) AS total FROM approval_log")
-            counts["audit_events"] = cursor.fetchone()["total"]
+
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name = %s "
+                "AND column_name = %s) AS has_status",
+                ("dietitian", "status"),
+            )
+            has_dietitian_status = cursor.fetchone()["has_status"]
+            if counts["dietitians"] and has_dietitian_status:
+                cursor.execute(
+                    "SELECT COUNT(*) AS total FROM dietitian WHERE status = 'PENDING'"
+                )
+                counts["pending_approvals"] = cursor.fetchone()["total"]
+            else:
+                counts["pending_approvals"] = 0
+
+            # ``audit_events`` is a convenience counter; older schemas can
+            # lack the approval log even though the core dashboard is valid.
+            counts["audit_events"] = 0
+            cursor.execute("SELECT to_regclass(%s) AS table_name", ("approval_log",))
+            if cursor.fetchone()["table_name"] is not None:
+                cursor.execute("SELECT COUNT(*) AS total FROM approval_log")
+                counts["audit_events"] = cursor.fetchone()["total"]
         return counts
     dietitian_count = 0
     client_count = 0
