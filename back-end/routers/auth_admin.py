@@ -60,13 +60,18 @@ from security import (
     require_dietitian,
 )
 from helpers import email_is_registered, build_full_name
-from stytch_service import StytchEmailError, send_email_code, verify_email_code
+from email_verification import (
+    EmailVerificationError,
+    email_verification_enabled,
+    send_email_code,
+    verify_email_code,
+)
 
 router = APIRouter()
 
 
 def _set_email_verification(email: str, verified: bool, stytch_user_id: str | None = None) -> None:
-    """Update the local account after Stytch verifies an email address."""
+    """Update a matching account after its email address has been verified."""
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -86,8 +91,6 @@ def _set_email_verification(email: str, verified: bool, stytch_user_id: str | No
 
 
 def _require_verified_registration_email(email: str) -> dict | None:
-    if not config.STYTCH_ENABLED:
-        return None
     verification = verified_email_db.get(email.casefold())
     if not verification or verification["expires_at"] < time.time():
         verified_email_db.pop(email.casefold(), None)
@@ -101,24 +104,20 @@ def _require_verified_registration_email(email: str) -> dict | None:
 def send_email_verification_code(data: EmailVerificationSend):
     try:
         result = send_email_code(data.email)
-    except StytchEmailError as error:
+    except EmailVerificationError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return {
         "enabled": result["enabled"],
         "method_id": result.get("method_id"),
-        "message": (
-            "A verification code was sent to your email."
-            if result["enabled"]
-            else "Email verification is disabled in this environment."
-        ),
+        "message": "A verification code was sent to your email.",
     }
 
 
 @router.post("/api/v1/auth/email/verify-code", tags=["1. Auth & Admin"])
 def verify_email_verification_code(data: EmailVerificationCheck):
     try:
-        result = verify_email_code(data.method_id, data.code)
-    except StytchEmailError as error:
+        result = verify_email_code(data.method_id, data.code, data.email)
+    except EmailVerificationError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     if not result.get("enabled"):
         return {
@@ -178,14 +177,14 @@ def register_dietitian(data: DietitianRegister):
                     data.email,
                     password_hash,
                     data.license_number,
-                    bool(verified_email) or not config.STYTCH_ENABLED,
+                    bool(verified_email),
                 ),
             )
         user = {
             "id": user_id,
             "type": "dietitian",
             "status": "PENDING",
-            "email_verified": bool(verified_email) or not config.STYTCH_ENABLED,
+            "email_verified": bool(verified_email),
             "stytch_user_id": verified_email.get("stytch_user_id") if verified_email else None,
             **registration,
             "password_hash": password_hash,
@@ -213,7 +212,7 @@ def register_dietitian(data: DietitianRegister):
         "id": user_id,
         "type": "dietitian",
         "status": "PENDING",
-        "email_verified": bool(verified_email) or not config.STYTCH_ENABLED,
+        "email_verified": bool(verified_email),
         "stytch_user_id": verified_email.get("stytch_user_id") if verified_email else None,
         "business_id": business_id,
         "branch_id": branch_id,
@@ -323,7 +322,7 @@ def _create_client(
                         data.consent_date,
                         data.consent_signatory_name,
                         data.consent_signature,
-                        bool(verified_email) or not config.STYTCH_ENABLED,
+                        bool(verified_email),
                         verified_email.get("stytch_user_id") if verified_email else None,
                         client_id,
                     ),
@@ -402,7 +401,7 @@ def _create_client(
         **registration,
         "password_hash": hash_password(data.password),
     }
-    user["email_verified"] = bool(verified_email) or not config.STYTCH_ENABLED
+    user["email_verified"] = bool(verified_email)
     user["stytch_user_id"] = verified_email.get("stytch_user_id") if verified_email else None
     verified_email_db.pop(data.email.casefold(), None)
     users_db[client_id] = user
@@ -605,7 +604,7 @@ def login(data: LoginRequest):
     if not user or not verify_password(data.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if (
-        config.STYTCH_ENABLED
+        email_verification_enabled()
         and user.get("type") in {"client", "dietitian"}
         and not user.get("email_verified", False)
     ):

@@ -392,6 +392,27 @@ select:focus {
     gap: 4px;
     overflow-y: auto;
 }
+.side-nav .nav-item,
+.side-nav .nav-section-label {
+    display: none;
+}
+.main-nav-label {
+    margin: 0 0 4px 2px;
+    color: #747c70;
+    font-size: 11px;
+    font-weight: 600;
+}
+.main-nav-select {
+    width: 100%;
+    min-height: 42px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--green-deep);
+    font: inherit;
+    font-size: 12px;
+}
 .nav-section-label {
     padding: 10px 11px 3px;
     color: #959a90;
@@ -2449,6 +2470,28 @@ textarea {
     color: var(--muted);
     font-size: 12px;
     line-height: 1.6;
+}
+.email-verification {
+    display: grid;
+    gap: 9px;
+    margin: 12px 0;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #f8faf5;
+}
+.email-verification h3,
+.email-verification p {
+    margin: 0;
+}
+.email-verification h3 {
+    color: var(--green-deep);
+    font-size: 14px;
+}
+.email-verification p {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.5;
 }
 .signup-progress {
     display: grid;

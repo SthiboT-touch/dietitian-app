@@ -24,6 +24,7 @@ from schemas import (
     InfantSensitivityLog,
     MealLog,
     ClientProfileUpdate,
+    MaternalCareAccessUpdate,
 )
 from lactation_guidance import (
     INCREASE_MILK_GUIDANCE,
@@ -35,7 +36,12 @@ from lactation_guidance import (
     daily_feeding_observations,
 )
 from helpers import fetch_client_profile
-from security import current_identity, authorize_client_access, require_client_record_access
+from security import (
+    current_identity,
+    authorize_client_access,
+    require_client_record_access,
+    require_maternal_care_access,
+)
 
 router = APIRouter()
 
@@ -66,7 +72,8 @@ def list_clients(
             if client_id:
                 cursor.execute(
                     "SELECT client_id AS id, name, email, dietitian_id, status, id_number, date_of_birth, "
-                    "gender, phone_number, consent_accepted, height, activity_level, dietary_preferences "
+                    "gender, phone_number, consent_accepted, height, activity_level, dietary_preferences, "
+                    "maternal_care_enabled "
                     "FROM client WHERE client_id = %s",
                     (client_id,),
                 )
@@ -105,6 +112,7 @@ def list_clients(
             client["height"] = user.get("height")
             client["activity_level"] = user.get("activity_level")
             client["dietary_preferences"] = user.get("dietary_preferences")
+            client["maternal_care_enabled"] = bool(user.get("maternal_care_enabled", False))
         results.append(client)
     return results
 
@@ -114,13 +122,60 @@ def list_clients(
     dependencies=[Depends(require_client_record_access)],
     tags=["2. Patient Health & History"],
 )
-def get_client_profile(client_id: str):
+def get_client_profile(
+    client_id: str,
+    authorization: Optional[str] = Header(default=None),
+):
+    identity = current_identity(authorization)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            return fetch_client_profile(cursor, client_id)
-    if client_id not in clients_db:
-        clients_db[client_id] = {"allergies": [], "conditions": [], "metrics": [], "progress": []}
-    return clients_db[client_id]
+            profile = fetch_client_profile(cursor, client_id)
+    else:
+        if client_id not in clients_db:
+            clients_db[client_id] = {"allergies": [], "conditions": [], "metrics": [], "progress": []}
+        profile = clients_db[client_id]
+        profile["maternal_care_enabled"] = bool(
+            users_db.get(client_id, {}).get("maternal_care_enabled", False)
+        )
+    if identity[0] == "client" and not profile.get("maternal_care_enabled", False):
+        profile.pop("pregnancy", None)
+        profile.pop("lactation", None)
+    return profile
+
+
+@router.patch(
+    "/api/v1/clients/{client_id}/maternal-care",
+    tags=["2. Patient Health & History"],
+)
+def update_maternal_care_access(
+    client_id: str,
+    data: MaternalCareAccessUpdate,
+    authorization: Optional[str] = Header(default=None),
+):
+    identity = current_identity(authorization)
+    if identity[0] != "dietitian":
+        raise HTTPException(status_code=403, detail="Only the assigned dietitian can enable these pages")
+    authorize_client_access(client_id, identity)
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "UPDATE client SET maternal_care_enabled = %s WHERE client_id = %s "
+                "RETURNING client_id",
+                (data.enabled, client_id),
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="Patient record not found")
+    else:
+        user = users_db.get(client_id)
+        if not user or user.get("type") != "client":
+            raise HTTPException(status_code=404, detail="Patient record not found")
+        user["maternal_care_enabled"] = data.enabled
+        clients_db.setdefault(client_id, {"allergies": [], "conditions": [], "metrics": [], "progress": []})
+        clients_db[client_id]["maternal_care_enabled"] = data.enabled
+    return {
+        "message": "Pregnancy and lactation pages enabled" if data.enabled else "Pregnancy and lactation pages disabled",
+        "maternal_care_enabled": data.enabled,
+    }
 
 
 @router.patch(
@@ -159,7 +214,7 @@ def update_client_profile(client_id: str, data: ClientProfileUpdate):
 
 @router.post(
     "/api/v1/clients/{client_id}/pregnancy",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def log_pregnancy(client_id: str, data: PregnancyLog):
@@ -178,7 +233,7 @@ def log_pregnancy(client_id: str, data: PregnancyLog):
 
 @router.post(
     "/api/v1/clients/{client_id}/lactation",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def log_lactation(client_id: str, data: LactationLog):
@@ -271,7 +326,7 @@ def list_lactation_entries(client_id: str, kind: str):
 
 @router.post(
     "/api/v1/clients/{client_id}/lactation/status",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def log_lactation_status(client_id: str, data: LactationStatusEntry):
@@ -293,7 +348,7 @@ def log_lactation_status(client_id: str, data: LactationStatusEntry):
 
 @router.get(
     "/api/v1/clients/{client_id}/lactation/status",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def get_lactation_status(client_id: str):
@@ -302,7 +357,7 @@ def get_lactation_status(client_id: str):
 
 @router.post(
     "/api/v1/clients/{client_id}/lactation/daily-feeding",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def log_daily_feeding(client_id: str, data: DailyFeedingLog):
@@ -316,7 +371,7 @@ def log_daily_feeding(client_id: str, data: DailyFeedingLog):
 
 @router.get(
     "/api/v1/clients/{client_id}/lactation/daily-feeding",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def get_daily_feeding(client_id: str):
@@ -325,7 +380,7 @@ def get_daily_feeding(client_id: str):
 
 @router.post(
     "/api/v1/clients/{client_id}/lactation/milk-supply",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def log_milk_supply(client_id: str, data: MilkSupplyLog):
@@ -339,7 +394,7 @@ def log_milk_supply(client_id: str, data: MilkSupplyLog):
 
 @router.get(
     "/api/v1/clients/{client_id}/lactation/milk-supply",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def get_milk_supply(client_id: str):
@@ -371,7 +426,7 @@ def guidance_weaning_nutrition(
 
 @router.post(
     "/api/v1/clients/{client_id}/lactation/weaning",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def log_weaning_plan(client_id: str, data: WeaningLog):
@@ -387,7 +442,7 @@ def log_weaning_plan(client_id: str, data: WeaningLog):
 
 @router.get(
     "/api/v1/clients/{client_id}/lactation/weaning",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def get_weaning_plans(client_id: str):
@@ -396,7 +451,7 @@ def get_weaning_plans(client_id: str):
 
 @router.post(
     "/api/v1/clients/{client_id}/lactation/maternal-discomfort",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def log_maternal_discomfort(client_id: str, data: MaternalDiscomfortLog):
@@ -412,7 +467,7 @@ def log_maternal_discomfort(client_id: str, data: MaternalDiscomfortLog):
 
 @router.get(
     "/api/v1/clients/{client_id}/lactation/maternal-discomfort",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def get_maternal_discomfort(client_id: str):
@@ -421,7 +476,7 @@ def get_maternal_discomfort(client_id: str):
 
 @router.post(
     "/api/v1/clients/{client_id}/lactation/infant-sensitivities",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def log_infant_sensitivity(client_id: str, data: InfantSensitivityLog):
@@ -436,7 +491,7 @@ def log_infant_sensitivity(client_id: str, data: InfantSensitivityLog):
 
 @router.get(
     "/api/v1/clients/{client_id}/lactation/infant-sensitivities",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def get_infant_sensitivities(client_id: str):
@@ -445,7 +500,7 @@ def get_infant_sensitivities(client_id: str):
 
 @router.get(
     "/api/v1/clients/{client_id}/lactation/overview",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_maternal_care_access)],
     tags=["2. Patient Health & History"],
 )
 def get_lactation_overview(client_id: str):

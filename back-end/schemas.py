@@ -88,6 +88,10 @@ class ClientProfileUpdate(BaseModel):
     dietary_preferences: Optional[str] = Field(default=None, max_length=2000)
 
 
+class MaternalCareAccessUpdate(BaseModel):
+    enabled: bool
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -96,11 +100,21 @@ class LoginRequest(BaseModel):
 class EmailVerificationSend(BaseModel):
     email: str
 
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, value: str) -> str:
+        return validate_email(value)
+
 
 class EmailVerificationCheck(BaseModel):
     email: str
     method_id: str = Field(..., min_length=1)
     code: str = Field(..., min_length=4, max_length=12)
+
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, value: str) -> str:
+        return validate_email(value)
 
 
 class AdminSetup(BaseModel):

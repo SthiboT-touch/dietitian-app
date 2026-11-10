@@ -137,3 +137,31 @@ def require_client_record_access(
     """Reusable route dependency for /clients/{client_id}/... endpoints."""
     identity = current_identity(authorization)
     authorize_client_access(request.path_params["client_id"], identity)
+
+
+def require_maternal_care_access(
+    request: FastAPIRequest, authorization: Optional[str] = Header(default=None)
+) -> None:
+    """Require client ownership/assignment and the dietitian's per-client enablement."""
+    import config
+    import database
+    from state import users_db
+
+    client_id = request.path_params["client_id"]
+    identity = current_identity(authorization)
+    authorize_client_access(client_id, identity)
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT maternal_care_enabled FROM client WHERE client_id = %s",
+                (client_id,),
+            )
+            record = cursor.fetchone()
+        enabled = bool(record and record["maternal_care_enabled"])
+    else:
+        enabled = bool(users_db.get(client_id, {}).get("maternal_care_enabled", False))
+    if not enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="Pregnancy and lactation pages have not been enabled by your dietitian.",
+        )

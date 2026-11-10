@@ -181,6 +181,8 @@ CREATE TABLE client (
 
     life_stage_id        VARCHAR(36) REFERENCES life_stage(life_stage_id) ON DELETE SET NULL,
 
+    maternal_care_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+
     name                 VARCHAR(150) NOT NULL,
 
     email                VARCHAR(150) UNIQUE NOT NULL,

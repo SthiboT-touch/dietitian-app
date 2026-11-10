@@ -1,0 +1,2 @@
+ALTER TABLE client
+    ADD COLUMN IF NOT EXISTS maternal_care_enabled BOOLEAN NOT NULL DEFAULT FALSE;

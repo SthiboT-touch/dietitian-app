@@ -196,9 +196,8 @@ function showWorkspace(user, initialView = "overview") {
     document.querySelectorAll("[data-client-only]").forEach((item) => {
         item.hidden = !isClient;
     });
-    const isMaleClient = isClient && String(user.gender || "").toLowerCase() === "male";
     document.querySelectorAll("[data-maternal-only]").forEach((item) => {
-        item.hidden = !isClient || isMaleClient;
+        item.hidden = true;
     });
     document.querySelectorAll("[data-dietitian-only]").forEach((item) => {
         item.hidden = !isDietitian;
@@ -245,6 +244,8 @@ if (isDietitian) {
         '<span class="nav-glyph">&#9633;</span>Dashboard';
     document.querySelector('[data-view="clients"]').innerHTML =
         '<span class="nav-glyph">&#9787;</span>My Patients';
+    refreshNavigationDropdown(initialView);
+    if (isClient) refreshClientMaternalAccess();
     document.querySelector("#signOutButton").lastChild.textContent = isAdmin
         ? "Logout"
         : "Sign out";
@@ -257,6 +258,23 @@ if (isDietitian) {
         document.querySelector("#reviewCount").textContent = "0";
     } else {
         refreshReviewCount();
+    }
+}
+
+async function refreshClientMaternalAccess() {
+    if (currentUser?.type !== "client") return false;
+    try {
+        const records = await request(`/api/v1/clients?client_id=${encodeURIComponent(currentUser.id)}`);
+        currentUser.maternal_care_enabled = records[0]?.maternal_care_enabled === true;
+        sessionStorage.setItem(sessionKey, JSON.stringify(currentUser));
+        document.querySelectorAll("[data-maternal-only]").forEach((item) => {
+            item.hidden = !currentUser.maternal_care_enabled;
+        });
+        refreshNavigationDropdown(workspaceContent.dataset.view);
+        return currentUser.maternal_care_enabled;
+    } catch (_) {
+        document.querySelectorAll("[data-maternal-only]").forEach((item) => { item.hidden = true; });
+        return false;
     }
 }
 
@@ -315,8 +333,82 @@ const patientSignupActions = document.querySelector("#patientSignupActions");
 const patientSignupBack = document.querySelector("#patientSignupBack");
 const patientSignupNext = document.querySelector("#patientSignupNext");
 const signupSubmit = document.querySelector("#signupSubmit");
+const signupEmailVerification = document.querySelector("#signupEmailVerification");
+const signupEmailVerificationMessage = document.querySelector("#signupEmailVerificationMessage");
+const signupEmailVerificationCode = document.querySelector("#signupEmailVerificationCode");
+const signupVerifyEmail = document.querySelector("#signupVerifyEmail");
+const signupResendEmail = document.querySelector("#signupResendEmail");
 let patientSignupStep = 1;
+let signupVerificationState = "unchecked";
+let signupVerificationEmail = "";
+let signupVerificationMethodId = "";
 const signupStepNames = ["Your details", "Patient details", "Account security"];
+
+signupForm.elements.email.addEventListener("input", () => {
+    const email = signupForm.elements.email.value.trim().toLowerCase();
+    if (email !== signupVerificationEmail) {
+        signupVerificationState = "unchecked";
+        signupVerificationEmail = "";
+        signupVerificationMethodId = "";
+        signupEmailVerification.hidden = true;
+        signupEmailVerificationCode.value = "";
+        signupEmailVerificationCode.required = false;
+        signupEmailVerificationCode.disabled = false;
+        signupVerifyEmail.disabled = false;
+        signupResendEmail.hidden = true;
+    }
+});
+
+signupVerifyEmail.addEventListener("click", async () => {
+    if (!signupVerificationMethodId || !signupEmailVerificationCode.value.trim()) {
+        signupEmailVerificationCode.reportValidity();
+        return;
+    }
+    signupVerifyEmail.disabled = true;
+    try {
+        const result = await request("/api/v1/auth/email/verify-code", {
+            method: "POST",
+            body: JSON.stringify({
+                email: signupVerificationEmail,
+                method_id: signupVerificationMethodId,
+                code: signupEmailVerificationCode.value.trim(),
+            }),
+        });
+        if (!result.verified) throw new Error(result.message || "Email verification failed.");
+        signupVerificationState = "verified";
+        signupEmailVerificationCode.disabled = true;
+        signupResendEmail.hidden = true;
+        signupEmailVerificationMessage.textContent = "Email verified. Creating your account…";
+        signupForm.requestSubmit(signupSubmit);
+    } catch (error) {
+        signupEmailVerificationMessage.textContent = error.message;
+        signupVerifyEmail.disabled = false;
+    }
+});
+
+signupResendEmail.addEventListener("click", async () => {
+    signupResendEmail.disabled = true;
+    try {
+        const result = await request("/api/v1/auth/email/send-code", {
+            method: "POST",
+            body: JSON.stringify({ email: signupVerificationEmail }),
+        });
+        if (!result.enabled || !result.method_id) {
+            throw new Error(result.message || "Email verification is unavailable.");
+        }
+        signupVerificationMethodId = result.method_id;
+        signupVerificationState = "sent";
+        signupEmailVerificationCode.value = "";
+        signupEmailVerificationCode.disabled = false;
+        signupEmailVerificationCode.focus();
+        signupEmailVerificationMessage.textContent =
+            "A new code was sent. Enter it here and verify before continuing.";
+    } catch (error) {
+        signupEmailVerificationMessage.textContent = error.message;
+    } finally {
+        signupResendEmail.disabled = false;
+    }
+});
 
 function setPatientSignupStep(nextStep, { focus = false } = {}) {
     patientSignupStep = Math.max(1, Math.min(signupSteps.length, nextStep));
@@ -620,6 +712,9 @@ function patientContextMarkup(client, profile, lactation = {}, documents = []) {
               )
               .join("")
         : '<p class="empty-state">No lactation records recorded.</p>';
+    const maternalMarkup = profile.maternal_care_enabled
+        ? `<div class="form-field full-width"><label>Pregnancy details</label><div class="text-input">${profile.pregnancy ? `Trimester: ${escapeHtml(profile.pregnancy.trimester || "Not provided")} · Due date: ${escapeHtml(profile.pregnancy.due_date || "Not provided")}` : "No pregnancy information recorded"}</div></div><div class="form-field full-width"><label>Lactation details</label><div class="form-grid">${lactationMarkup}</div></div>`
+        : "";
     const documentsMarkup = documents.length
         ? documents
               .map(
@@ -638,7 +733,7 @@ function patientContextMarkup(client, profile, lactation = {}, documents = []) {
         <div class="form-field"><label>Medical conditions</label><div class="text-input">${conditions.length ? conditions.map((item) => escapeHtml(item.condition_name)).join(", ") : "No conditions recorded"}</div></div>
         <div class="form-field"><label>Recorded metrics</label><div class="text-input">${metrics.length ? metrics.map((item) => `${escapeHtml(item.metric_type)}: ${escapeHtml(item.value)}`).join(" Â· ") : "No metrics recorded"}</div></div>
         <div class="form-field"><label>Progress history</label><div class="text-input">${progress.length ? progressRows.join("<br>") : "No progress recorded"}</div></div>
-        <div class="form-field full-width"><label>Lactation details</label><div class="form-grid">${lactationMarkup}</div></div>
+        ${maternalMarkup}
         <div class="form-field full-width"><label>Medical documents and doctor information</label><ul class="result-list">${documentsMarkup}</ul></div>
       </div>
     </section>`;
@@ -919,6 +1014,14 @@ async function renderClientManagementProfile(clientId) {
     workspaceContent.innerHTML = `
     ${pageHeading("PATIENT PROFILE", client.name, "Current information recorded for this patient.")}
     <div data-message class="workspace-message" hidden></div>
+    <section class="content-panel health-edit-panel">
+      <p class="subsection-label">PREGNANCY &amp; LACTATION PAGES</p>
+      <p>${profile.maternal_care_enabled ? "Enabled for this client." : "Disabled. The client cannot see these pages until you enable them."}</p>
+      <div class="form-actions">
+        <button class="button button-primary" id="toggleMaternalCare" type="button">${profile.maternal_care_enabled ? "Disable pages" : "Enable pages"}</button>
+        ${profile.maternal_care_enabled ? `<button class="button" id="openPregnancyPage" type="button">Pregnancy details</button><button class="button" id="openLactationPage" type="button">Lactation tracker</button>` : ""}
+      </div>
+    </section>
     ${patientContextMarkup(client, profile, lactation, documents)}
     <section class="content-panel health-edit-panel">
       <p class="subsection-label">ADD MEDICAL CONDITION</p>
@@ -990,6 +1093,24 @@ async function renderClientManagementProfile(clientId) {
 
 
     const showButton = workspaceContent.querySelector("#showDietitianConditionForm");
+
+    workspaceContent.querySelector("#toggleMaternalCare").addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await request(`/api/v1/clients/${encodeURIComponent(clientId)}/maternal-care`, {
+                method: "PATCH",
+                body: JSON.stringify({ enabled: !profile.maternal_care_enabled }),
+            });
+            await renderClientManagementProfile(clientId);
+            showWorkspaceMessage(profile.maternal_care_enabled ? "Pregnancy and lactation pages disabled." : "Pregnancy and lactation pages enabled.");
+        } catch (error) {
+            showWorkspaceMessage(error.message, true);
+            button.disabled = false;
+        }
+    });
+    workspaceContent.querySelector("#openPregnancyPage")?.addEventListener("click", () => renderClientHealth(clientId, "pregnancy"));
+    workspaceContent.querySelector("#openLactationPage")?.addEventListener("click", () => renderLactationTracking(clientId));
     const conditionForm = workspaceContent.querySelector("#dietitianMedicalConditionForm");
     const cancelButton = workspaceContent.querySelector("#cancelDietitianConditionForm");
 
@@ -1087,7 +1208,29 @@ function navTo(view, aiPanel = "coach") {
     document.querySelectorAll(".nav-item").forEach((item) => {
         item.classList.toggle("is-current", item.dataset.view === view);
     });
+    const navigation = document.querySelector("#mainViewSelect");
+    if (navigation) {
+        navigation.value = [...navigation.options].some((option) => option.value === view)
+            ? view
+            : "";
+    }
     loadView(view, aiPanel);
+}
+
+function refreshNavigationDropdown(activeView) {
+    const navigation = document.querySelector("#mainViewSelect");
+    if (!navigation) return;
+    const availableViews = [...document.querySelectorAll(".side-nav .nav-item")]
+        .filter((item) => !item.hidden);
+    const options = availableViews.map((item) => {
+        const label = item.cloneNode(true);
+        label.querySelectorAll(".nav-glyph, .nav-count").forEach((element) => element.remove());
+        return `<option value="${escapeHtml(item.dataset.view)}">${escapeHtml(label.textContent.trim())}</option>`;
+    });
+    navigation.innerHTML = '<option value="">Choose a section</option>' + options.join("");
+    navigation.value = availableViews.some((item) => item.dataset.view === activeView)
+        ? activeView
+        : "";
 }
 
 function renderDietitianRows(dietitians) {
@@ -1190,9 +1333,8 @@ async function renderMyProfile() {
             profileUser = { ...user, ...clientRecord, id: user.id, full_name: user.full_name };
             currentUser = profileUser;
             sessionStorage.setItem(sessionKey, JSON.stringify(profileUser));
-            const isMaleClient = String(profileUser.gender || "").toLowerCase() === "male";
             document.querySelectorAll("[data-maternal-only]").forEach((item) => {
-                item.hidden = isMaleClient;
+                item.hidden = profileUser.maternal_care_enabled !== true;
             });
         }
     }
@@ -1325,10 +1467,11 @@ async function renderClientHealth(clientId, section) {
         form = `<form id="clientHealthForm" class="form-grid"><div class="form-field"><label for="lactationStatus">Status</label><select id="lactationStatus" name="is_active"><option value="true">Active</option><option value="false">Inactive</option></select></div><div class="form-field"><label for="lactationNotes">Notes</label><input class="text-input" id="lactationNotes" name="notes"></div><div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Save lactation details</button></div></form>`;
     }
     workspaceContent.innerHTML = `
-    ${pageHeading("HEALTH INFORMATION", title, "Keep your care team informed about current health details.")}
+    ${pageHeading("HEALTH INFORMATION", title, "Keep your care team informed about current health details.", currentUser.type === "dietitian" ? `<button class="button" id="backToClientProfile" type="button">Back to patient profile</button>` : "")}
     <div data-message class="workspace-message" hidden></div>
     <section class="content-panel"><p class="subsection-label">RECORDED DETAILS</p>${details}</section>
     <section class="content-panel health-edit-panel"><p class="subsection-label">UPDATE ${escapeHtml(title.toUpperCase())}</p>${form}</section>`;
+    workspaceContent.querySelector("#backToClientProfile")?.addEventListener("click", () => renderClientManagementProfile(clientId));
     if (section === "conditions") {
         const documents = await request(
             `/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents`,
@@ -1507,8 +1650,9 @@ async function renderLactationTracking(clientId) {
         return;
     }
     workspaceContent.innerHTML = `
-    ${pageHeading("HEALTH INFORMATION", "Lactation", "Track feeding, milk supply, weaning, maternal comfort, and infant sensitivities in one place.")}
+    ${pageHeading("HEALTH INFORMATION", "Lactation", "Track feeding, milk supply, weaning, maternal comfort, and infant sensitivities in one place.", currentUser.type === "dietitian" ? `<button class="button" id="backToClientProfile" type="button">Back to patient profile</button>` : "")}
     <div data-message class="workspace-message" hidden></div>`;
+    workspaceContent.querySelector("#backToClientProfile")?.addEventListener("click", () => renderClientManagementProfile(clientId));
     const plan = overview.weaning[0];
     const weaningQuery = new URLSearchParams({
         current_sessions: plan ? plan.feeds_per_day_current : 6,
@@ -2423,13 +2567,12 @@ async function loadView(view, initialAIPanel = "coach") {
     workspaceContent.classList.add("view-enter");
     const firstName = currentUser.full_name.split(" ")[0];
     const clientId = currentUser.type === "client" ? currentUser.id : "";
-    if (
-        currentUser.type === "client" &&
-        String(currentUser.gender || "").toLowerCase() === "male" &&
-        ["health-pregnancy", "health-lactation"].includes(view)
-    ) {
-        await renderClientDashboard(firstName);
-        return;
+    if (currentUser.type === "client" && ["health-pregnancy", "health-lactation"].includes(view)) {
+        if (!(await refreshClientMaternalAccess())) {
+            await renderClientDashboard(firstName);
+            showWorkspaceMessage("These pages are available after your dietitian enables them for your profile.");
+            return;
+        }
     }
     workspaceContent.innerHTML =
         '<div data-message class="workspace-message" hidden></div><p class="loading-copy">Loading your workspace...</p>';
@@ -3793,6 +3936,9 @@ document.querySelectorAll("#signOutButton, #mobileSignOutButton").forEach((butto
 document
     .querySelectorAll(".nav-item")
     .forEach((item) => item.addEventListener("click", () => navTo(item.dataset.view)));
+document.querySelector("#mainViewSelect").addEventListener("change", (event) => {
+    if (event.target.value) navTo(event.target.value);
+});
 
 loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -3937,8 +4083,52 @@ signupForm.addEventListener("submit", async (event) => {
         signupForm.elements.confirm_password.reportValidity();
         return;
     }
+    const email = signupForm.elements.email.value.trim().toLowerCase();
+    if (signupVerificationEmail !== email) {
+        signupVerificationEmail = "";
+        signupVerificationMethodId = "";
+        signupVerificationState = "unchecked";
+    }
+    if (signupVerificationState === "unchecked") {
+        button.disabled = true;
+        try {
+            const result = await request("/api/v1/auth/email/send-code", {
+                method: "POST",
+                body: JSON.stringify({ email }),
+            });
+            if (!result.enabled || !result.method_id) {
+                throw new Error(result.message || "Email verification is unavailable.");
+            }
+            signupVerificationEmail = email;
+            signupVerificationMethodId = result.method_id;
+            signupVerificationState = "sent";
+            signupEmailVerification.hidden = false;
+            signupEmailVerificationCode.required = true;
+            signupResendEmail.hidden = false;
+            signupEmailVerificationMessage.textContent =
+                "A code was sent to your email. Enter it here and verify before creating your account.";
+            signupEmailVerificationCode.focus();
+            return;
+        } catch (error) {
+            showAuthMessage(error.message);
+            return;
+        } finally {
+            button.disabled = false;
+        }
+    }
+    if (signupVerificationState === "sent") {
+        signupEmailVerification.hidden = false;
+        signupEmailVerificationMessage.textContent =
+            "Enter the code sent to your email, then select Verify email.";
+        signupEmailVerificationCode.focus();
+        return;
+    }
+    if (signupVerificationState !== "verified") {
+        showAuthMessage("Verify your email before creating your account.");
+        return;
+    }
     const values = Object.fromEntries(new FormData(signupForm));
-    values.email = values.email.trim().toLowerCase();
+    values.email = email;
     if (role === "client") {
         values.phone = values.phone.trim();
         // Never infer consent: send an explicit boolean only when checked.
