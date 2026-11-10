@@ -15,6 +15,10 @@ RESEND_FROM_EMAIL=NutriCare <noreply@your-verified-domain.com>
 
 4. Install the dependencies in `back-end/requirements.txt`, then restart the API. Docker deployments should rebuild the API image.
 
+## Configure the production deployment
+
+The local `.env` file is not copied to the production server. In GitHub, open **Settings → Secrets and variables → Actions** and add repository secrets named `RESEND_API_KEY` and `RESEND_FROM_EMAIL`. Use an active Resend sending key and a sender address on a verified domain. The deployment workflow forwards these secrets to Docker Compose and stops before restarting services if either is missing.
+
 The backend loads the API key from `RESEND_API_KEY`, assigns it to the SDK, and sends the message with `resend.Emails.send(...)`. Set `RESEND_FROM_EMAIL` to an address on a sending domain verified in your Resend account. See Resend's [Python SDK guide](https://resend.com/python) for the SDK setup and examples.
 
 Keep the API key private and do not commit `.env`. OTPs expire after five minutes, allow five attempts, and can be resent once per minute. OTP challenge state is held in API process memory, so use a single API worker unless challenge storage is moved to shared storage.

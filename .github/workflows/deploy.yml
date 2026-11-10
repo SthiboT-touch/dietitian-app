@@ -15,15 +15,23 @@ jobs:
 
       - name: Deploy to Server via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           command_timeout: 30m
+          envs: RESEND_API_KEY,RESEND_FROM_EMAIL
           script: |
             set -e
             cd ~/dietitian-app_2
+            if [ -z "${RESEND_API_KEY:-}" ] || [ -z "${RESEND_FROM_EMAIL:-}" ]; then
+              echo "Configure RESEND_API_KEY and RESEND_FROM_EMAIL as GitHub Actions repository secrets before deploying." >&2
+              exit 1
+            fi
             git fetch origin main
             git reset --hard FETCH_HEAD
             docker compose down
