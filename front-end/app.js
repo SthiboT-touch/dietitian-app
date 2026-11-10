@@ -309,7 +309,6 @@ if (isDietitian) {
         '<span class="nav-glyph">&#9633;</span>Dashboard';
     document.querySelector('[data-view="clients"]').innerHTML =
         '<span class="nav-glyph">&#9787;</span>My Patients';
-    refreshNavigationDropdown(initialView);
     if (isClient) refreshClientMaternalAccess();
     document.querySelector("#signOutButton").lastChild.textContent = isAdmin
         ? "Logout"
@@ -335,7 +334,6 @@ async function refreshClientMaternalAccess() {
         document.querySelectorAll("[data-maternal-only]").forEach((item) => {
             item.hidden = !currentUser.maternal_care_enabled;
         });
-        refreshNavigationDropdown(workspaceContent.dataset.view);
         return currentUser.maternal_care_enabled;
     } catch (_) {
         document.querySelectorAll("[data-maternal-only]").forEach((item) => { item.hidden = true; });
@@ -1274,29 +1272,7 @@ function navTo(view, aiPanel = "coach") {
     document.querySelectorAll(".nav-item").forEach((item) => {
         item.classList.toggle("is-current", item.dataset.view === view);
     });
-    const navigation = document.querySelector("#mainViewSelect");
-    if (navigation) {
-        navigation.value = [...navigation.options].some((option) => option.value === view)
-            ? view
-            : "";
-    }
     loadView(view, aiPanel);
-}
-
-function refreshNavigationDropdown(activeView) {
-    const navigation = document.querySelector("#mainViewSelect");
-    if (!navigation) return;
-    const availableViews = [...document.querySelectorAll(".side-nav .nav-item")]
-        .filter((item) => !item.hidden);
-    const options = availableViews.map((item) => {
-        const label = item.cloneNode(true);
-        label.querySelectorAll(".nav-glyph, .nav-count").forEach((element) => element.remove());
-        return `<option value="${escapeHtml(item.dataset.view)}">${escapeHtml(label.textContent.trim())}</option>`;
-    });
-    navigation.innerHTML = '<option value="">Choose a section</option>' + options.join("");
-    navigation.value = availableViews.some((item) => item.dataset.view === activeView)
-        ? activeView
-        : "";
 }
 
 function renderDietitianRows(dietitians) {
@@ -4209,10 +4185,6 @@ document.querySelectorAll("#signOutButton, #mobileSignOutButton").forEach((butto
 document
     .querySelectorAll(".nav-item")
     .forEach((item) => item.addEventListener("click", () => navTo(item.dataset.view)));
-document.querySelector("#mainViewSelect").addEventListener("change", (event) => {
-    if (event.target.value) navTo(event.target.value);
-});
-
 loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = loginForm.querySelector("button[type=submit]");
