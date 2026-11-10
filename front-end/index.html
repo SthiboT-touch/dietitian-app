@@ -36,10 +36,12 @@
             src="/static/support.js?v=3"
             defer
         ></script>
+        <script src="/static/meetings.js?v=2" defer></script>
         <script
-            src="/static/app.js?v=33"
+            src="/static/app.js?v=41"
             defer
         ></script>
+        <script src="/static/care.js?v=2" defer></script>
     </head>
     <body>
         <main
@@ -938,15 +940,6 @@
                     >
                     <button
                         class="nav-item nav-subitem"
-                        data-view="health-pregnancy"
-                        data-client-only
-                        data-standard-only
-                        data-maternal-only
-                        type="button"
-                        >Pregnancy</button
-                    >
-                    <button
-                        class="nav-item nav-subitem"
                         data-view="health-lactation"
                         data-client-only
                         data-standard-only
@@ -999,7 +992,7 @@
                         data-view="ai-workspace"
                         data-standard-only
                         type="button"
-                        ><span class="nav-glyph">&#10022;</span>AI Coach</button
+                        ><span class="nav-glyph">&#10022;</span>Nutrition Coach</button
                     >
                     <button
                         class="nav-item"
@@ -1065,6 +1058,7 @@
     type="button"
     ><span class="nav-glyph">&#9881;</span>Settings</button
 >
+                    <button class="nav-item" data-view="client-settings" data-client-only type="button"><span class="nav-glyph">&#9881;</span>Settings</button>
                 </nav>
                 <div class="sidebar-bottom">
                     <div
@@ -1101,6 +1095,7 @@
                                 type="button" aria-haspopup="true" aria-expanded="false"
                                 aria-controls="accountMenuPanel" aria-label="Open account menu">
                             <span id="profileInitials" class="profile-avatar" aria-hidden="true">FN</span>
+                            <img id="profileAvatarImage" class="profile-avatar-image" alt="" hidden>
                             <span id="profileName">Your account</span>
                             <span class="account-chevron" aria-hidden="true">▾</span>
                         </button>

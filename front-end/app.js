@@ -19,6 +19,16 @@ const staffRoleNames = {
 };
 
 let currentUser = null;
+let profileAvatarObjectUrl = null;
+
+function sessionToken() {
+    return (
+        sessionStorage.getItem(adminTokenKey) ||
+        sessionStorage.getItem(dietitianTokenKey) ||
+        sessionStorage.getItem(clientTokenKey) ||
+        sessionStorage.getItem(staffTokenKey)
+    );
+}
 
 async function request(url, options = {}) {
     const headers = new Headers(options.headers || {});
@@ -26,11 +36,7 @@ async function request(url, options = {}) {
         headers.set("Content-Type", "application/json");
     }
 
-    const token =
-        sessionStorage.getItem(adminTokenKey) ||
-        sessionStorage.getItem(dietitianTokenKey) ||
-        sessionStorage.getItem(clientTokenKey) ||
-        sessionStorage.getItem(staffTokenKey);
+    const token = sessionToken();
     if (token && !headers.has("Authorization")) {
         headers.set("Authorization", `Bearer ${token}`);
     }
@@ -58,6 +64,41 @@ async function request(url, options = {}) {
         throw new Error(message + reference);
     }
     return payload;
+}
+
+async function fetchProfilePhoto() {
+    const token = sessionToken();
+    const response = await fetch("/api/v1/profile/photo", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        cache: "no-store",
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) {
+        throw new Error(`Could not load profile photo (${response.status}).`);
+    }
+    return response.blob();
+}
+
+async function refreshAccountAvatar() {
+    const image = document.querySelector("#profileAvatarImage");
+    const initials = document.querySelector("#profileInitials");
+    if (!image || !initials) return;
+    try {
+        const photo = await fetchProfilePhoto();
+        if (profileAvatarObjectUrl) URL.revokeObjectURL(profileAvatarObjectUrl);
+        profileAvatarObjectUrl = photo ? URL.createObjectURL(photo) : null;
+        image.hidden = !profileAvatarObjectUrl;
+        image.src = profileAvatarObjectUrl || "";
+        initials.hidden = Boolean(profileAvatarObjectUrl);
+    } catch (error) {
+        image.hidden = true;
+        initials.hidden = false;
+        const message = document.querySelector("[data-profile-photo-message]");
+        if (message) {
+            message.textContent = error.message;
+            message.dataset.kind = "error";
+        }
+    }
 }
 
 // The health indicator reflects the real API/database result, not a hardcoded
@@ -161,11 +202,16 @@ function showWorkspace(user, initialView = "overview") {
     const accountName = user.full_name || user.name || "Your account";
     const firstName = accountName.split(" ")[0];
     document.querySelector("#profileName").textContent = firstName;
+    if (profileAvatarObjectUrl) URL.revokeObjectURL(profileAvatarObjectUrl);
+    profileAvatarObjectUrl = null;
+    document.querySelector("#profileAvatarImage").hidden = true;
+    document.querySelector("#profileInitials").hidden = false;
     document.querySelector("#profileInitials").textContent = accountName
         .split(/\s+/)
         .slice(0, 2)
         .map((part) => part[0].toUpperCase())
         .join("");
+    void refreshAccountAvatar();
     document.querySelector("#accountMenuFullName").textContent = accountName;
     document.querySelector("#accountMenuRole").textContent =
         staffRoleNames[user.type] || ({ client: "Patient", dietitian: "Dietitian", admin: "Administrator" }[user.type] || "Account");
@@ -181,6 +227,7 @@ function showWorkspace(user, initialView = "overview") {
     const isAdmin = user.type === "admin";
     const isDietitian = user.type === "dietitian";
     const isStaff = Object.hasOwn(staffRoleNames, user.type);
+    document.querySelectorAll(".side-nav .nav-item, .side-nav .nav-section-label").forEach(item => item.hidden = false);
     document.querySelectorAll("[data-staff-only]").forEach((item) => {
         item.hidden = !isStaff;
     });
@@ -240,6 +287,24 @@ if (isDietitian) {
         }
     });
 }
+    if (isClient) {
+        const nav = document.querySelector(".side-nav");
+        const menu = [
+            ["overview", "Dashboard", "&#9633;"],
+            ["client-appointments", "Appointments", "&#9635;"],
+            ["client-progress", "Progress", "&#9636;"],
+            ["client-goals", "Goals", "&#9673;"],
+            ["ai-workspace", "Nutrition Coach", "&#10022;"],
+            ["client-settings", "Settings", "&#9881;"],
+        ];
+        nav.querySelectorAll(".nav-item, .nav-section-label").forEach(item => item.hidden = true);
+        menu.forEach(([view, label, icon]) => {
+            const item = nav.querySelector(`[data-view="${view}"]`);
+            item.innerHTML = `<span class="nav-glyph">${icon}</span>${label}`;
+            item.hidden = false;
+            nav.appendChild(item);
+        });
+    }
     document.querySelector('[data-view="overview"]').innerHTML =
         '<span class="nav-glyph">&#9633;</span>Dashboard';
     document.querySelector('[data-view="clients"]').innerHTML =
@@ -725,7 +790,7 @@ function patientContextMarkup(client, profile, lactation = {}, documents = []) {
         : '<li class="result-item">No supporting medical documents uploaded.</li>';
     return `
     <section class="content-panel patient-context-preview">
-      <h3>${escapeHtml(client.name)}</h3>
+      <h3>${escapeHtml(client.name)}</h3><button class="button quiet-button" type="button" data-care-record="${escapeHtml(client.id)}">Open care record and review progress</button>
       <div class="form-field full-width"><label>Client details</label><div class="text-input">${clientDetails.length ? clientDetails.map(([label, value]) => `<strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}`).join(" Â· ") : "No demographic details recorded"}</div></div>
       <p class="stat-caption">${escapeHtml(client.id)} Â· ${escapeHtml(client.status || "Patient")}</p>
       <div class="form-grid">
@@ -903,7 +968,7 @@ async function renderAIChat() {
     const messages = conversation.messages || [];
     panel.innerHTML = `
     <section class="assistant-topics" aria-label="Nutrition assistant topics">
-      <div class="assistant-topics-heading"><span class="eyebrow eyebrow-green">NUTRITION ASSISTANT</span><span>Choose a starting point or ask anything</span></div>
+      <div class="assistant-topics-heading"><span class="eyebrow eyebrow-green">AUTOMATED NUTRITION ASSISTANT</span><span>Choose a starting point or ask anything</span></div>
       <div class="assistant-topic-list">
         <button class="assistant-topic is-primary" data-topic="ask" type="button">Ask a question</button>
         <button class="assistant-topic" data-topic="recipe" type="button">Recipe Ideas</button>
@@ -1023,6 +1088,7 @@ async function renderClientManagementProfile(clientId) {
       </div>
     </section>
     ${patientContextMarkup(client, profile, lactation, documents)}
+    ${currentUser.type === "dietitian" ? '<section class="content-panel"><button class="button button-primary" id="editPatientMetrics" type="button">Manage health metrics</button></section>' : ""}
     <section class="content-panel health-edit-panel">
       <p class="subsection-label">ADD MEDICAL CONDITION</p>
       <button class="button button-primary" id="showDietitianConditionForm" type="button">Add Medical Condition</button>
@@ -1093,7 +1159,6 @@ async function renderClientManagementProfile(clientId) {
 
 
     const showButton = workspaceContent.querySelector("#showDietitianConditionForm");
-
     workspaceContent.querySelector("#toggleMaternalCare").addEventListener("click", async (event) => {
         const button = event.currentTarget;
         button.disabled = true;
@@ -1111,6 +1176,7 @@ async function renderClientManagementProfile(clientId) {
     });
     workspaceContent.querySelector("#openPregnancyPage")?.addEventListener("click", () => renderClientHealth(clientId, "pregnancy"));
     workspaceContent.querySelector("#openLactationPage")?.addEventListener("click", () => renderLactationTracking(clientId));
+    workspaceContent.querySelector("#editPatientMetrics")?.addEventListener("click", () => renderClientProgress(clientId));
     const conditionForm = workspaceContent.querySelector("#dietitianMedicalConditionForm");
     const cancelButton = workspaceContent.querySelector("#cancelDietitianConditionForm");
 
@@ -1256,6 +1322,15 @@ function renderDietitianRows(dietitians) {
         .join("")}</div>`;
 }
 
+function renderClientSettings() {
+    workspaceContent.innerHTML = `${pageHeading("SETTINGS", "Your account.", "Manage your profile and get help with your account.")}
+    <section class="content-panel"><div class="quick-grid">
+      <button class="quick-link" data-go="my-profile" type="button"><strong>My Profile</strong><span>View and update your personal information.</span></button>
+      <button class="quick-link" data-go="support" type="button"><strong>Support &amp; Tickets</strong><span>Get help with your account.</span></button>
+    </div></section>`;
+    bindGoButtons();
+}
+
 async function renderClientDashboard(firstName) {
     const dietitians = await request("/api/v1/dietitians");
     workspaceContent.innerHTML = `
@@ -1271,8 +1346,12 @@ async function renderClientDashboard(firstName) {
       <button class="quick-link" data-go="health-conditions" type="button"><strong>Health Information</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-goals" type="button"><strong>My Goals</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-meal-plan" type="button"><strong>My Meal Plan</strong><span aria-hidden="true">&#8599;</span></button>
+      <button class="quick-link" data-go="health-allergies" type="button"><strong>Allergies</strong><span aria-hidden="true">&#8599;</span></button>
+      <button class="quick-link" data-go="client-checkin" type="button"><strong>QR Check-In</strong><span aria-hidden="true">&#8599;</span></button>
+      <button class="quick-link" data-go="client-recommendations" type="button"><strong>Recommendations</strong><span aria-hidden="true">&#8599;</span></button>
+      ${String(currentUser.gender || "").toLowerCase() !== "male" ? '<button class="quick-link" data-go="health-lactation" type="button"><strong>Lactation</strong></button>' : ""}
       <button class="quick-link" data-go="client-appointments" type="button"><strong>Appointments</strong><span aria-hidden="true">&#8599;</span></button>
-        <button class="quick-link" data-go="ai-workspace" type="button"><strong>AI Coach</strong><span aria-hidden="true">&#8599;</span></button>
+        <button class="quick-link" data-go="ai-workspace" type="button"><strong>Nutrition Coach</strong><span aria-hidden="true">&#8599;</span></button>
     </div>
     <div class="section-heading"><h2>Find a Dietitian</h2><span>${dietitians.length} AVAILABLE</span></div>
     ${
@@ -1316,7 +1395,9 @@ function renderAdminProfile() {
         ${pageHeading("MY PROFILE", "Administrator profile.", "Your signed-in account details.")}
         <section class="content-panel"><dl class="profile-details">
             ${fields.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "Not provided")}</dd></div>`).join("")}
-        </dl></section>`;
+        </dl></section>
+        ${profilePhotoSectionMarkup()}`;
+    bindProfilePhotoControls();
 }
 
 async function renderMyProfile() {
@@ -1374,6 +1455,7 @@ async function renderMyProfile() {
 
           
        </section>
+    ${profilePhotoSectionMarkup()}
     ${user.type === "dietitian" ? `
     <div class="section-heading">
       <h2>Practice information</h2>
@@ -1395,7 +1477,98 @@ async function renderMyProfile() {
     </div>
     ` : ""}`;
     if (approval) bindApprovalResubmission();
+    bindProfilePhotoControls();
     if (user.type === "dietitian") bindGoButtons();
+}
+
+function profilePhotoSectionMarkup() {
+    return `<section class="content-panel">
+      <h2 class="compact-heading">Profile picture</h2>
+      <p>Upload a JPEG or PNG image up to 1 MB. You can replace or remove it at any time.</p>
+      <img data-profile-photo-preview class="profile-photo-preview" alt="Your profile picture" hidden>
+      <p data-profile-photo-empty>No profile picture uploaded.</p>
+      <form data-profile-photo-form class="profile-photo-actions">
+        <div class="form-field"><label for="profilePhotoFile">Choose a picture</label><input class="text-input" id="profilePhotoFile" name="file" type="file" accept="image/jpeg,image/png" required></div>
+        <button class="button button-primary" type="submit">Upload picture</button>
+        <button class="button" data-profile-photo-remove type="button" hidden>Remove picture</button>
+      </form>
+      <p data-profile-photo-message role="status" aria-live="polite"></p>
+    </section>`;
+}
+
+function bindProfilePhotoControls() {
+    const form = workspaceContent.querySelector("[data-profile-photo-form]");
+    if (!form) return;
+    const preview = workspaceContent.querySelector("[data-profile-photo-preview]");
+    const emptyMessage = workspaceContent.querySelector("[data-profile-photo-empty]");
+    const removeButton = workspaceContent.querySelector("[data-profile-photo-remove]");
+    const status = workspaceContent.querySelector("[data-profile-photo-message]");
+    const setPhotoMessage = (message, isError = false) => {
+        status.textContent = message;
+        status.dataset.kind = isError ? "error" : "success";
+    };
+    const refreshPreview = async () => {
+        try {
+            const photo = await fetchProfilePhoto();
+            if (!photo) {
+                if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+                delete preview.dataset.objectUrl;
+                preview.hidden = true;
+                preview.removeAttribute("src");
+                emptyMessage.hidden = false;
+                removeButton.hidden = true;
+                return true;
+            }
+            if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+            preview.dataset.objectUrl = URL.createObjectURL(photo);
+            preview.src = preview.dataset.objectUrl;
+            preview.hidden = false;
+            emptyMessage.hidden = true;
+            removeButton.hidden = false;
+            return true;
+        } catch (error) {
+            setPhotoMessage(error.message, true);
+            return false;
+        }
+    };
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const file = form.elements.file.files[0];
+        if (!file) return;
+        if (!["image/jpeg", "image/png"].includes(file.type) || file.size > 1024 * 1024) {
+            setPhotoMessage("Choose a JPEG or PNG image up to 1 MB.", true);
+            return;
+        }
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        const data = new FormData();
+        data.append("file", file);
+        try {
+            await request("/api/v1/profile/photo", { method: "PUT", body: data });
+            const previewLoaded = await refreshPreview();
+            await refreshAccountAvatar();
+            if (previewLoaded) setPhotoMessage("Profile picture updated.");
+            form.reset();
+        } catch (error) {
+            setPhotoMessage(error.message, true);
+        } finally {
+            button.disabled = false;
+        }
+    });
+    removeButton.addEventListener("click", async () => {
+        removeButton.disabled = true;
+        try {
+            await request("/api/v1/profile/photo", { method: "DELETE" });
+            const previewLoaded = await refreshPreview();
+            await refreshAccountAvatar();
+            if (previewLoaded) setPhotoMessage("Profile picture removed.");
+        } catch (error) {
+            setPhotoMessage(error.message, true);
+        } finally {
+            removeButton.disabled = false;
+        }
+    });
+    void refreshPreview();
 }
 
 function dietitianApprovalMarkup(approval) {
@@ -1449,7 +1622,7 @@ async function renderClientHealth(clientId, section) {
             "condition_name",
             "No medical conditions recorded.",
         );
-        form = `<form id="clientHealthForm" class="form-grid"><div class="form-field"><label for="conditionName">Condition</label><input class="text-input" id="conditionName" name="condition_name" required></div><div class="form-field"><label for="conditionCode">ICD code (optional)</label><input class="text-input" id="conditionCode" name="icd_code"></div><div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add condition</button></div></form>`;
+        details += '<p class="notice">Your assigned dietitian records your medical conditions. You can view them here and upload supporting documents below.</p>';
     } else if (section === "allergies") {
         details = renderTags(profile.allergies, "allergen", "No allergies recorded.");
         form = `<form id="clientHealthForm" class="form-grid"><div class="form-field"><label for="allergenName">Allergen</label><input class="text-input" id="allergenName" name="allergen" required></div><div class="form-field"><label for="allergySeverity">Severity</label><select id="allergySeverity" name="severity"><option value="mild">Mild</option><option value="moderate">Moderate</option><option value="severe">Severe</option><option value="anaphylactic">Anaphylactic</option></select></div><div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add allergy</button></div></form>`;
@@ -1470,7 +1643,7 @@ async function renderClientHealth(clientId, section) {
     ${pageHeading("HEALTH INFORMATION", title, "Keep your care team informed about current health details.", currentUser.type === "dietitian" ? `<button class="button" id="backToClientProfile" type="button">Back to patient profile</button>` : "")}
     <div data-message class="workspace-message" hidden></div>
     <section class="content-panel"><p class="subsection-label">RECORDED DETAILS</p>${details}</section>
-    <section class="content-panel health-edit-panel"><p class="subsection-label">UPDATE ${escapeHtml(title.toUpperCase())}</p>${form}</section>`;
+    ${form ? `<section class="content-panel health-edit-panel"><p class="subsection-label">UPDATE ${escapeHtml(title.toUpperCase())}</p>${form}</section>` : ""}`;
     workspaceContent.querySelector("#backToClientProfile")?.addEventListener("click", () => renderClientManagementProfile(clientId));
     if (section === "conditions") {
         const documents = await request(
@@ -1511,7 +1684,8 @@ async function renderClientHealth(clientId, section) {
             }
         });
     }
-    document.querySelector("#clientHealthForm").addEventListener("submit", async (event) => {
+    if (section === "conditions") await mountCarePanel(workspaceContent, clientId, false);
+    document.querySelector("#clientHealthForm")?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const values = Object.fromEntries(new FormData(event.currentTarget));
         let endpoint = section;
@@ -1855,6 +2029,7 @@ function formatSleepHours(value) {
 }
 
 async function renderClientProgress(clientId) {
+    const canEditMetrics = currentUser.type === "dietitian";
     const [progressResult, metricsResult] = await Promise.allSettled([
         request(`/api/v1/clients/${encodeURIComponent(clientId)}/progress`),
         request(`/api/v1/clients/${encodeURIComponent(clientId)}/metrics`),
@@ -1925,7 +2100,7 @@ async function renderClientProgress(clientId) {
         ],
     ];
     workspaceContent.innerHTML = `
-    ${pageHeading("MY PROGRESS", "Progress metrics.", "Track the measurements and daily habits recorded for your care.")}
+    ${pageHeading(canEditMetrics ? "PATIENT PROGRESS" : "MY PROGRESS", "Progress metrics.", "Health metrics are recorded and managed by your doctor/dietitian.")}
     <div data-message class="workspace-message" hidden></div>
     <div class="client-progress-layout">
       <section class="content-panel weight-trend"><div class="progress-section-heading"><h2>Weight</h2><strong>${escapeHtml(metricCards[0][1])}</strong></div>
@@ -1933,12 +2108,12 @@ async function renderClientProgress(clientId) {
       </section>
       <section class="content-panel"><h2 class="compact-heading">Health Metrics</h2><dl class="progress-metrics">${metricCards.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></section>
     </div>`;
-    workspaceContent.insertAdjacentHTML(
+    if (canEditMetrics) workspaceContent.insertAdjacentHTML(
         "beforeend",
         `
     <section class="content-panel progress-edit-panel">
-      <h2 class="compact-heading">Update My Progress</h2>
-      <p class="progress-edit-copy">Enter any measurements you tracked today. Blank fields keep their previous values.</p>
+      <h2 class="compact-heading">Update patient health metrics</h2>
+      <p class="progress-edit-copy">Record this patient's measurements. Blank fields keep their previous values for today.</p>
       <form id="progressUpdateForm" class="form-grid">
         <div class="form-field"><label for="progressWeight">Weight (kg)</label><input class="text-input" id="progressWeight" name="weight_kg" type="number" min="0" step="0.1" value="${escapeHtml(latest.weight_kg ?? "")}"></div>
         <div class="form-field"><label for="progressBodyFat">Body Fat (%)</label><input class="text-input" id="progressBodyFat" name="body_fat_pct" type="number" min="0" max="100" step="0.1" value="${escapeHtml(latest.body_fat_pct ?? "")}"></div>
@@ -1951,7 +2126,7 @@ async function renderClientProgress(clientId) {
       </form>
     </section>`,
     );
-    workspaceContent.insertAdjacentHTML(
+    if (!canEditMetrics) workspaceContent.insertAdjacentHTML(
         "beforeend",
         `
     <section class="content-panel progress-edit-panel">
@@ -1970,8 +2145,9 @@ async function renderClientProgress(clientId) {
       <div class="result-list">${meals.length ? meals.map((meal) => `<article class="result-item"><span><strong>${escapeHtml(String(meal.log_date).slice(0, 10))}${meal.meal_time ? ` Â· ${escapeHtml(meal.meal_time)}` : ""} Â· ${escapeHtml(meal.meal_type)}</strong><br>${escapeHtml(meal.description)}${meal.calories != null ? ` Â· ${escapeHtml(meal.calories)} kcal` : ""}${meal.notes ? `<br>${escapeHtml(meal.notes)}` : ""}</span></article>`).join("") : '<p class="empty-state">No meals recorded yet.</p>'}</div>
     </section>`,
     );
-    document.querySelector("#mealLogDate").value = new Date().toISOString().slice(0, 10);
-    document.querySelector("#progressUpdateForm").addEventListener("submit", async (event) => {
+    const mealLogDate = document.querySelector("#mealLogDate");
+    if (mealLogDate) mealLogDate.value = new Date().toISOString().slice(0, 10);
+    document.querySelector("#progressUpdateForm")?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const values = {};
         for (const [key, rawValue] of new FormData(event.currentTarget)) {
@@ -1992,7 +2168,7 @@ async function renderClientProgress(clientId) {
             showWorkspaceMessage(error.message, true);
         }
     });
-    document.querySelector("#mealLogForm").addEventListener("submit", async (event) => {
+    document.querySelector("#mealLogForm")?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const values = Object.fromEntries(new FormData(event.currentTarget));
         if (values.calories === "") delete values.calories;
@@ -2008,18 +2184,14 @@ async function renderClientProgress(clientId) {
             showWorkspaceMessage(error.message, true);
         }
     });
+    await mountCarePanel(workspaceContent, clientId, canEditMetrics);
 }
 
 async function renderClientGoals(clientId) {
     const goals = await request(`/api/v1/goals?client_id=${encodeURIComponent(clientId)}`);
     workspaceContent.innerHTML = `
-    ${pageHeading("MY GOALS", "Goals that move with you.", "Choose goals that reflect what matters to you, from daily habits and energy to hydration, digestion, health needs, or weight if relevant.")}
+    ${pageHeading("MY GOALS", "Goals that move with you.", "Your dietitian sets your goals and targets. View them here and record your measurements in My Progress.")}
     <div data-message class="workspace-message" hidden></div>
-    <section class="content-panel"><form id="clientGoalForm" class="form-grid">
-      <div class="form-field"><label for="goalMetric">Goal metric</label><select id="goalMetric" name="target_metric"><option>Balanced meals per day</option><option>Fruit and vegetable servings</option><option>Fiber servings</option><option>Water (ml)</option><option>Meals per day</option><option>Home-cooked meals per week</option><option>Protein servings</option><option>Sleep (hours)</option><option>Steps</option><option>Symptom-free days</option><option>Weight (optional)</option><option>Body fat (optional)</option><option>Waist (optional)</option><option>Calories (dietitian-guided)</option></select></div>
-      <div class="form-field"><label for="goalTarget">Target value</label><input class="text-input" id="goalTarget" name="target_value" type="number" step="any" required></div>
-      <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add goal</button></div>
-    </form></section>
     <div class="section-heading"><h2>My goals</h2><span>${goals.length} SAVED</span></div>
     <div class="goal-list">${
         goals.length
@@ -2029,21 +2201,8 @@ async function renderClientGoals(clientId) {
       <article class="goal-row"><div><span class="subsection-label">${escapeHtml(goal.target_metric)}</span><h3>Target ${escapeHtml(goal.target_value)}</h3></div><div class="goal-current"><span>Current</span><strong>${goal.current_value == null ? "Not recorded" : escapeHtml(goal.current_value)}</strong></div></article>`,
                   )
                   .join("")
-            : '<p class="empty-state">No goals saved yet. Choose a goal that is meaningful to you. Goals can focus on habits, nourishment, hydration, symptoms, activity, or measurements when relevant.</p>'
+            : '<p class="empty-state">Your dietitian has not assigned any goals yet. Discuss your goals at your next consultation.</p>'
     }</div>`;
-    document.querySelector("#clientGoalForm").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const values = Object.fromEntries(new FormData(event.currentTarget));
-        values.client_id = clientId;
-        values.target_value = Number(values.target_value);
-        try {
-            await request("/api/v1/goals", { method: "POST", body: JSON.stringify(values) });
-            await renderClientGoals(clientId);
-            showWorkspaceMessage("Goal saved.");
-        } catch (error) {
-            showWorkspaceMessage(error.message, true);
-        }
-    });
 }
 
 async function renderClientMealPlan(clientId, selectedTab = "today") {
@@ -2056,11 +2215,11 @@ async function renderClientMealPlan(clientId, selectedTab = "today") {
         if (!days.length) return '<p class="empty-state">No schedule has been shared.</p>';
         return days
             .map((day, index) => {
-                const meals = Array.isArray(day.meals) ? day.meals : [];
+                const meals = Array.isArray(day.meals) ? day.meals : day.candidate_recipe ? [day.candidate_recipe] : [];
                 const entries = meals.map((meal) =>
                     typeof meal === "string"
                         ? meal
-                        : [meal.name, meal.recipe_name, meal.meal_type].filter(Boolean).join(" â€” "),
+                        : [meal.title || meal.name || meal.recipe_name, meal.meal_type].filter(Boolean).join(" · "),
                 );
                 return `<article class="meal-plan-row"><h3>Day ${escapeHtml(day.day || index + 1)}</h3><ul class="meal-summary">${entries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></article>`;
             })
@@ -2098,10 +2257,17 @@ async function renderClientAppointments(
         request(`/api/v1/appointments?client_id=${encodeURIComponent(clientId)}`),
         request("/api/v1/dietitians"),
     ]);
+    const branches = [...new Map(dietitians.filter(d => d.branch_id).map(d => [d.branch_id, d])).values()];
     const now = Date.now();
-    const isUpcoming = (appointment) =>
-        new Date(appointment.appointment_date).getTime() >= now &&
-        ["PENDING", "CONFIRMED", "SCHEDULED"].includes(appointment.status || "SCHEDULED");
+    const isUpcoming = (appointment) => {
+        const when = new Date(appointment.appointment_date);
+        const status = appointment.status || "SCHEDULED";
+        const ongoingVirtual = isVirtualAppointment(appointment)
+            && ["CONFIRMED", "SCHEDULED"].includes(status)
+            && when.toDateString() === new Date(now).toDateString();
+        return ["PENDING", "CONFIRMED", "SCHEDULED"].includes(status)
+            && (when.getTime() >= now || ongoingVirtual);
+    };
     const upcoming = appointments.filter(isUpcoming);
     const past = appointments.filter((appointment) => !isUpcoming(appointment));
     const activeTab = ["book", "upcoming", "past"].includes(selectedTab) ? selectedTab : "upcoming";
@@ -2112,9 +2278,21 @@ async function renderClientAppointments(
               .map(
                   (appointment) => `
     <article class="appointment-row">
-      <div><span class="appointment-status status-${escapeHtml((appointment.status || "scheduled").toLowerCase())}">${escapeHtml(appointment.status || "SCHEDULED")}</span><h3>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</h3></div>
-      <span>${escapeHtml(dietitians.find((dietitian) => dietitian.id === appointment.dietitian_id)?.full_name || `Dietitian ${appointment.dietitian_id}`)}</span>
-      ${activeTab === "upcoming" ? `<button class="button button-small button-reject" data-cancel-appointment="${escapeHtml(appointment.appointment_id)}" type="button">Cancel appointment</button>` : ""}
+  <div>
+    <span class="appointment-status status-${escapeHtml((appointment.status || "scheduled").toLowerCase())}">
+      ${escapeHtml(appointment.status || "SCHEDULED")}
+    </span>
+    <h3>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</h3>
+    <p>${escapeHtml(appointment.consultation_type === "FOLLOW_UP" ? "Follow-up consultation" : "Initial consultation")} &middot; ${escapeHtml(dietitians.find(d => d.branch_id === appointment.branch_id)?.branch_name || "")}</p>
+    <p>Appointment type: <strong>${
+        isVirtualAppointment(appointment) ? "Virtual" : "In-person"
+    }</strong></p>
+    ${appointmentMeetingMarkup(appointment)}
+  </div>
+
+  <span>${escapeHtml(dietitians.find((dietitian) => dietitian.id === appointment.dietitian_id)?.full_name || `Dietitian ${appointment.dietitian_id}`)}</span>
+
+  ${activeTab === "upcoming" ? `<button class="button button-small button-reject" data-cancel-appointment="${escapeHtml(appointment.appointment_id)}" type="button">Cancel appointment</button>` : ""}
     </article>`,
               )
               .join("")
@@ -2125,6 +2303,7 @@ async function renderClientAppointments(
     workspaceContent.innerHTML = `
     ${pageHeading("MY APPOINTMENTS", "Time with your care team.", "Request a visit and track its status here.")}
     <div data-message class="workspace-message" hidden></div>
+    <div class="form-actions"><button class="button quiet-button" type="button" data-refresh-appointments>Refresh appointments</button></div>
     <div class="meal-view-tabs appointment-tabs" role="tablist" aria-label="Appointments">
       <button class="meal-view-tab${activeTab === "book" ? " is-active" : ""}" role="tab" aria-selected="${activeTab === "book"}" data-appointment-tab="book" type="button">Book Appointment</button>
       <button class="meal-view-tab${activeTab === "upcoming" ? " is-active" : ""}" role="tab" aria-selected="${activeTab === "upcoming"}" data-appointment-tab="upcoming" type="button">Upcoming</button>
@@ -2136,17 +2315,32 @@ async function renderClientAppointments(
                   dietitians.length
                       ? `
       <form id="appointmentForm" class="form-grid appointment-booking-form">
+        <div class="form-field"><label for="appointmentBranch">Branch</label><select class="text-input" id="appointmentBranch" name="branch_id" required><option value="">Choose a branch</option>${branches.map(d => `<option value="${escapeHtml(d.branch_id)}">${escapeHtml(d.branch_name || d.practice_name || d.branch_id)} &middot; ${escapeHtml(d.branch_address || "")}</option>`).join("")}</select></div>
+        <div class="form-field"><label for="consultationType">Consultation type</label><select class="text-input" id="consultationType" name="consultation_type" required><option value="INITIAL">Initial consultation</option><option value="FOLLOW_UP">Follow-up consultation</option></select></div>
         <div class="form-field"><label for="appointmentDietitian">Dietitian</label><select class="text-input" id="appointmentDietitian" name="dietitian_id" required><option value="">Choose a Dietitian</option>${dietitians.map((dietitian) => `<option value="${escapeHtml(dietitian.id)}" ${dietitian.id === preferredDietitianId ? "selected" : ""}>${escapeHtml(dietitian.full_name)}${dietitian.practice_name ? ` Â· ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` Â· ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` Â· ${escapeHtml(dietitian.branch_address)}` : ""}</option>`).join("")}</select></div>
-        <div class="form-field"><label for="appointmentDate">Preferred date and time</label><input class="text-input" id="appointmentDate" name="appointment_date" type="datetime-local" min="${minDate}" required></div>
+    <div class="form-field">
+  <label for="appointmentType">Appointment type</label>
+  <select class="text-input" id="appointmentType" name="appointment_type" required>
+    <option value="IN_PERSON">In-person</option>
+    <option value="VIRTUAL">Virtual</option>
+  </select>
+</div>
+    <div class="form-field"><label for="appointmentDate">Preferred date and time</label><input class="text-input" id="appointmentDate" name="appointment_date" type="datetime-local" min="${minDate}" required></div>
         <div class="form-field form-actions"><button class="button button-primary" type="submit">Send request <span class="button-arrow" aria-hidden="true">&#8594;</span></button></div>
       </form>
-      <p class="appointment-note">Your request stays pending until the selected Dietitian approves or rejects it.</p>`
+      <p class="appointment-note">Your request stays pending until the selected Dietitian approves or rejects it.</p>
+      <p class="appointment-note" data-virtual-booking-note hidden>For virtual visits, your dietitian confirms the appointment and prepares a meeting link. Join from this page when ready.</p>`
                       : '<p class="empty-state">No approved Dietitians are available for booking right now.</p>'
               }</section>`
             : `
       <div class="section-heading"><h2>${activeTab === "upcoming" ? "Upcoming Appointments" : "Past Appointments"}</h2><span>${rows.length} APPOINTMENTS</span></div>
       <div class="appointment-list">${appointmentRows}</div>`
     }`;
+    workspaceContent.querySelector('[data-refresh-appointments]').addEventListener('click', async event => {
+        event.currentTarget.disabled = true;
+        try { await renderClientAppointments(clientId, activeTab); }
+        catch (error) { showWorkspaceMessage(error.message, true); event.target.disabled = false; }
+    });
     workspaceContent.querySelectorAll("[data-appointment-tab]").forEach((button) => {
         button.addEventListener("click", () =>
             renderClientAppointments(
@@ -2157,6 +2351,27 @@ async function renderClientAppointments(
         );
     });
     const form = document.querySelector("#appointmentForm");
+    if (form) {
+        const branch = form.querySelector("#appointmentBranch");
+        const dietitian = form.querySelector("#appointmentDietitian");
+        branch.value = dietitians.find(d => d.id === preferredDietitianId)?.branch_id || "";
+        const filterDietitians = () => {
+            for (const option of dietitian.options) {
+                const match = !option.value || dietitians.find(d => d.id === option.value)?.branch_id === branch.value;
+                option.hidden = !match;
+                option.disabled = !match;
+            }
+            if (dietitian.selectedOptions[0]?.disabled) dietitian.value = "";
+        };
+        branch.addEventListener("change", filterDietitians);
+        filterDietitians();
+        const format = form.querySelector('#appointmentType');
+        const note = workspaceContent.querySelector('[data-virtual-booking-note]');
+        const updateMeetingNote = () => { note.hidden = format.value !== 'VIRTUAL'; };
+        format.addEventListener('change', updateMeetingNote);
+        updateMeetingNote();
+    }
+
     if (form)
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
@@ -2194,10 +2409,10 @@ async function renderClientAppointments(
     });
 }
 
-async function renderAppointmentRequests() {
+async function renderAppointmentRequests(initialDate = null) {
     const appointments = await request("/api/v1/appointments/calendar");
 
-    const selectedDate = new Date();
+    const selectedDate = new Date(initialDate || Date.now());
     selectedDate.setHours(0, 0, 0, 0);
 
     let calendarMonth = new Date(
@@ -2316,44 +2531,62 @@ async function renderAppointmentRequests() {
                 appointment.client_name || appointment.client_id,
             );
 
-        const appointmentCard = (appointment, showActions = false) => `
-            <article
-                class="appointment-request-row"
-                data-appointment-id="${escapeHtml(appointment.appointment_id)}"
-                data-patient-card
-            >
-                <div class="appointment-request-details">
-                    <span class="appointment-status ${
-                        appointment.status === "PENDING"
-                            ? "status-pending"
-                            : "status-confirmed"
-                    }">${escapeHtml(appointment.status)}</span>
-                    <h2>${patientName(appointment)}</h2>
-                    <p>${escapeHtml(formatTime(appointment.appointment_date))}</p>
-                </div>
-                <div class="review-actions">
-                    <button
-                        class="button button-small"
-                        data-patient-context="${escapeHtml(appointment.client_id)}"
-                        aria-expanded="false"
-                        type="button"
-                    >View patient info</button>
-                    ${
-                        showActions
-                            ? `
-                                <button class="button button-small button-reject"
-                                    data-appointment-decision="REJECTED"
-                                    type="button">Reject</button>
-                                <button class="button button-small button-approve"
-                                    data-appointment-decision="APPROVED"
-                                    type="button">Approve</button>
-                            `
-                            : ""
-                    }
-                </div>
-                <div data-patient-preview hidden></div>
-            </article>
-        `;
+      const appointmentCard = (appointment, showActions = false) => `
+    <article
+        class="appointment-request-row"
+        data-appointment-id="${escapeHtml(appointment.appointment_id)}"
+        data-appointment-type="${isVirtualAppointment(appointment) ? "VIRTUAL" : "IN_PERSON"}"
+        data-patient-card
+    >
+        <div class="appointment-request-details">
+            <span class="appointment-status ${
+                appointment.status === "PENDING"
+                    ? "status-pending"
+                    : "status-confirmed"
+            }">${escapeHtml(appointment.status)}</span>
+
+            <h2>${patientName(appointment)}</h2>
+            <p>${escapeHtml(formatTime(appointment.appointment_date))}</p>
+
+            <p>
+                Appointment type:
+                <strong>${
+                    isVirtualAppointment(appointment)
+                        ? "Virtual"
+                        : "In-person"
+                }</strong>
+            </p>
+
+            ${appointmentMeetingMarkup(appointment, true)}
+            ${showActions ? meetingChoiceMarkup(appointment) : ""}
+        </div>
+
+        <div class="review-actions">
+            <button
+                class="button button-small"
+                data-patient-context="${escapeHtml(appointment.client_id)}"
+                aria-expanded="false"
+                type="button"
+            >View patient info</button>
+
+            ${
+                showActions
+                    ? `
+                        <button class="button button-small button-reject"
+                            data-appointment-decision="REJECTED"
+                            type="button">Reject</button>
+
+                        <button class="button button-small button-approve"
+                            data-appointment-decision="APPROVED"
+                            type="button">Approve</button>
+                    `
+                    : ""
+            }
+        </div>
+
+        <div data-patient-preview hidden></div>
+    </article>
+`;
 
         workspaceContent.innerHTML = `
             ${pageHeading(
@@ -2492,42 +2725,56 @@ async function renderAppointmentRequests() {
             });
 
         bindPatientContextButtons();
+        bindMeetingControls(workspaceContent, () => renderAppointmentRequests(selectedDate.toISOString()));
 
-        workspaceContent.querySelectorAll("[data-appointment-decision]").forEach((button) => {
-            button.addEventListener("click", async () => {
-                const card = button.closest("[data-appointment-id]");
+       workspaceContent.querySelectorAll("[data-appointment-decision]").forEach((button) => {
+    button.addEventListener("click", async () => {
+        const card = button.closest("[data-appointment-id]");
+        const action = button.dataset.appointmentDecision;
+        let meetingLink = "";
+        if (action === "APPROVED" && card.querySelector('[data-meeting-mode]')?.value === 'manual') {
+            const input = card.querySelector('[data-manual-meeting-link]');
+            const url = safeMeetingUrl(input.value.trim());
+            if (!url) {
+                showWorkspaceMessage('Enter a valid HTTPS meeting link, or choose the automatic Jitsi option.', true);
+                input.focus();
+                return;
+            }
+            meetingLink = url.href;
+        }
 
-                card.querySelectorAll("button").forEach((item) => {
-                    item.disabled = true;
-                });
-
-                const action = button.dataset.appointmentDecision;
-
-                try {
-                    await request(
-                        `/api/v1/appointments/${encodeURIComponent(card.dataset.appointmentId)}`,
-                        {
-                            method: "PATCH",
-                            body: JSON.stringify({ action }),
-                        },
-                    );
-
-                    await renderAppointmentRequests();
-
-                    showWorkspaceMessage(
-                        action === "APPROVED"
-                            ? "Appointment confirmed."
-                            : "Appointment request rejected.",
-                    );
-                } catch (error) {
-                    card.querySelectorAll("button").forEach((item) => {
-                        item.disabled = false;
-                    });
-
-                    showWorkspaceMessage(error.message, true);
-                }
-            });
+        card.querySelectorAll("button").forEach((item) => {
+            item.disabled = true;
         });
+
+        try {
+            await request(
+                `/api/v1/appointments/${encodeURIComponent(card.dataset.appointmentId)}`,
+                {
+                    method: "PATCH",
+                    body: JSON.stringify({
+                        action,
+                        ...(meetingLink ? { meeting_link: meetingLink } : {}),
+                    }),
+                },
+            );
+
+            await renderAppointmentRequests(selectedDate.toISOString());
+
+            showWorkspaceMessage(
+                action === "APPROVED"
+                    ? "Appointment confirmed."
+                    : "Appointment request rejected.",
+            );
+        } catch (error) {
+            card.querySelectorAll("button").forEach((item) => {
+                item.disabled = false;
+            });
+
+            showWorkspaceMessage(error.message, true);
+        }
+    });
+});
     }
 
     renderCalendar();
@@ -2550,6 +2797,7 @@ async function renderClientRecommendations(clientId) {
                   .join("")
             : '<p class="empty-state">No recommendations have been shared yet. Your dietitian will review drafts before they appear here.</p>'
     }</div>`;
+    await mountCarePanel(workspaceContent, clientId, false);
 }
 
 async function renderDietitians() {
@@ -2678,6 +2926,8 @@ async function loadView(view, initialAIPanel = "coach") {
             await renderAdminReports();
         } else if (view === "admin-audit-logs") {
             await renderAdminAuditLogs();
+        } else if (view === "client-settings" && currentUser.type === "client") {
+            renderClientSettings();
         } else if (view === "admin-settings") {
             await renderAdminSettings();
             } else if (view === "dietitian-settings") {
@@ -2755,6 +3005,7 @@ async function renderAIStudio(clientId = "") {
       <div id="planResult" aria-live="polite"></div>
     </section>`;
     document.querySelector("#aiForm").addEventListener("submit", generatePlan);
+    await bindConsultationChoice(document.querySelector("#aiForm"));
 }
 
 async function renderDietitianDocuments() {
@@ -2933,7 +3184,7 @@ function retrievedSourcesMarkup(references) {
 async function renderReviews() {
     const recommendations = await request("/api/v1/ai/recommendations/pending");
     workspaceContent.innerHTML = `
-    ${pageHeading("HUMAN REVIEW", "Review queue.", "Every AI suggestion waits here until a dietitian decides what happens next.")}
+    ${pageHeading("DIETITIAN REVIEW", "Review queue.", "Every generated suggestion waits here until a dietitian decides what happens next.")}
     <div data-message class="workspace-message" hidden></div>
     <div class="review-list">${
         recommendations.length
@@ -3009,6 +3260,7 @@ async function loadClientProfile(clientId) {
       </div>
       <p class="subsection-label">RECORDED DETAILS</p>
       <div class="form-grid"><div><strong class="stat-label">Allergies</strong>${renderTags(profile.allergies, "allergen", "No allergies recorded")}</div><div><strong class="stat-label">Medical conditions</strong>${renderTags(profile.conditions, "condition_name", "No conditions recorded")}</div></div>`;
+        await mountCarePanel(target, clientId, true);
         document
             .querySelector("#allergyForm")
             .addEventListener("submit", (event) => submitClientEntry(event, clientId, "allergies"));
@@ -3183,7 +3435,7 @@ async function renderMealPlans() {
     ${pageHeading("MEAL PLANNING", "Review meal plans.", "Prepare screened drafts and approve them before client delivery.")}
 <div class="section-heading">
     <button class="button button-lime" data-go="ai-workspace" type="button">
-        AI Coach
+        Nutrition Coach
     </button>
 </div>
     ${problemsHtml}
@@ -3244,6 +3496,8 @@ async function renderMealPlans() {
         if (selectedClient && clients.some((c) => String(c.id) === String(selectedClient)))
             form.elements.client_id.value = selectedClient;
         sessionStorage.removeItem("meal-plan-client");
+        await bindConsultationChoice(form, sessionStorage.getItem("meal-plan-appointment") || "");
+        sessionStorage.removeItem("meal-plan-appointment");
         form.addEventListener("submit", createMealPlan);
     }
     document
@@ -3269,6 +3523,7 @@ async function createMealPlan(event) {
                   .filter(Boolean);
     const payload = {
         client_id: values.client_id,
+        appointment_id: values.appointment_id,
         diet_type: values.diet_type,
         days: Number(values.days),
         life_stage: values.life_stage,
@@ -3418,7 +3673,9 @@ async function renderStaffProfile() {
       <div><dt>Role</dt><dd>${escapeHtml(staffRoleNames[profile.role] || profile.role)}</dd></div>
       <div><dt>Branch ID</dt><dd>${escapeHtml(profile.branch_id || "Organization-wide")}</dd></div>
       <div><dt>Status</dt><dd>${profile.is_active ? "Active" : "Inactive"}</dd></div>
-    </dl></section>`;
+    </dl></section>
+    ${profilePhotoSectionMarkup()}`;
+    bindProfilePhotoControls();
 }
 
 async function renderAccessEvents() {
@@ -4213,16 +4470,30 @@ adminSetupForm.addEventListener("submit", async (event) => {
 
 // FR-1.7: authenticated patient QR view; the code is never the patient's ID.
 async function renderClientCheckin(clientId) {
+    const appointments = await request(`/api/v1/appointments?client_id=${encodeURIComponent(clientId)}`);
+    const today = new Intl.DateTimeFormat("en-CA", {timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit"}).format(new Date());
+    const eligibleAppointments = appointments.filter(appointment => {
+        const localDate = new Intl.DateTimeFormat("en-CA", {timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit"}).format(new Date(appointment.appointment_date));
+        return ["CONFIRMED", "SCHEDULED"].includes(appointment.status) && localDate >= today;
+    });
+    if (!eligibleAppointments.length) {
+        workspaceContent.innerHTML = `${pageHeading("CHECK-IN", "Your QR check-in.", "Your QR code becomes available after your appointment is confirmed.")}
+        <section class="content-panel"><p>Book an appointment and wait for your dietitian to confirm it. Pending, cancelled, rejected and past appointments do not enable check-in.</p><button class="button button-primary" data-go="client-appointments" type="button">View appointments</button></section>`;
+        bindGoButtons();
+        return;
+    }
     workspaceContent.innerHTML = `${pageHeading("CHECK-IN", "Your QR check-in.", "Show your private code to reception when you arrive.")}
     <section class="content-panel" aria-label="Check-in QR"><p>Generate a fresh QR code for your visit. The previous code will stop working.</p>
+    <div class="form-field"><label for="checkinAppointment">Appointment</label><select id="checkinAppointment" class="text-input">${eligibleAppointments.map(a => `<option value="${escapeHtml(a.appointment_id)}">${escapeHtml(new Date(a.appointment_date).toLocaleString())} · ${escapeHtml(a.consultation_type || "Consultation")} · ${escapeHtml(a.appointment_id)}</option>`).join("")}</select></div>
     <button class="button button-primary" id="generateCheckinQR" type="button">Generate my check-in QR</button>
     <div id="clientQRDisplay" class="qr-display" role="status"></div></section>`;
     document.querySelector("#generateCheckinQR").addEventListener("click", async (event) => {
-        event.currentTarget.disabled = true;
+        const button = event.currentTarget;
+        button.disabled = true;
         try {
             const result = await request(
                 `/api/v1/clients/${encodeURIComponent(clientId)}/checkin-code`,
-                { method: "POST" },
+                { method: "POST", body: JSON.stringify({appointment_id: document.querySelector("#checkinAppointment").value}) },
             );
             const svgBlob = new Blob([result.qr_svg], { type: "image/svg+xml" });
             const url = URL.createObjectURL(svgBlob);
@@ -4234,7 +4505,7 @@ async function renderClientCheckin(clientId) {
         } catch (error) {
             document.querySelector("#clientQRDisplay").textContent = error.message;
         } finally {
-            event.currentTarget.disabled = false;
+            button.disabled = false;
         }
     });
 }
@@ -4337,5 +4608,3 @@ try {
     sessionStorage.removeItem(sessionKey);
     sessionStorage.removeItem(adminTokenKey);
 }
-
-

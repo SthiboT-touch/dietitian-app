@@ -19,3 +19,7 @@ server.stderr.log
 
 # Local source exports
 exports/
+
+qa/.deps/
+
+qa/artifacts/

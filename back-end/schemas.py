@@ -3,6 +3,7 @@
 from pydantic import BaseModel, Field, field_validator, ValidationInfo
 from typing import List, Literal, Optional
 from datetime import date
+from urllib.parse import urlparse
 from registration_validation import (
     validate_email,
     validate_sa_phone,
@@ -242,13 +243,13 @@ class MetricLog(BaseModel):
 
 
 class ProgressLog(BaseModel):
-    weight_kg: Optional[float] = None
-    body_fat_pct: Optional[float] = None
-    waist_cm: Optional[float] = None
-    calories: Optional[int] = None
-    water_ml: Optional[int] = None
-    steps: Optional[int] = None
-    sleep_hours: Optional[float] = None
+    weight_kg: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    body_fat_pct: Optional[float] = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    waist_cm: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    calories: Optional[int] = Field(default=None, ge=0)
+    water_ml: Optional[int] = Field(default=None, ge=0)
+    steps: Optional[int] = Field(default=None, ge=0)
+    sleep_hours: Optional[float] = Field(default=None, ge=0, le=24, allow_inf_nan=False)
 
 
 class MealLog(BaseModel):
@@ -280,14 +281,41 @@ class AppointmentCreate(BaseModel):
     client_id: str
     dietitian_id: str
     appointment_date: str
+    branch_id: Optional[str] = None
+    consultation_type: Literal["INITIAL", "FOLLOW_UP", "VIRTUAL"] = "INITIAL"
+    appointment_type: Literal["IN_PERSON", "VIRTUAL"] = "IN_PERSON"
 
 
 class AppointmentDecision(BaseModel):
     action: Literal["APPROVED", "REJECTED", "CANCELLED"]
+    meeting_link: Optional[str] = Field(default=None, max_length=2048)
 
+    @field_validator("meeting_link")
+    @classmethod
+    def validate_meeting_link(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        if not value:
+            return None
+
+        parsed = urlparse(value)
+
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+        ):
+            raise ValueError("Meeting link must be a valid HTTPS URL")
+
+        return value
 
 class GoalCreate(BaseModel):
     client_id: str
+    appointment_id: Optional[str] = None
     target_metric: str
     target_value: float
 
@@ -335,6 +363,7 @@ class MealPlanResponse(BaseModel):
 
 class AIGenerateRequest(BaseModel):
     client_id: str
+    appointment_id: Optional[str] = None
     dietary_goal: str
 
 

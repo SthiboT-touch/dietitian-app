@@ -112,6 +112,7 @@ def decode_recommendation(row: dict) -> dict:
         "recommendation_id": row["recommendation_id"],
         "client_id": row["client_id"],
         "dietary_goal": details.get("dietary_goal", ""),
+        "appointment_id": details.get("appointment_id"),
         "generated_plan": details.get("generated_plan", []),
         "retrieved_references": details.get("retrieved_references", []),
         "status": row["status"],

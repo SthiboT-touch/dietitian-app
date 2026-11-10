@@ -558,6 +558,28 @@ select:focus {
     font-size: 10px;
     font-weight: 700;
 }
+.profile-avatar-image {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+.profile-photo-preview {
+    width: 88px;
+    height: 88px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #e2ead7;
+}
+.profile-photo-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 12px;
+    margin-top: 16px;
+}
+[data-profile-photo-message][data-kind="error"] { color: #8d443d; }
+[data-profile-photo-message][data-kind="success"] { color: var(--green-deep); }
 .mobile-signout {
     display: none;
     min-height: 32px;
@@ -2762,4 +2784,25 @@ textarea {
     .appointment-queue-section {
         padding: 13px;
     }
+}
+/* Care workflow uses the existing panel, form and button system. */
+.care-workflow { margin-top: 1.5rem; }
+.care-workflow h3 { margin-top: 1.75rem; }
+.care-history { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+.care-history dt { font-weight: 600; }
+.care-history dd { margin: .4rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.care-entry { padding: 1rem 0; border-bottom: 1px solid #dfe4da; }
+.care-entry p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.care-workflow [data-care-message]:not(:empty) { padding: .75rem; background: #fff0e5; margin-bottom: 1rem; }
+.meeting-actions, .meeting-choice { display: grid; gap: .65rem; margin-top: .85rem; }
+.meeting-choice label { display: grid; gap: .4rem; }
+.meeting-actions .button { justify-self: start; font-size: .875rem; min-height: 42px; }
+.meeting-actions .appointment-note, .meeting-choice .appointment-note { margin: 0; }
+.meeting-actions .appointment-note { font-size: .8rem; line-height: 1.5; }
+.meeting-choice, .appointment-request-details { min-width: 0; }
+.meeting-choice select, .meeting-choice input { min-width: 0; max-width: 100%; }
+.meeting-choice [hidden] { display: none; }
+@media (max-width: 720px) {
+    .appointment-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: .85rem; }
+    .appointment-row > .button { justify-self: start; }
 }
