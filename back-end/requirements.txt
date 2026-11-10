@@ -3,6 +3,8 @@ uvicorn==0.34.0
 psycopg2-binary==2.9.13
 pydantic==2.13.5
 python-dotenv==1.1.1
+resend>=2.52.0,<3.0.0
+truststore>=0.10.4,<1.0.0
 python-multipart==0.0.32
 stytch>=13.0.0,<14.0.0
 langchain>=1.0.0,<2.0.0

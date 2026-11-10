@@ -4,6 +4,13 @@ Run locally with ``uvicorn app:app --app-dir back-end`` or through Docker.
 """
 
 import os
+import truststore
+
+# Use the platform certificate store for outbound TLS. This lets Requests (used
+# by the Resend SDK) trust certificates Windows already recognizes, while
+# keeping certificate and hostname verification enabled.
+truststore.inject_into_ssl()
+
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles

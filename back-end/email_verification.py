@@ -2,13 +2,12 @@
 
 import hashlib
 import hmac
-import json
 import secrets
 import time
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 import config
+import resend
+from resend.exceptions import NoContentError, ResendError
 
 
 class EmailVerificationError(Exception):
@@ -49,7 +48,7 @@ def send_email_code(email: str) -> dict:
     code = f"{secrets.randbelow(1_000_000):06d}"
     method_id = secrets.token_urlsafe(24)
     payload = {
-        "from": config.RESEND_FROM_EMAIL or env.get("RESEND_FROM_EMAIL", "onboarding@resend.dev"),
+        "from": config.RESEND_FROM_EMAIL,
         "to": [email],
         "subject": "Verify your NutriCare account",
         "text": (
@@ -59,58 +58,42 @@ def send_email_code(email: str) -> dict:
             "This code expires in 5 minutes. If you did not request it, you can ignore this email."
         ),
     }
-    request = Request(
-        "https://api.resend.com/emails",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {config.RESEND_API_KEY}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
     try:
-        with urlopen(request, timeout=15) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except HTTPError as error:
-        try:
-            body = json.loads(error.read().decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
-            body = {}
-        message = body.get("message") if isinstance(body, dict) else None
-        if not message and isinstance(body, dict):
-            provider_error = body.get("error")
+        # Match the tutorial: load the key from the server environment, then send
+        # through the official SDK. Keep the existing request timeout.
+        resend.api_key = config.RESEND_API_KEY
+        resend.default_http_client = resend.RequestsClient(timeout=15)
+        result = resend.Emails.send(payload)
+    except ResendError as error:
+        status_code = str(error.code)
+        provider_detail = f" Resend said: {error.message}" if error.message else ""
+        if status_code == "401":
             message = (
-                provider_error.get("message") or provider_error.get("name")
-                if isinstance(provider_error, dict)
-                else provider_error
+                "Resend rejected the API key (HTTP 401). Check that RESEND_API_KEY is active and valid."
+                f"{provider_detail}"
             )
-        if not message and error.code == 401:
-            message = "Resend rejected the API key (HTTP 401). Check that RESEND_API_KEY is active and valid."
-        elif not message and error.code == 403:
+        elif status_code == "403":
             message = (
-                "Resend denied this sender (HTTP 403). Verify the sender's domain in Resend "
-                "and confirm the API key has permission for that domain."
+                "Resend denied this sender (HTTP 403). Verify the sender's domain and "
+                f"confirm this API key can send from that domain.{provider_detail}"
             )
-        elif not message and error.code == 422:
+        elif status_code == "422":
             message = (
                 "Resend rejected the sender or email format (HTTP 422). Check RESEND_FROM_EMAIL "
-                "and verify the sender's domain."
+                f"and verify the sender's domain.{provider_detail}"
             )
-        elif not message and error.code == 429:
-            message = "Resend rate limit reached. Wait a moment, then request a new code."
-        elif not message:
-            message = f"Resend rejected the request (HTTP {error.code}). Check the sender and API key settings."
+        elif status_code == "429":
+            message = f"Resend rate limit reached. Wait a moment, then request a new code.{provider_detail}"
+        else:
+            message = f"Resend rejected the request (HTTP {status_code}): {error.message}"
+        raise EmailVerificationError(message) from error
+    except NoContentError as error:
         raise EmailVerificationError(
-            str(message)
+            "Resend returned an empty response. Please try again."
         ) from error
-    except (URLError, TimeoutError, OSError) as error:
+    except (TimeoutError, OSError) as error:
         raise EmailVerificationError(
             "Email verification is temporarily unavailable. Please try again."
-        ) from error
-    except (ValueError, UnicodeDecodeError) as error:
-        raise EmailVerificationError(
-            "Resend returned an invalid response. Please try again."
         ) from error
 
     _challenges[method_id] = {
