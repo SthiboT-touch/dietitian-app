@@ -75,11 +75,15 @@ def test_recommendations_are_clinician_only_and_shared_with_patient():
 
 def test_booking_branch_consultation_validation_and_roundtrip():
     booking = {"client_id": "c", "dietitian_id": "d", "branch_id": "b", "consultation_type": "FOLLOW_UP",
-               "appointment_date": (datetime.now() + timedelta(days=2)).isoformat()}
+               "appointment_date": (datetime.now() + timedelta(days=2))
+               .replace(hour=8, minute=0, second=0, microsecond=0)
+               .isoformat()}
     response = api.post("/api/v1/appointments", json=booking, headers=auth("patient"))
     assert response.status_code == 200
     assert response.json()["appointment"]["branch_id"] == "b"
-    assert api.get("/api/v1/appointments", headers=auth("patient")).json()[0]["consultation_type"] == "FOLLOW_UP"
+    stored = api.get("/api/v1/appointments", headers=auth("patient")).json()[0]
+    assert stored["consultation_type"] == "FOLLOW_UP"
+    assert stored["visit_type"] == "follow_up"
     booking["branch_id"] = "wrong"
     assert api.post("/api/v1/appointments", json=booking, headers=auth("patient")).status_code == 422
     booking["branch_id"] = "b"
@@ -91,7 +95,9 @@ def test_existing_appointment_format_and_manual_meeting_link_are_preserved():
     booking = {
         "client_id": "c", "dietitian_id": "d", "branch_id": "b",
         "consultation_type": "FOLLOW_UP", "appointment_type": "VIRTUAL",
-        "appointment_date": (datetime.now() + timedelta(days=2)).isoformat(),
+        "appointment_date": (datetime.now() + timedelta(days=2))
+        .replace(hour=8, minute=0, second=0, microsecond=0)
+        .isoformat(),
     }
     created = api.post("/api/v1/appointments", json=booking, headers=auth("patient"))
     assert created.status_code == 200

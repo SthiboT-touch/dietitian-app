@@ -197,6 +197,22 @@ class CheckinRequest(BaseModel):
     checkin_code: str = Field(..., min_length=20, max_length=200)
 
 
+def _appointment_qr_is_valid_today(appointment: dict) -> bool:
+    if appointment.get("status") not in {"PENDING", "CONFIRMED", "SCHEDULED"}:
+        return False
+    appointment_date = appointment["date_time"] if "date_time" in appointment else appointment["appointment_date"]
+    if isinstance(appointment_date, str):
+        appointment_date = datetime.fromisoformat(
+            appointment_date.replace("Z", "+00:00")
+        )
+    local_date = (
+        appointment_date.astimezone(timezone(timedelta(hours=2))).date()
+        if appointment_date.tzinfo
+        else appointment_date.date()
+    )
+    return local_date == datetime.now(timezone(timedelta(hours=2))).date()
+
+
 @router.post("/api/v1/reception/check-in", status_code=201)
 def scan_checkin(
     data: CheckinRequest, identity=Depends(require_roles("reception", "branch_manager"))
@@ -206,6 +222,94 @@ def scan_checkin(
     token = data.checkin_code.removeprefix("NC1:").strip()
     if len(token) < 32:
         raise HTTPException(422, "Invalid check-in code")
+    if token.startswith("APPT:"):
+        appointment_id = token.removeprefix("APPT:")
+        if not appointment_id:
+            raise HTTPException(422, "Invalid appointment check-in code")
+        if config.DATABASE_ENABLED:
+            with database.cursor() as cursor:
+                cursor.execute(
+                    "SELECT branch_id, is_active FROM staff_account WHERE staff_id=%s",
+                    (staff_id,),
+                )
+                staff = cursor.fetchone()
+                if not staff or not staff["is_active"] or not staff["branch_id"]:
+                    raise HTTPException(403, "An active branch assignment is required")
+                cursor.execute(
+                    "SELECT a.client_id, a.status, a.date_time, "
+                    "COALESCE(a.branch_id, d.branch_id) AS appointment_branch "
+                    "FROM appointment a JOIN dietitian d ON d.dietitian_id=a.dietitian_id "
+                    "WHERE a.appointment_id=%s FOR UPDATE OF a",
+                    (appointment_id,),
+                )
+                appointment = cursor.fetchone()
+                if not appointment:
+                    raise HTTPException(404, "Appointment QR not found")
+                if str(appointment["appointment_branch"]) != str(staff["branch_id"]):
+                    raise HTTPException(403, "This appointment belongs to another branch")
+                if not _appointment_qr_is_valid_today(appointment):
+                    raise HTTPException(
+                        409, "This QR is valid only on its active appointment date"
+                    )
+                cursor.execute(
+                    "SELECT 1 FROM client_checkin_event WHERE appointment_id=%s LIMIT 1",
+                    (appointment_id,),
+                )
+                if cursor.fetchone():
+                    raise HTTPException(409, "This appointment has already been checked in")
+                client_id = appointment["client_id"]
+                cursor.execute(
+                    "INSERT INTO client_checkin_event "
+                    "(checkin_id, client_id, staff_id, branch_id, appointment_id) "
+                    "VALUES (%s,%s,%s,%s,%s)",
+                    (
+                        str(uuid4()),
+                        client_id,
+                        staff_id,
+                        staff["branch_id"],
+                        appointment_id,
+                    ),
+                )
+                branch_id = staff["branch_id"]
+        else:
+            staff = staff_accounts_db.get(staff_id)
+            if not staff or not staff.get("is_active") or not staff.get("branch_id"):
+                raise HTTPException(403, "An active branch assignment is required")
+            appointment = appointments_db.get(appointment_id)
+            if not appointment:
+                raise HTTPException(404, "Appointment QR not found")
+            dietitian = users_db.get(appointment.get("dietitian_id"), {})
+            appointment_branch = appointment.get("branch_id") or dietitian.get("branch_id")
+            if str(appointment_branch) != str(staff["branch_id"]):
+                raise HTTPException(403, "This appointment belongs to another branch")
+            if not _appointment_qr_is_valid_today(appointment):
+                raise HTTPException(
+                    409, "This QR is valid only on its active appointment date"
+                )
+            if any(
+                event.get("appointment_id") == appointment_id
+                for event in checkin_events_db
+            ):
+                raise HTTPException(409, "This appointment has already been checked in")
+            client_id = appointment["client_id"]
+            checkin_events_db.append(
+                {
+                    "checkin_id": str(uuid4()),
+                    "client_id": client_id,
+                    "staff_id": staff_id,
+                    "branch_id": staff["branch_id"],
+                    "appointment_id": appointment_id,
+                    "checked_in_at": datetime.now(timezone.utc),
+                }
+            )
+            branch_id = staff["branch_id"]
+        return {
+            "message": "Patient checked in",
+            "appointment_id": appointment_id,
+            "client_id": client_id,
+            "branch_id": branch_id,
+        }
+
     digest = checkin_hash(token)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
@@ -227,6 +331,12 @@ def scan_checkin(
             if not appointment_id:
                 raise HTTPException(409, "Generate a new QR code for a confirmed appointment")
             require_checkin_appointment(client_id, cursor, staff["branch_id"], appointment_id, lock=True)
+            cursor.execute(
+                "SELECT 1 FROM client_checkin_event WHERE appointment_id=%s LIMIT 1",
+                (appointment_id,),
+            )
+            if cursor.fetchone():
+                raise HTTPException(409, "This appointment has already been checked in")
             cursor.execute("DELETE FROM client_checkin_credential WHERE client_id=%s", (client_id,))
             cursor.execute(
                 "INSERT INTO client_checkin_event (checkin_id, client_id, staff_id, branch_id, appointment_id) "
@@ -252,6 +362,11 @@ def scan_checkin(
         if not appointment_id:
             raise HTTPException(409, "Generate a new QR code for a confirmed appointment")
         require_checkin_appointment(client_id, branch_id=staff["branch_id"], appointment_id=appointment_id)
+        if any(
+            event.get("appointment_id") == appointment_id
+            for event in checkin_events_db
+        ):
+            raise HTTPException(409, "This appointment has already been checked in")
         checkin_credentials_db.pop(client_id, None)  # single-use QR credential
         checkin_events_db.append(
             {

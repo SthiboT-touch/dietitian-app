@@ -242,7 +242,7 @@ def test_patient_without_assigned_dietitian_can_book_with_directory_dietitian():
             "client_id": patient["id"],
             "dietitian_id": directory.json()[0]["id"],
             "appointment_date": (datetime.now() + timedelta(days=5))
-            .replace(microsecond=0)
+            .replace(hour=8, minute=0, second=0, microsecond=0)
             .isoformat(),
         },
         headers=authenticated_client_headers(patient["id"]),
@@ -286,7 +286,7 @@ def test_approved_appointment_links_patient_to_dietitian_for_dashboard():
             "client_id": patient["id"],
             "dietitian_id": dietitian["id"],
             "appointment_date": (datetime.now() + timedelta(days=5))
-            .replace(microsecond=0)
+            .replace(hour=8, minute=0, second=0, microsecond=0)
             .isoformat(),
         },
         headers=authenticated_client_headers(patient["id"]),
@@ -1030,14 +1030,16 @@ def test_meal_plan_create_and_list():
 
 
 def test_appointments_can_be_filtered_by_client():
-    appointment_date = (datetime.now() + timedelta(days=8)).replace(microsecond=0).isoformat()
-    for client_id in ("client-a", "client-b"):
+    appointment_date = (datetime.now() + timedelta(days=8)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    )
+    for client_id, slot in (("client-a", "08:00"), ("client-b", "08:55")):
         response = client.post(
             "/api/v1/appointments",
             json={
                 "client_id": client_id,
                 "dietitian_id": "dietitian-1",
-                "appointment_date": appointment_date,
+                "appointment_date": f"{appointment_date:%Y-%m-%d}T{slot}:00",
             },
             headers=authenticated_client_headers(client_id),
         )
@@ -1052,6 +1054,120 @@ def test_appointments_can_be_filtered_by_client():
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["client_id"] == "client-a"
+
+
+def test_appointment_checkin_qr_is_returned_and_stays_stable_in_appointment_list():
+    appointment_date = (datetime.now() + timedelta(days=8)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    )
+    created = client.post(
+        "/api/v1/appointments",
+        json={
+            "client_id": "client-qr-test",
+            "dietitian_id": "dietitian-qr-test",
+            "appointment_date": appointment_date.isoformat(),
+        },
+        headers=authenticated_client_headers("client-qr-test"),
+    )
+    listed = client.get(
+        "/api/v1/appointments",
+        params={"client_id": "client-qr-test"},
+        headers=authenticated_client_headers("client-qr-test"),
+    )
+
+    assert created.status_code == 200
+    assert listed.status_code == 200
+    created_appointment = created.json()["appointment"]
+    listed_appointment = listed.json()[0]
+    assert "<svg" in created_appointment["checkin_qr_svg"]
+    assert listed_appointment["checkin_qr_svg"] == created_appointment["checkin_qr_svg"]
+
+
+def test_appointment_qr_checks_in_only_its_matching_appointment_once():
+    from datetime import timezone
+
+    appointment_id = "qr-checkin-test-appointment"
+    staff_id = "qr-checkin-test-staff"
+    staff_token = "qr-checkin-test-token"
+    branch_id = "qr-checkin-test-branch"
+    state.users_db["qr-checkin-test-dietitian"] = {
+        "type": "dietitian",
+        "branch_id": branch_id,
+    }
+    state.staff_accounts_db[staff_id] = {
+        "role": "reception",
+        "is_active": True,
+        "branch_id": branch_id,
+    }
+    state.staff_sessions_db[staff_token] = staff_id
+    state.appointments_db[appointment_id] = {
+        "appointment_id": appointment_id,
+        "client_id": "qr-checkin-test-client",
+        "dietitian_id": "qr-checkin-test-dietitian",
+        "appointment_date": datetime.now(timezone(timedelta(hours=2))).isoformat(),
+        "status": "CONFIRMED",
+    }
+    headers = {"Authorization": f"Bearer {staff_token}"}
+    payload = {"checkin_code": f"NC1:APPT:{appointment_id}"}
+
+    try:
+        first_scan = client.post(
+            "/api/v1/reception/check-in", json=payload, headers=headers
+        )
+        repeated_scan = client.post(
+            "/api/v1/reception/check-in", json=payload, headers=headers
+        )
+
+        assert first_scan.status_code == 201
+        assert first_scan.json()["client_id"] == "qr-checkin-test-client"
+        assert repeated_scan.status_code == 409
+    finally:
+        state.staff_sessions_db.pop(staff_token, None)
+        state.staff_accounts_db.pop(staff_id, None)
+        state.users_db.pop("qr-checkin-test-dietitian", None)
+        state.appointments_db.pop(appointment_id, None)
+        state.checkin_events_db[:] = [
+            event
+            for event in state.checkin_events_db
+            if event.get("appointment_id") != appointment_id
+        ]
+
+
+def test_appointments_require_grid_slots_and_prevent_overlapping_bookings():
+    appointment_date = (datetime.now() + timedelta(days=6)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    )
+    first = client.post(
+        "/api/v1/appointments",
+        json={
+            "client_id": "client-a",
+            "dietitian_id": "dietitian-1",
+            "appointment_date": appointment_date.isoformat(),
+        },
+        headers=authenticated_client_headers("client-a"),
+    )
+    collision = client.post(
+        "/api/v1/appointments",
+        json={
+            "client_id": "client-b",
+            "dietitian_id": "dietitian-1",
+            "appointment_date": appointment_date.isoformat(),
+        },
+        headers=authenticated_client_headers("client-b"),
+    )
+    invalid_slot = client.post(
+        "/api/v1/appointments",
+        json={
+            "client_id": "client-c",
+            "dietitian_id": "dietitian-1",
+            "appointment_date": (appointment_date + timedelta(minutes=5)).isoformat(),
+        },
+        headers=authenticated_client_headers("client-c"),
+    )
+
+    assert first.status_code == 200
+    assert collision.status_code == 409
+    assert invalid_slot.status_code == 422
 
 
 def test_goals_are_created_by_assigned_dietitian_and_viewed_by_client():
@@ -1123,7 +1239,9 @@ def test_dietitian_progress_saves_and_preserves_partial_metric_updates():
 
 
 def test_appointment_lifecycle_supports_approval_rejection_and_cancellation():
-    appointment_date = (datetime.now() + timedelta(days=5)).replace(microsecond=0).isoformat()
+    appointment_date = (datetime.now() + timedelta(days=5)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    ).isoformat()
     created = client.post(
         "/api/v1/appointments",
         json={
@@ -1184,7 +1302,7 @@ def test_appointment_decisions_only_apply_to_pending_requests():
             "client_id": "client-a",
             "dietitian_id": "dietitian-1",
             "appointment_date": (datetime.now() + timedelta(days=3))
-            .replace(microsecond=0)
+            .replace(hour=8, minute=0, second=0, microsecond=0)
             .isoformat(),
         },
         headers=authenticated_client_headers("client-a"),

@@ -2806,3 +2806,20 @@ textarea {
     .appointment-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: .85rem; }
     .appointment-row > .button { justify-self: start; }
 }
+.appointment-checkin-qr {
+    display: grid;
+    justify-items: start;
+    gap: 4px;
+    margin-top: 10px;
+    color: var(--muted);
+    font-size: 11px;
+}
+.appointment-checkin-qr img {
+    display: block;
+    width: 132px;
+    height: 132px;
+    padding: 5px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: #fff;
+}

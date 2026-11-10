@@ -11,6 +11,7 @@ from state import (
  appointments_db,goals_db,
 users_db, clients_db, checkin_events_db,
 )
+from onboarding_services import qr_svg
 from schemas import AppointmentCreate, AppointmentDecision, GoalCreate
 from security import current_identity, authorize_client_access
 from consultations import completed_consultation
@@ -20,6 +21,60 @@ from virtual_meetings import (
 
 router = APIRouter()
 SOUTH_AFRICA = timezone(timedelta(hours=2))
+APPOINTMENT_DURATION_MINUTES = 50
+APPOINTMENT_BUFFER_MINUTES = 5
+APPOINTMENT_SLOT_INTERVAL_MINUTES = APPOINTMENT_DURATION_MINUTES + APPOINTMENT_BUFFER_MINUTES
+APPOINTMENT_FIRST_SLOT_MINUTES = 8 * 60
+APPOINTMENT_LAST_SLOT_MINUTES = 16 * 60 + 15
+ACTIVE_APPOINTMENT_STATUSES = ("PENDING", "CONFIRMED", "SCHEDULED")
+
+
+def _validate_appointment_slot(appointment_date: datetime) -> None:
+    slot_minute = appointment_date.hour * 60 + appointment_date.minute
+    if (
+        appointment_date.second
+        or appointment_date.microsecond
+        or slot_minute < APPOINTMENT_FIRST_SLOT_MINUTES
+        or slot_minute > APPOINTMENT_LAST_SLOT_MINUTES
+        or (slot_minute - APPOINTMENT_FIRST_SLOT_MINUTES)
+        % APPOINTMENT_SLOT_INTERVAL_MINUTES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Choose an available 50-minute appointment slot between 08:00 and 16:15",
+        )
+
+
+def _appointment_overlaps(start: datetime, existing: dict) -> bool:
+    existing_start = datetime.fromisoformat(
+        existing["appointment_date"].replace("Z", "+00:00")
+    )
+    if start.tzinfo and existing_start.tzinfo:
+        start = start.astimezone(timezone.utc)
+        existing_start = existing_start.astimezone(timezone.utc)
+    else:
+        start = start.replace(tzinfo=None)
+        existing_start = existing_start.replace(tzinfo=None)
+    existing_duration = int(existing.get("duration", APPOINTMENT_DURATION_MINUTES))
+    requested_end = start + timedelta(minutes=APPOINTMENT_SLOT_INTERVAL_MINUTES)
+    existing_reserved_end = existing_start + timedelta(
+        minutes=existing_duration + APPOINTMENT_BUFFER_MINUTES
+    )
+    return existing_start < requested_end and existing_reserved_end > start
+
+
+def _include_appointment_qr(appointment: dict, role: str) -> dict:
+    result = dict(appointment)
+    if role == "client":
+        appointment_id = str(appointment["appointment_id"])
+        try:
+            uuid.UUID(appointment_id)
+        except ValueError:
+            return result
+        result["checkin_qr_svg"] = qr_svg(
+            f"NC1:APPT:{appointment_id}"
+        )
+    return result
 
 
 # --- 4. APPOINTMENTS & GOALS ---
@@ -46,7 +101,8 @@ def _authorize_appointment_decision(
 def create_appointment(
     data: AppointmentCreate, authorization: Optional[str] = Header(default=None)
 ):
-    authorize_client_access(data.client_id, current_identity(authorization))
+    identity = current_identity(authorization)
+    authorize_client_access(data.client_id, identity)
 
     try:
         appointment_date = datetime.fromisoformat(
@@ -57,6 +113,10 @@ def create_appointment(
             status_code=422,
             detail="Appointment date must be a valid date and time",
         ) from exc
+    _validate_appointment_slot(appointment_date)
+    visit_type = data.visit_type or (
+        "follow_up" if data.consultation_type == "FOLLOW_UP" else "initial_visit"
+    )
 
     now = (
         datetime.now(appointment_date.tzinfo)
@@ -81,10 +141,34 @@ def create_appointment(
             raise HTTPException(422, "Choose an approved dietitian")
         if str(dietitian.get("branch_id")) != data.branch_id:
             raise HTTPException(422, "Dietitian does not practice at the selected branch")
-    appt_id = f"appt_{uuid.uuid4().hex[:8]}"
+    appt_id = str(uuid.uuid4())
 
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                (f"appointment:{data.dietitian_id}",),
+            )
+            cursor.execute(
+                "SELECT 1 FROM appointment "
+                "WHERE dietitian_id = %s AND status = ANY(%s) "
+                "AND date_time < %s + (%s * INTERVAL '1 minute') "
+                "AND date_time + ((COALESCE(duration, 30) + %s) * INTERVAL '1 minute') > %s "
+                "LIMIT 1",
+                (
+                    data.dietitian_id,
+                    list(ACTIVE_APPOINTMENT_STATUSES),
+                    appointment_date,
+                    APPOINTMENT_SLOT_INTERVAL_MINUTES,
+                    APPOINTMENT_BUFFER_MINUTES,
+                    appointment_date,
+                ),
+            )
+            if cursor.fetchone():
+                raise HTTPException(
+                    status_code=409,
+                    detail="This appointment time is no longer available. Choose another slot.",
+                )
             cursor.execute(
                 """
                 INSERT INTO appointment (
@@ -97,20 +181,23 @@ def create_appointment(
                     appointment_type,
                     meeting_link,
                     branch_id,
-                    consultation_type
+                    consultation_type,
+                    visit_type
                 )
-                VALUES (%s, %s, %s, %s, %s, 'PENDING', %s, NULL, %s, %s)
-                RETURNING status, date_time, appointment_type, meeting_link, branch_id, consultation_type
+                VALUES (%s, %s, %s, %s, %s, 'PENDING', %s, NULL, %s, %s, %s)
+                RETURNING status, date_time, appointment_type, meeting_link, branch_id,
+                          consultation_type, visit_type, duration
                 """,
                 (
                     appt_id,
                     data.client_id,
                     data.dietitian_id,
-                    data.appointment_date,
-                    30,
+                    appointment_date,
+                    APPOINTMENT_DURATION_MINUTES,
                     data.appointment_type,
                     data.branch_id,
                     data.consultation_type,
+                    visit_type,
                 ),
             )
             row = cursor.fetchone()
@@ -125,12 +212,25 @@ def create_appointment(
             "meeting_link": row["meeting_link"],
             "branch_id": row["branch_id"],
             "consultation_type": row["consultation_type"],
+            "visit_type": row["visit_type"],
+            "duration": row["duration"],
         }
 
         return {
             "message": "Appointment scheduled",
-            "appointment": appointment,
+            "appointment": _include_appointment_qr(appointment, identity[0]),
         }
+
+    for existing in appointments_db.values():
+        if (
+            existing.get("dietitian_id") == data.dietitian_id
+            and existing.get("status", "PENDING") in ACTIVE_APPOINTMENT_STATUSES
+            and _appointment_overlaps(appointment_date, existing)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="This appointment time is no longer available. Choose another slot.",
+            )
 
     appointment = {
         "appointment_id": appt_id,
@@ -142,13 +242,15 @@ def create_appointment(
         "meeting_link": None,
         "branch_id": data.branch_id,
         "consultation_type": data.consultation_type,
+        "visit_type": visit_type,
+        "duration": APPOINTMENT_DURATION_MINUTES,
     }
 
     appointments_db[appt_id] = appointment
 
     return {
         "message": "Appointment scheduled",
-        "appointment": appointment,
+        "appointment": _include_appointment_qr(appointment, identity[0]),
     }
 
 @router.get("/api/v1/appointments/calendar", tags=["4. Appointments & Goals"])
@@ -326,7 +428,9 @@ def get_appointments(
                     branch_id,
                     consultation_type,
                     appointment_type,
-                    meeting_link
+                    meeting_link,
+                    visit_type,
+                    duration
                 FROM appointment
             """
 
@@ -338,13 +442,14 @@ def get_appointments(
                 tuple(parameters),
             )
 
-            return [
+            results = [
                 {
                     **public_appointment(row, (role, account_id)),
                     "appointment_date": row["appointment_date"].isoformat(),
                 }
                 for row in cursor.fetchall()
             ]
+            return [_include_appointment_qr(appointment, role) for appointment in results]
 
     appointments = list(appointments_db.values())
 
@@ -362,7 +467,10 @@ def get_appointments(
             if appointment["dietitian_id"] == dietitian_id
         ]
 
-    return [public_appointment(a, (role, account_id)) for a in appointments]
+    return [
+        _include_appointment_qr(public_appointment(a, (role, account_id)), role)
+        for a in appointments
+    ]
 
 @router.patch("/api/v1/appointments/{appointment_id}", tags=["4. Appointments & Goals"])
 def decide_appointment(

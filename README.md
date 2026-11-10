@@ -105,6 +105,10 @@ All signed-in account roles can upload, replace, or remove a JPEG/PNG profile pi
 
 Appointment requests are created as `PENDING`; dietitian decisions change them to `CONFIRMED` or `REJECTED`, and patients can cancel future pending or confirmed appointments. Patients may create an account before joining a dietitian. For an existing PostgreSQL database, apply the status migration once with `python back-end/migrations/apply_001_appointment_approval_states.py`.
 
+Appointment requests use 50-minute visits with a 5-minute buffer, offered in 55-minute slots from 08:00 through 16:15. Clients must choose an initial visit or follow-up. For existing PostgreSQL databases, apply `python back-end/migrations/apply_022_appointment_visit_type.py` to store the visit type.
+
+Appointment check-in QR codes stay on the appointment record and are valid for reception scanning only on the appointment's date at its assigned branch.
+
 For running the API outside Compose, set `OLLAMA_BASE_URL` (default `http://localhost:11434`) and `OLLAMA_MODEL` (default `llama3.2`) to match an Ollama instance with the selected model downloaded.
 
 ## Admin approvals

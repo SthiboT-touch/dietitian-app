@@ -284,6 +284,7 @@ class AppointmentCreate(BaseModel):
     branch_id: Optional[str] = None
     consultation_type: Literal["INITIAL", "FOLLOW_UP", "VIRTUAL"] = "INITIAL"
     appointment_type: Literal["IN_PERSON", "VIRTUAL"] = "IN_PERSON"
+    visit_type: Optional[Literal["initial_visit", "follow_up"]] = None
 
 
 class AppointmentDecision(BaseModel):

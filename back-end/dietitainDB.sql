@@ -112,11 +112,11 @@ CREATE TABLE dietitian (
 
     email                 VARCHAR(150) UNIQUE NOT NULL,
 
-    password              VARCHAR(255) NOT NULL,
-
     email_verified       BOOLEAN NOT NULL DEFAULT TRUE,
 
     stytch_user_id       VARCHAR(80),
+
+    password              VARCHAR(255) NOT NULL,
 
     registration_number   VARCHAR(50) UNIQUE NOT NULL,
 
@@ -187,11 +187,11 @@ CREATE TABLE client (
 
     email                VARCHAR(150) UNIQUE NOT NULL,
 
-    password              VARCHAR(255) NOT NULL,
-
     email_verified       BOOLEAN NOT NULL DEFAULT TRUE,
 
     stytch_user_id       VARCHAR(80),
+
+    password              VARCHAR(255) NOT NULL,
 
     id_number            VARCHAR(30) UNIQUE NOT NULL,
 
@@ -435,6 +435,11 @@ CREATE TABLE appointment (
     status          VARCHAR(20) NOT NULL DEFAULT 'PENDING'
 
         CHECK (status IN ('PENDING','CONFIRMED','REJECTED','SCHEDULED','COMPLETED','CANCELLED','NO_SHOW')),
+
+    -- Store the client's selected visit category; legacy rows default to initial visits.
+    visit_type      VARCHAR(20) NOT NULL DEFAULT 'initial_visit'
+
+        CHECK (visit_type IN ('initial_visit', 'follow_up')),
 
     notes           TEXT
 
@@ -1075,6 +1080,7 @@ CREATE TABLE IF NOT EXISTS client_checkin_event (
     client_id VARCHAR(36) NOT NULL REFERENCES client(client_id) ON DELETE RESTRICT,
     staff_id VARCHAR(36) NOT NULL REFERENCES staff_account(staff_id) ON DELETE RESTRICT,
     branch_id VARCHAR(36) NOT NULL REFERENCES branch(branch_id) ON DELETE RESTRICT,
+    appointment_id VARCHAR(36) REFERENCES appointment(appointment_id) ON DELETE SET NULL,
     checked_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_client_checkin_event_client ON client_checkin_event(client_id, checked_in_at DESC);

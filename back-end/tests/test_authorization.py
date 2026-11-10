@@ -82,10 +82,13 @@ def test_health_metrics_are_managed_only_by_assigned_dietitian(endpoint, payload
 
 
 def booking(client_id="c1", dietitian_id="d1"):
+    # Authorization tests use a valid grid time so they exercise access checks, not slot validation.
     return {
         "client_id": client_id,
         "dietitian_id": dietitian_id,
-        "appointment_date": (datetime.now() + timedelta(days=3)).isoformat(),
+        "appointment_date": (datetime.now() + timedelta(days=3))
+        .replace(hour=8, minute=0, second=0, microsecond=0)
+        .isoformat(),
     }
 
 

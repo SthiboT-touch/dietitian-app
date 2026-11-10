@@ -2288,6 +2288,7 @@ async function renderClientAppointments(
         isVirtualAppointment(appointment) ? "Virtual" : "In-person"
     }</strong></p>
     ${appointmentMeetingMarkup(appointment)}
+    ${appointment.checkin_qr_svg ? `<div class="appointment-checkin-qr"><img alt="Appointment check-in QR code" src="data:image/svg+xml,${encodeURIComponent(appointment.checkin_qr_svg)}"><span>Show this QR to reception on your appointment day</span></div>` : ""}
   </div>
 
   <span>${escapeHtml(dietitians.find((dietitian) => dietitian.id === appointment.dietitian_id)?.full_name || `Dietitian ${appointment.dietitian_id}`)}</span>
@@ -2299,7 +2300,17 @@ async function renderClientAppointments(
         : `<p class="empty-state">${activeTab === "upcoming" ? "No upcoming appointments." : "No past appointments."}</p>`;
     const minDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
         .toISOString()
-        .slice(0, 16);
+        .slice(0, 10);
+    const appointmentSlots = Array.from({ length: 10 }, (_, index) => {
+        const startMinutes = 8 * 60 + index * 55;
+        const endMinutes = startMinutes + 50;
+        const formatSlotTime = (minutes) =>
+            `${String(Math.floor(minutes / 60)).padStart(2, "0")}h${String(minutes % 60).padStart(2, "0")}`;
+        return {
+            value: `${String(Math.floor(startMinutes / 60)).padStart(2, "0")}:${String(startMinutes % 60).padStart(2, "0")}`,
+            label: `${formatSlotTime(startMinutes)}-${formatSlotTime(endMinutes)}`,
+        };
+    });
     workspaceContent.innerHTML = `
     ${pageHeading("MY APPOINTMENTS", "Time with your care team.", "Request a visit and track its status here.")}
     <div data-message class="workspace-message" hidden></div>
@@ -2325,7 +2336,8 @@ async function renderClientAppointments(
     <option value="VIRTUAL">Virtual</option>
   </select>
 </div>
-    <div class="form-field"><label for="appointmentDate">Preferred date and time</label><input class="text-input" id="appointmentDate" name="appointment_date" type="datetime-local" min="${minDate}" required></div>
+    <div class="form-field"><label for="appointmentDate">Preferred date</label><input class="text-input" id="appointmentDate" name="appointment_day" type="date" min="${minDate}" required></div>
+    <div class="form-field"><label for="appointmentTime">Available time</label><select class="text-input" id="appointmentTime" name="appointment_time" required><option value="">Choose a time</option>${appointmentSlots.map((slot) => `<option value="${slot.value}">${slot.label}</option>`).join("")}</select></div>
         <div class="form-field form-actions"><button class="button button-primary" type="submit">Send request <span class="button-arrow" aria-hidden="true">&#8594;</span></button></div>
       </form>
       <p class="appointment-note">Your request stays pending until the selected Dietitian approves or rejects it.</p>
@@ -2376,6 +2388,10 @@ async function renderClientAppointments(
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
             const values = Object.fromEntries(new FormData(form));
+            values.appointment_date = `${values.appointment_day}T${values.appointment_time}:00`;
+            values.visit_type = values.consultation_type === "FOLLOW_UP" ? "follow_up" : "initial_visit";
+            delete values.appointment_day;
+            delete values.appointment_time;
             values.client_id = clientId;
             try {
                 await request("/api/v1/appointments", {
