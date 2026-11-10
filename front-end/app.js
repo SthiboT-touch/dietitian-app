@@ -5,6 +5,14 @@ const signupForm = document.querySelector("#signupForm");
 const adminSetupForm = document.querySelector("#adminSetupForm");
 const authMessage = document.querySelector("#authMessage");
 const workspaceContent = document.querySelector("#workspaceContent");
+const themePreferenceKey = "nutrition-practice-theme";
+try {
+    document.documentElement.dataset.theme =
+        localStorage.getItem(themePreferenceKey) === "dark" ? "dark" : "light";
+} catch (error) {
+    console.error("Could not load the saved appearance preference.", error);
+    document.documentElement.dataset.theme = "light";
+}
 const sessionKey = "nutrition-practice-session";
 const adminTokenKey = "nutrition-practice-admin-token";
 const dietitianTokenKey = "nutrition-practice-dietitian-token";
@@ -1300,11 +1308,48 @@ function renderDietitianRows(dietitians) {
 
 function renderClientSettings() {
     workspaceContent.innerHTML = `${pageHeading("SETTINGS", "Your account.", "Manage your profile and get help with your account.")}
+    ${appearanceSettingsMarkup()}
     <section class="content-panel"><div class="quick-grid">
       <button class="quick-link" data-go="my-profile" type="button"><strong>My Profile</strong><span>View and update your personal information.</span></button>
       <button class="quick-link" data-go="support" type="button"><strong>Support &amp; Tickets</strong><span>Get help with your account.</span></button>
     </div></section>`;
+    bindAppearanceSettings();
     bindGoButtons();
+}
+
+function appearanceSettingsMarkup() {
+    const isDark = document.documentElement.dataset.theme === "dark";
+    return `
+    <section class="content-panel appearance-settings">
+      <div class="section-heading"><h2>Appearance</h2><span>PERSONAL PREFERENCE</span></div>
+      <label class="appearance-toggle" for="darkModeToggle">
+        <span class="appearance-toggle-copy"><strong>Dark mode</strong><small>Use the opposite colors of light mode throughout the app.</small></span>
+        <input id="darkModeToggle" type="checkbox" role="switch" aria-label="Dark mode" ${isDark ? "checked" : ""}>
+        <span class="appearance-switch" aria-hidden="true"></span>
+      </label>
+      <p class="appearance-message" id="appearanceMessage" role="status" aria-live="polite" hidden></p>
+    </section>`;
+}
+
+function bindAppearanceSettings() {
+    const toggle = workspaceContent.querySelector("#darkModeToggle");
+    const message = workspaceContent.querySelector("#appearanceMessage");
+    if (!toggle || !message) return;
+    toggle.addEventListener("change", () => {
+        const previousTheme = document.documentElement.dataset.theme;
+        const nextTheme = toggle.checked ? "dark" : "light";
+        document.documentElement.dataset.theme = nextTheme;
+        try {
+            localStorage.setItem(themePreferenceKey, nextTheme);
+            message.hidden = true;
+            message.textContent = "";
+        } catch (error) {
+            document.documentElement.dataset.theme = previousTheme;
+            toggle.checked = previousTheme === "dark";
+            message.textContent = `Could not save your appearance preference: ${error.message}`;
+            message.hidden = false;
+        }
+    });
 }
 
 async function renderClientDashboard(firstName) {
@@ -4003,6 +4048,8 @@ async function renderDietitianSettings() {
         "Manage your professional information and practice details."
     )}
 
+    ${appearanceSettingsMarkup()}
+
     <section class="content-panel">
         <div class="section-heading">
             <h2>Professional registration</h2>
@@ -4050,6 +4097,7 @@ async function renderDietitianSettings() {
         </button>
     </div>`;
 
+    bindAppearanceSettings();
     bindGoButtons();
 }
 
@@ -4060,6 +4108,7 @@ async function renderAdminSettings() {
     ]);
     workspaceContent.innerHTML = `
     ${pageHeading("SETTINGS", "System settings.", "Review installation status and the active administrator account.")}
+    ${appearanceSettingsMarkup()}
     <section class="content-panel"><dl class="profile-details">
       <div><dt>API status</dt><dd>${escapeHtml(health.status)}</dd></div>
       <div><dt>Database</dt><dd>${escapeHtml(health.database)}</dd></div>
@@ -4067,6 +4116,7 @@ async function renderAdminSettings() {
       <div><dt>Administrator</dt><dd>${escapeHtml(currentUser.full_name)} Â· ${escapeHtml(currentUser.email)}</dd></div>
       <div><dt>Initial setup</dt><dd>${setup.available ? "Available" : "Complete"}</dd></div>
     </dl></section>`;
+    bindAppearanceSettings();
 }
 
 async function renderAdminApprovals() {
