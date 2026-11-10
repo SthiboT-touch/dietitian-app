@@ -69,6 +69,20 @@ jobs:
             docker compose run --rm --no-deps api python migrations/apply_020_care_workflow.py
             docker compose run --rm --no-deps api python migrations/apply_021_account_profile_photos.py
             docker compose up -d --build
+            OLLAMA_MODEL=$(docker compose exec -T api python -c 'import os; print(os.environ["OLLAMA_MODEL"])')
+            echo "Ensuring Ollama model is available: ${OLLAMA_MODEL}"
+            for attempt in $(seq 1 60); do
+              if docker compose exec -T ollama ollama list >/dev/null 2>&1; then
+                break
+              fi
+              if [ "$attempt" -eq 60 ]; then
+                echo "Ollama did not become ready" >&2
+                docker compose logs --tail=100 ollama
+                exit 1
+              fi
+              sleep 2
+            done
+            docker compose exec -T ollama ollama pull "$OLLAMA_MODEL"
             for attempt in $(seq 1 30); do
               if docker compose exec -T api python -c 'import urllib.request,json; h=json.load(urllib.request.urlopen("http://localhost:8000/health")); assert h["database"] == "online"'; then
                 break
