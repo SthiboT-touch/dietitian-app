@@ -40,6 +40,15 @@ from security import current_identity, authorize_client_access, require_client_r
 router = APIRouter()
 
 
+def require_metric_editor(
+    client_id: str, authorization: Optional[str] = Header(default=None)
+):
+    identity = current_identity(authorization)
+    if identity[0] != "dietitian":
+        raise HTTPException(403, "Health metrics must be recorded by the patient's dietitian")
+    authorize_client_access(client_id, identity)
+
+
 # --- 2. PATIENT HEALTH, LIFE STAGE & CLINICAL HISTORY ---
 
 
@@ -528,7 +537,7 @@ def add_medical_condition(client_id: str, data: MedicalConditionEntry, authoriza
 
 @router.post(
     "/api/v1/clients/{client_id}/metrics",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_metric_editor)],
     tags=["3. Clinical Labs & Progress"],
 )
 def log_metric(client_id: str, data: MetricLog):
@@ -593,7 +602,7 @@ def get_metrics(client_id: str):
 
 @router.post(
     "/api/v1/clients/{client_id}/progress",
-    dependencies=[Depends(require_client_record_access)],
+    dependencies=[Depends(require_metric_editor)],
     tags=["3. Clinical Labs & Progress"],
 )
 def log_progress(client_id: str, data: ProgressLog):

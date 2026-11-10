@@ -65,6 +65,22 @@ def headers(token):
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest.mark.parametrize("endpoint,payload", [
+    ("progress", {"weight_kg": 72, "steps": 6000}),
+    ("metrics", {"metric_type": "weight", "value": "72"}),
+])
+def test_health_metrics_are_managed_only_by_assigned_dietitian(endpoint, payload):
+    url = f"/api/v1/clients/c1/{endpoint}"
+    assert api.post(url, json=payload).status_code == 401
+    for token in ("client-1", "client-2", "dietitian-2", "admin-1"):
+        assert api.post(url, json=payload, headers=headers(token)).status_code == 403
+    assert state.clients_db["c1"][endpoint] == []
+    assert api.post(url, json=payload, headers=headers("dietitian-1")).status_code == 200
+    response = api.get(url, headers=headers("client-1"))
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
 def booking(client_id="c1", dietitian_id="d1"):
     return {
         "client_id": client_id,
@@ -275,7 +291,7 @@ def test_database_assignment_check_rejects_an_unassigned_dietitian(monkeypatch):
 def test_every_client_record_route_has_the_authorization_dependency():
     """Make newly introduced health endpoints fail tests if left unprotected."""
     from fastapi.routing import APIRoute
-    from routers.clients import router as clients_router
+    from routers.clients import require_metric_editor, router as clients_router
     from security import require_client_record_access
 
     routes = [
@@ -285,8 +301,13 @@ def test_every_client_record_route_has_the_authorization_dependency():
     ]
     assert routes, "Expected to discover clinical client routes"
     for route in routes:
+        expected_dependency = (
+            require_metric_editor
+            if route.path.endswith(("/metrics", "/progress")) and "POST" in route.methods
+            else require_client_record_access
+        )
         assert any(
-            dependency.call is require_client_record_access
+            dependency.call is expected_dependency
             for dependency in route.dependant.dependencies
         ), route.path
 

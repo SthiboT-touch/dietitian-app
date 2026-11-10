@@ -985,6 +985,7 @@ async function renderClientManagementProfile(clientId) {
     ${pageHeading("PATIENT PROFILE", client.name, "Current information recorded for this patient.")}
     <div data-message class="workspace-message" hidden></div>
     ${patientContextMarkup(client, profile, lactation, documents)}
+    ${currentUser.type === "dietitian" ? '<section class="content-panel"><button class="button button-primary" id="editPatientMetrics" type="button">Manage health metrics</button></section>' : ""}
     <section class="content-panel health-edit-panel">
       <p class="subsection-label">ADD MEDICAL CONDITION</p>
       <button class="button button-primary" id="showDietitianConditionForm" type="button">Add Medical Condition</button>
@@ -1055,6 +1056,7 @@ async function renderClientManagementProfile(clientId) {
 
 
     const showButton = workspaceContent.querySelector("#showDietitianConditionForm");
+    workspaceContent.querySelector("#editPatientMetrics")?.addEventListener("click", () => renderClientProgress(clientId));
     const conditionForm = workspaceContent.querySelector("#dietitianMedicalConditionForm");
     const cancelButton = workspaceContent.querySelector("#cancelDietitianConditionForm");
 
@@ -1205,7 +1207,7 @@ async function renderClientDashboard(firstName) {
       <button class="quick-link" data-go="health-allergies" type="button"><strong>Allergies</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-checkin" type="button"><strong>QR Check-In</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-recommendations" type="button"><strong>Recommendations</strong><span aria-hidden="true">&#8599;</span></button>
-      ${String(currentUser.gender || "").toLowerCase() !== "male" ? '<button class="quick-link" data-go="health-pregnancy" type="button"><strong>Pregnancy</strong></button><button class="quick-link" data-go="health-lactation" type="button"><strong>Lactation</strong></button>' : ""}
+      ${String(currentUser.gender || "").toLowerCase() !== "male" ? '<button class="quick-link" data-go="health-lactation" type="button"><strong>Lactation</strong></button>' : ""}
       <button class="quick-link" data-go="client-appointments" type="button"><strong>Appointments</strong><span aria-hidden="true">&#8599;</span></button>
         <button class="quick-link" data-go="ai-workspace" type="button"><strong>Nutrition Coach</strong><span aria-hidden="true">&#8599;</span></button>
     </div>
@@ -1884,6 +1886,7 @@ function formatSleepHours(value) {
 }
 
 async function renderClientProgress(clientId) {
+    const canEditMetrics = currentUser.type === "dietitian";
     const [progressResult, metricsResult] = await Promise.allSettled([
         request(`/api/v1/clients/${encodeURIComponent(clientId)}/progress`),
         request(`/api/v1/clients/${encodeURIComponent(clientId)}/metrics`),
@@ -1954,7 +1957,7 @@ async function renderClientProgress(clientId) {
         ],
     ];
     workspaceContent.innerHTML = `
-    ${pageHeading("MY PROGRESS", "Progress metrics.", "Track the measurements and daily habits recorded for your care.")}
+    ${pageHeading(canEditMetrics ? "PATIENT PROGRESS" : "MY PROGRESS", "Progress metrics.", "Health metrics are recorded and managed by your doctor/dietitian.")}
     <div data-message class="workspace-message" hidden></div>
     <div class="client-progress-layout">
       <section class="content-panel weight-trend"><div class="progress-section-heading"><h2>Weight</h2><strong>${escapeHtml(metricCards[0][1])}</strong></div>
@@ -1962,12 +1965,12 @@ async function renderClientProgress(clientId) {
       </section>
       <section class="content-panel"><h2 class="compact-heading">Health Metrics</h2><dl class="progress-metrics">${metricCards.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></section>
     </div>`;
-    workspaceContent.insertAdjacentHTML(
+    if (canEditMetrics) workspaceContent.insertAdjacentHTML(
         "beforeend",
         `
     <section class="content-panel progress-edit-panel">
-      <h2 class="compact-heading">Update My Progress</h2>
-      <p class="progress-edit-copy">Enter any measurements you tracked today. Blank fields keep their previous values.</p>
+      <h2 class="compact-heading">Update patient health metrics</h2>
+      <p class="progress-edit-copy">Record this patient's measurements. Blank fields keep their previous values for today.</p>
       <form id="progressUpdateForm" class="form-grid">
         <div class="form-field"><label for="progressWeight">Weight (kg)</label><input class="text-input" id="progressWeight" name="weight_kg" type="number" min="0" step="0.1" value="${escapeHtml(latest.weight_kg ?? "")}"></div>
         <div class="form-field"><label for="progressBodyFat">Body Fat (%)</label><input class="text-input" id="progressBodyFat" name="body_fat_pct" type="number" min="0" max="100" step="0.1" value="${escapeHtml(latest.body_fat_pct ?? "")}"></div>
@@ -1980,7 +1983,7 @@ async function renderClientProgress(clientId) {
       </form>
     </section>`,
     );
-    workspaceContent.insertAdjacentHTML(
+    if (!canEditMetrics) workspaceContent.insertAdjacentHTML(
         "beforeend",
         `
     <section class="content-panel progress-edit-panel">
@@ -1999,8 +2002,9 @@ async function renderClientProgress(clientId) {
       <div class="result-list">${meals.length ? meals.map((meal) => `<article class="result-item"><span><strong>${escapeHtml(String(meal.log_date).slice(0, 10))}${meal.meal_time ? ` Â· ${escapeHtml(meal.meal_time)}` : ""} Â· ${escapeHtml(meal.meal_type)}</strong><br>${escapeHtml(meal.description)}${meal.calories != null ? ` Â· ${escapeHtml(meal.calories)} kcal` : ""}${meal.notes ? `<br>${escapeHtml(meal.notes)}` : ""}</span></article>`).join("") : '<p class="empty-state">No meals recorded yet.</p>'}</div>
     </section>`,
     );
-    document.querySelector("#mealLogDate").value = new Date().toISOString().slice(0, 10);
-    document.querySelector("#progressUpdateForm").addEventListener("submit", async (event) => {
+    const mealLogDate = document.querySelector("#mealLogDate");
+    if (mealLogDate) mealLogDate.value = new Date().toISOString().slice(0, 10);
+    document.querySelector("#progressUpdateForm")?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const values = {};
         for (const [key, rawValue] of new FormData(event.currentTarget)) {
@@ -2021,7 +2025,7 @@ async function renderClientProgress(clientId) {
             showWorkspaceMessage(error.message, true);
         }
     });
-    document.querySelector("#mealLogForm").addEventListener("submit", async (event) => {
+    document.querySelector("#mealLogForm")?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const values = Object.fromEntries(new FormData(event.currentTarget));
         if (values.calories === "") delete values.calories;
@@ -2037,7 +2041,7 @@ async function renderClientProgress(clientId) {
             showWorkspaceMessage(error.message, true);
         }
     });
-    await mountCarePanel(workspaceContent, clientId, false);
+    await mountCarePanel(workspaceContent, clientId, canEditMetrics);
 }
 
 async function renderClientGoals(clientId) {

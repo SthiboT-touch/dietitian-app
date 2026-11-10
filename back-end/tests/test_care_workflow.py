@@ -50,12 +50,13 @@ def test_history_versions_and_record_access():
 def test_clinician_review_preserves_original_measurements_after_edit():
     state.appointments_db["completed"] = {"appointment_id": "completed", "client_id": "c", "dietitian_id": "d", "status": "COMPLETED", "appointment_date": (datetime.now() - timedelta(days=1)).isoformat()}
     path = "/api/v1/clients/c"
-    assert api.post(path + "/progress", json={"weight_kg": 70}, headers=auth("patient")).status_code == 200
+    assert api.post(path + "/progress", json={"weight_kg": 70}, headers=auth("patient")).status_code == 403
+    assert api.post(path + "/progress", json={"weight_kg": 70}, headers=auth("clinician")).status_code == 200
     log_date = api.get(path + "/progress", headers=auth("patient")).json()[0]["log_date"]
     review = {"log_date": log_date, "decision": "APPROVED", "notes": "Reviewed measurements"}
     assert api.post(path + "/care/progress-reviews", json=review, headers=auth("patient")).status_code == 403
     assert api.post(path + "/care/progress-reviews", json=review, headers=auth("clinician")).status_code == 200
-    api.post(path + "/progress", json={"weight_kg": 71}, headers=auth("patient"))
+    api.post(path + "/progress", json={"weight_kg": 71}, headers=auth("clinician"))
     events = api.get(path + "/care", headers=auth("patient")).json()
     assert events[0]["payload"]["snapshot"]["weight_kg"] == 70
     review["decision"] = "CHANGES_REQUESTED"
@@ -108,7 +109,7 @@ def test_existing_appointment_format_and_manual_meeting_link_are_preserved():
 
 @pytest.mark.parametrize("value", [{}, {"sleep_hours": 25}, {"weight_kg": -1}, {"body_fat_pct": 101}, {"water_ml": -2}])
 def test_invalid_progress_rejected(value):
-    assert api.post("/api/v1/clients/c/progress", json=value, headers=auth("patient")).status_code == 422
+    assert api.post("/api/v1/clients/c/progress", json=value, headers=auth("clinician")).status_code == 422
 
 
 def test_database_events_encode_decimal_measurements(monkeypatch):

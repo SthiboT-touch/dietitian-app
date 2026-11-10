@@ -1079,7 +1079,12 @@ def test_goals_are_created_by_assigned_dietitian_and_viewed_by_client():
     assert listing.json() == [created.json()["goal"]]
 
 
-def test_patient_progress_saves_and_preserves_partial_metric_updates():
+def test_dietitian_progress_saves_and_preserves_partial_metric_updates():
+    state.users_db["patient-progress-test"] = {
+        "id": "patient-progress-test",
+        "type": "client",
+        "dietitian_id": "progress-dietitian",
+    }
     first_entry = client.post(
         "/api/v1/clients/patient-progress-test/progress",
         json={
@@ -1091,14 +1096,14 @@ def test_patient_progress_saves_and_preserves_partial_metric_updates():
             "steps": 8500,
             "sleep_hours": 7.33,
         },
-        headers=authenticated_client_headers("patient-progress-test"),
+        headers=authenticated_dietitian_headers("progress-dietitian"),
     )
     assert first_entry.status_code == 200
 
     partial_update = client.post(
         "/api/v1/clients/patient-progress-test/progress",
         json={"weight_kg": 72.2},
-        headers=authenticated_client_headers("patient-progress-test"),
+        headers=authenticated_dietitian_headers("progress-dietitian"),
     )
     history = client.get(
         "/api/v1/clients/patient-progress-test/progress",
