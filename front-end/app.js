@@ -1086,7 +1086,7 @@ async function renderClientManagementProfile(clientId) {
       </div>
     </section>
     ${patientContextMarkup(client, profile, lactation, documents)}
-    ${currentUser.type === "dietitian" ? '<section class="content-panel"><button class="button button-primary" id="editPatientMetrics" type="button">Manage health metrics</button></section>' : ""}
+    ${currentUser.type === "dietitian" ? '<section class="content-panel"><button class="button button-primary" id="editPatientMetrics" type="button">View patient progress &amp; meals</button></section>' : ""}
     <section class="content-panel health-edit-panel">
       <p class="subsection-label">ADD MEDICAL CONDITION</p>
       <button class="button button-primary" id="showDietitianConditionForm" type="button">Add Medical Condition</button>
@@ -2006,15 +2006,16 @@ function formatSleepHours(value) {
 
 async function renderClientProgress(clientId) {
     const canEditMetrics = currentUser.type === "dietitian";
-    const [progressResult, metricsResult] = await Promise.allSettled([
+    const [progressResult, metricsResult, mealsResult] = await Promise.allSettled([
         request(`/api/v1/clients/${encodeURIComponent(clientId)}/progress`),
         request(`/api/v1/clients/${encodeURIComponent(clientId)}/metrics`),
+        request(`/api/v1/clients/${encodeURIComponent(clientId)}/meals`),
     ]);
-    const meals = await request(`/api/v1/clients/${encodeURIComponent(clientId)}/meals`).catch(
-        () => [],
-    );
     const progress = progressResult.status === "fulfilled" ? progressResult.value : [];
     const metrics = metricsResult.status === "fulfilled" ? metricsResult.value : [];
+    const meals = mealsResult.status === "fulfilled" ? mealsResult.value : [];
+    const mealLoadError =
+        mealsResult.status === "rejected" ? mealsResult.reason.message : "";
     const latest = progress.at(-1) || {};
     const weightHistory = progress
         .filter((entry) => Number(entry.weight_kg) > 0)
@@ -2084,6 +2085,59 @@ async function renderClientProgress(clientId) {
       </section>
       <section class="content-panel"><h2 class="compact-heading">Health Metrics</h2><dl class="progress-metrics">${metricCards.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></section>
     </div>`;
+    if (canEditMetrics) {
+        const now = new Date();
+        const selectedDate = new Date(
+            now.getTime() - now.getTimezoneOffset() * 60_000,
+        )
+            .toISOString()
+            .slice(0, 10);
+        workspaceContent.insertAdjacentHTML(
+            "beforeend",
+            `
+    <section class="content-panel progress-edit-panel">
+      <div class="section-heading">
+        <h2 class="compact-heading">What the client ate</h2>
+        <div class="form-field"><label for="patientMealLogDate">Day</label><input class="text-input" id="patientMealLogDate" type="date" value="${selectedDate}"></div>
+      </div>
+      <div id="patientMealDiary" aria-live="polite">${
+          mealLoadError
+              ? `<p class="workspace-message error" role="alert">Could not load the client's meal history: ${escapeHtml(mealLoadError)}</p>`
+              : ""
+      }</div>
+    </section>`,
+        );
+        if (!mealLoadError) {
+            const dateInput = workspaceContent.querySelector("#patientMealLogDate");
+            const diary = workspaceContent.querySelector("#patientMealDiary");
+            const renderDiary = () => {
+                const dailyMeals = meals
+                    .filter((meal) => String(meal.log_date).slice(0, 10) === dateInput.value)
+                    .sort((a, b) =>
+                        String(a.meal_time || "99:99").localeCompare(
+                            String(b.meal_time || "99:99"),
+                        ),
+                    );
+                const recordedCalories = dailyMeals.reduce(
+                    (total, meal) => total + (meal.calories == null ? 0 : Number(meal.calories)),
+                    0,
+                );
+                diary.innerHTML = `
+      <p class="document-hint">${dailyMeals.length} meal${dailyMeals.length === 1 ? "" : "s"} recorded${dailyMeals.some((meal) => meal.calories != null) ? ` · ${recordedCalories.toLocaleString()} recorded kcal` : ""}</p>
+      <div class="result-list">${
+          dailyMeals.length
+              ? dailyMeals
+                    .map(
+                        (meal) => `<article class="result-item"><span><strong>${escapeHtml(meal.meal_time || "Time not recorded")} · ${escapeHtml(meal.meal_type)}</strong><br>${escapeHtml(meal.description)}${meal.calories != null ? ` · ${escapeHtml(meal.calories)} kcal` : ""}${meal.notes ? `<br>${escapeHtml(meal.notes)}` : ""}</span></article>`,
+                    )
+                    .join("")
+              : '<p class="empty-state">No meals were recorded for this day.</p>'
+      }</div>`;
+            };
+            dateInput.addEventListener("change", renderDiary);
+            renderDiary();
+        }
+    }
     if (canEditMetrics) workspaceContent.insertAdjacentHTML(
         "beforeend",
         `
@@ -2122,7 +2176,14 @@ async function renderClientProgress(clientId) {
     </section>`,
     );
     const mealLogDate = document.querySelector("#mealLogDate");
-    if (mealLogDate) mealLogDate.value = new Date().toISOString().slice(0, 10);
+    if (mealLogDate) {
+        const now = new Date();
+        mealLogDate.value = new Date(
+            now.getTime() - now.getTimezoneOffset() * 60_000,
+        )
+            .toISOString()
+            .slice(0, 10);
+    }
     document.querySelector("#progressUpdateForm")?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const values = {};

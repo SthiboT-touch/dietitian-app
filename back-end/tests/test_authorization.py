@@ -165,6 +165,26 @@ def test_client_meal_and_lactation_routes_are_protected():
     assert api.get("/api/v1/clients/c1/meals").status_code == 401
 
 
+def test_assigned_dietitian_can_review_client_meal_logs():
+    meal = {
+        "log_date": "2026-11-11",
+        "meal_time": "08:30",
+        "meal_type": "breakfast",
+        "description": "Oats with banana",
+        "calories": 320,
+    }
+    saved = api.post(
+        "/api/v1/clients/c1/meals", json=meal, headers=headers("client-1")
+    )
+    assert saved.status_code == 200
+    reviewed = api.get("/api/v1/clients/c1/meals", headers=headers("dietitian-1"))
+    assert reviewed.status_code == 200
+    assert len(reviewed.json()) == 1
+    assert reviewed.json()[0]["description"] == meal["description"]
+    assert reviewed.json()[0]["log_date"] == meal["log_date"]
+    assert api.get("/api/v1/clients/c1/meals", headers=headers("dietitian-2")).status_code == 403
+
+
 def test_appointment_booking_requires_client_ownership():
     assert api.post("/api/v1/appointments", json=booking()).status_code == 401
     assert (
