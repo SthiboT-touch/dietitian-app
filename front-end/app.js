@@ -4722,23 +4722,42 @@ async function renderPatientCheckin() {
     const status = document.querySelector("#qrScannerStatus");
 
     startButton.addEventListener("click", async () => {
-        if (!("BarcodeDetector" in window)) {
+        if (window.isSecureContext === false) {
             status.textContent =
-                "Camera QR scanning is not supported by this browser. Use a QR-capable browser or enter the scanned code below.";
+                "Camera access requires a secure connection. Open this site using HTTPS, then allow camera access.";
             return;
         }
-        if (!navigator.mediaDevices?.getUserMedia) {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             status.textContent =
-                "Camera access is unavailable. Open this site over HTTPS or enter the scanned code below.";
+                "This device does not allow camera access in the current browser. Open the site in your phone's browser over HTTPS.";
             return;
         }
 
         startButton.disabled = true;
         try {
-            const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+            let detector = null;
+            if (typeof window.BarcodeDetector === "function") {
+                try {
+                    detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+                } catch {
+                    detector = null;
+                }
+            }
+            if (!detector && typeof window.jsQR !== "function") {
+                throw new Error("The QR decoder did not load. Refresh the page and try again.");
+            }
+            const canvas = document.createElement("canvas");
+            const context = canvas.getContext("2d", { willReadFrequently: true });
+            if (!detector && !context) {
+                throw new Error("This browser could not initialize QR image scanning.");
+            }
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: false,
-                video: { facingMode: { ideal: "environment" } },
+                video: {
+                    facingMode: { ideal: "environment" },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                },
             });
             if (!video.isConnected) {
                 stream.getTracks().forEach((track) => track.stop());
@@ -4750,15 +4769,35 @@ async function renderPatientCheckin() {
             await video.play();
             stopButton.disabled = false;
             status.textContent = "Camera is on. Hold the patient's QR code in view.";
+            let lastScanTime = 0;
 
-            const scanFrame = async () => {
+            const scanFrame = async (timestamp) => {
                 if (!qrCameraStream || !video.isConnected) return;
-                if (!qrScanBusy) {
+                if (!qrScanBusy && timestamp - lastScanTime >= 180) {
                     qrScanBusy = true;
+                    lastScanTime = timestamp;
                     try {
-                        const codes = await detector.detect(video);
+                        let code = "";
+                        if (detector) {
+                            try {
+                                const codes = await detector.detect(video);
+                                code = codes.find((item) => item.rawValue)?.rawValue || "";
+                            } catch (error) {
+                                if (typeof window.jsQR !== "function") throw error;
+                                detector = null;
+                            }
+                        }
+                        if (!detector && video.videoWidth > 0 && video.videoHeight > 0) {
+                            canvas.width = video.videoWidth;
+                            canvas.height = video.videoHeight;
+                            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                            const image = context.getImageData(0, 0, canvas.width, canvas.height);
+                            code =
+                                window.jsQR(image.data, image.width, image.height, {
+                                    inversionAttempts: "attemptBoth",
+                                })?.data || "";
+                        }
                         if (!qrCameraStream || !video.isConnected) return;
-                        const code = codes.find((item) => item.rawValue)?.rawValue;
                         if (code) {
                             form.elements.checkin_code.value = code;
                             status.textContent = "QR code found. Recording check-in…";
@@ -4782,7 +4821,11 @@ async function renderPatientCheckin() {
             const message =
                 error.name === "NotAllowedError"
                     ? "Camera permission was denied. Allow camera access or enter the scanned code below."
-                    : `Could not start the camera: ${error.message}`;
+                    : error.name === "NotFoundError"
+                      ? "No camera was found on this device."
+                      : error.name === "NotReadableError"
+                        ? "The camera is already in use by another app. Close it and try again."
+                        : `Could not start the camera: ${error.message}`;
             status.textContent = message;
         }
     });

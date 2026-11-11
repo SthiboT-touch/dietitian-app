@@ -1,12 +1,21 @@
 """Browser smoke test for receptionist onboarding and role-scoped QR scanning."""
 
+import base64
+import io
 from pathlib import Path
+import qrcode
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1] / "front-end"
 html = (ROOT / "index.html").read_text()
 js = (ROOT / "app.js").read_text()
+decoder = (ROOT / "jsQR.js").read_text()
 css = (ROOT / "styles.css").read_text() + "\n" + (ROOT / "vibrant-theme.css").read_text()
+qr_image = io.BytesIO()
+qrcode.make("NC1:CAMERA-FALLBACK-TEST-TOKEN-12345678901234567890").save(
+    qr_image, format="PNG"
+)
+qr_data = "data:image/png;base64," + base64.b64encode(qr_image.getvalue()).decode()
 with sync_playwright() as p:
     browser = p.chromium.launch(
         headless=True, executable_path="/usr/bin/chromium", args=["--no-sandbox"]
@@ -32,6 +41,7 @@ with sync_playwright() as p:
       return {ok:true,status:200,json:async()=>([])};
     }
   }""")
+        page.add_script_tag(content=decoder)
         page.add_script_tag(content=js)
         page.wait_for_timeout(150)
         assert page.locator('[data-view="reception-onboarding"]').is_visible()
@@ -63,11 +73,54 @@ with sync_playwright() as p:
         page.locator("#adminDietitianCheckinForm button").click()
         page.wait_for_timeout(100)
         assert page.evaluate("window.__checkins.length") == 1, errors
+        page.evaluate(
+            """async (qrData) => {
+                Object.defineProperty(window, 'isSecureContext', {configurable:true, value:true});
+                Object.defineProperty(navigator, 'mediaDevices', {
+                    configurable:true,
+                    value:{getUserMedia:async () => new MediaStream()},
+                });
+                window.BarcodeDetector = undefined;
+                window.requestAnimationFrame = callback =>
+                    setTimeout(() => callback(performance.now()), 40);
+                window.cancelAnimationFrame = clearTimeout;
+                HTMLMediaElement.prototype.play = () => Promise.resolve();
+                const image = new Image();
+                await new Promise((resolve, reject) => {
+                    image.onload = resolve;
+                    image.onerror = reject;
+                    image.src = qrData;
+                });
+                const source = document.createElement('canvas');
+                source.width = image.width;
+                source.height = image.height;
+                source.getContext('2d').drawImage(image, 0, 0);
+                window.__qrTestCanvas = source;
+                const video = document.querySelector('#checkinScannerVideo');
+                Object.defineProperty(video, 'videoWidth', {configurable:true, value:image.width});
+                Object.defineProperty(video, 'videoHeight', {configurable:true, value:image.height});
+                const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+                CanvasRenderingContext2D.prototype.drawImage = function(input, ...args) {
+                    if (input.id === 'checkinScannerVideo') {
+                        return drawImage.call(this, source, 0, 0, this.canvas.width, this.canvas.height);
+                    }
+                    return drawImage.call(this, input, ...args);
+                };
+            }""",
+            qr_data,
+        )
+        page.locator("#startQRScanner").click()
+        page.wait_for_function(
+            "window.__checkins.length === 2", timeout=10000
+        )
+        assert page.evaluate("window.__checkins[1].checkin_code") == (
+            "NC1:CAMERA-FALLBACK-TEST-TOKEN-12345678901234567890"
+        )
         page.evaluate("showWorkspace({id:'dietitian-a',type:'dietitian',full_name:'Test Dietitian'})")
         page.wait_for_timeout(100)
         assert page.locator('[data-checkin-scanner]').is_hidden()
         assert page.locator('[data-go="reception-checkin"]').is_visible()
         assert not errors, errors
-        print(f"PASS: receptionist restriction, admin scanner, and dietitian dashboard action at {width}px")
+        print(f"PASS: role access and native-API-free camera QR scan at {width}px")
         page.close()
     browser.close()
