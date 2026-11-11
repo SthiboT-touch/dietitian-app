@@ -2162,7 +2162,7 @@ async function renderClientProgress(clientId) {
     <div data-message class="workspace-message" hidden></div>
     <div class="client-progress-layout">
       <section class="content-panel weight-trend"><div class="progress-section-heading"><h2>Metrics graph</h2><strong>${escapeHtml(metricCards[0][1])}</strong></div>
-        ${weightHistory.length ? renderWeightChart(weightHistory) : '<p class="empty-state">No weight history has been recorded yet.</p>'}
+        ${weightHistory.length ? renderWeightChart(weightHistory) : '<p class="empty-state">No history yet recorded</p>'}
       </section>
       <section class="content-panel"><h2 class="compact-heading">Health Metrics</h2><dl class="progress-metrics">${metricCards.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></section>
     </div>`;
