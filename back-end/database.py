@@ -64,6 +64,22 @@ def is_sqlite():
     return urlsplit(os.environ.get("DATABASE_URL", "")).scheme == "sqlite"
 
 
+def table_exists(cursor, table_name):
+    """Check for a public table using the active database's catalog."""
+    if is_sqlite():
+        cursor.execute(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name=%s) AS relation",
+            (table_name,),
+        )
+    else:
+        cursor.execute(
+            "SELECT to_regclass(%s) IS NOT NULL AS relation",
+            (f"public.{table_name}",),
+        )
+    return bool(cursor.fetchone()["relation"])
+
+
 def _sqlite_path(database_url):
     configured_path = os.environ.get("SQLITE_PATH")
     if configured_path:
@@ -89,6 +105,20 @@ def _sqlite_path(database_url):
 class _SQLiteCursor:
     def __init__(self, cursor):
         self._cursor = cursor
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    def fetchall(self):
+        return [dict(row) for row in self._cursor.fetchall()]
+
+    def fetchmany(self, size=None):
+        rows = self._cursor.fetchmany() if size is None else self._cursor.fetchmany(size)
+        return [dict(row) for row in rows]
+
+    def __iter__(self):
+        return iter(self.fetchall())
 
     def execute(self, query, parameters=()):
         if "pg_advisory_xact_lock" in query.lower():

@@ -488,8 +488,8 @@ def create_administrator(data: AdminCreate, admin_id: str = Depends(require_admi
 def admin_setup_available() -> bool:
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute("SELECT EXISTS (SELECT 1 FROM admin)")
-            return not cursor.fetchone()["exists"]
+            cursor.execute("SELECT EXISTS (SELECT 1 FROM admin) AS has_admin")
+            return not cursor.fetchone()["has_admin"]
     return not admins_db
 
 
@@ -510,8 +510,8 @@ def setup_first_admin(data: AdminSetup, request: FastAPIRequest):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(%s)", (731904281,))
-            cursor.execute("SELECT EXISTS (SELECT 1 FROM admin)")
-            if cursor.fetchone()["exists"]:
+            cursor.execute("SELECT EXISTS (SELECT 1 FROM admin) AS has_admin")
+            if cursor.fetchone()["has_admin"]:
                 raise HTTPException(
                     status_code=409, detail="Admin setup has already been completed"
                 )
@@ -573,8 +573,7 @@ def login(data: LoginRequest):
             if not user:
                 # Staff role storage is introduced by migration 008. Existing
                 # logins must continue working even before the local migration.
-                cursor.execute("SELECT to_regclass('public.staff_account') AS relation")
-                if cursor.fetchone()["relation"]:
+                if database.table_exists(cursor, "staff_account"):
                     cursor.execute(
                         "SELECT staff_id AS id, role AS type, full_name, email, "
                         "role, branch_id, is_active, password_hash "
@@ -593,6 +592,8 @@ def login(data: LoginRequest):
                     break
             if user is not None:
                 break
+    if user is not None:
+        user = dict(user)
     if user and "role" in user and "type" not in user:
         user = {**user, "id": user["staff_id"], "type": user["role"]}
     if (

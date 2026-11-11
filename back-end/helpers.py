@@ -20,8 +20,7 @@ def email_is_registered(email: str) -> bool:
             )
             if cursor.fetchone():
                 return True
-            cursor.execute("SELECT to_regclass('public.staff_account') AS relation")
-            if not cursor.fetchone()["relation"]:
+            if not database.table_exists(cursor, "staff_account"):
                 return False
             cursor.execute("SELECT 1 FROM staff_account WHERE LOWER(email) = LOWER(%s)", (email,))
             return cursor.fetchone() is not None

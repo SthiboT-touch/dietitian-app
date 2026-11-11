@@ -27,6 +27,17 @@ def test_sqlite_cursor_returns_mapping_rows_and_commits(tmp_path, monkeypatch):
         row = cursor.fetchone()
 
     assert dict(row) == {"item_id": 1, "label": "saved"}
+    assert row.get("label") == "saved"
+
+    with database.cursor() as cursor:
+        cursor.execute("SELECT item_id, label FROM sample")
+        rows = cursor.fetchall()
+
+    assert rows[0].get("item_id") == 1
+
+    with database.cursor() as cursor:
+        cursor.execute("SELECT item_id, label FROM sample")
+        assert cursor.fetchmany()[0].get("label") == "saved"
 
 
 def test_sqlite_initializes_current_feature_tables(tmp_path, monkeypatch):
@@ -43,6 +54,157 @@ def test_sqlite_initializes_current_feature_tables(tmp_path, monkeypatch):
     assert {"client", "appointment", "staff_account", "meal_plan_review",
             "registration_welcome_outbox", "client_checkin_credential"} <= tables
     assert len(generated_id) == 36
+
+
+def test_sqlite_initializes_cms_tables(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./app.db")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "app.db"))
+
+    with database.cursor() as cursor:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = {row["name"] for row in cursor.fetchall()}
+
+    assert {
+        "ehr_note",
+        "nutrition_plan_version",
+        "client_attachment",
+        "client_access_audit",
+    } <= tables
+
+
+def test_sqlite_patient_registration_succeeds(tmp_path, monkeypatch):
+    import config
+    from fastapi.testclient import TestClient
+    from app import app
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./app.db")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "app.db"))
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+    monkeypatch.setattr(config, "STYTCH_ENABLED", False)
+    payload = {
+        "first_name": "Jordan",
+        "last_name": "Lee",
+        "email": "jordan@example.test",
+        "id_number": "9005140012345",
+        "phone": "082 123 4567",
+        "date_of_birth": "1990-05-14",
+        "gender": "female",
+        "password": "nutrition-safe-pass",
+        "consent_to_care": True,
+        "privacy_notice_version": "2026-10-28-v1",
+    }
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/auth/register/client", json=payload)
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"email": payload["email"], "password": payload["password"]},
+        )
+        unknown_login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "unknown@example.test", "password": payload["password"]},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["type"] == "client"
+    assert response.json()["welcome_email"] == "queued"
+    assert login.status_code == 200
+    assert login.json()["user"]["type"] == "client"
+    assert unknown_login.status_code == 401
+
+
+def test_sqlite_admin_setup_and_login_work(tmp_path, monkeypatch):
+    import config
+    from fastapi import Request
+    from routers.auth_admin import login, setup_first_admin
+    from schemas import AdminSetup, LoginRequest
+    from state import admin_sessions_db
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./app.db")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "app.db"))
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+    monkeypatch.setattr(config, "STYTCH_ENABLED", False)
+    payload = {
+        "first_name": "Avery",
+        "last_name": "Admin",
+        "email": "avery@example.test",
+        "password": "nutrition-safe-pass",
+    }
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/admin/setup",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+            "server": ("127.0.0.1", 8001),
+            "scheme": "http",
+            "query_string": b"",
+        }
+    )
+
+    setup = setup_first_admin(AdminSetup(**payload), request)
+    result = login(LoginRequest(email=payload["email"], password=payload["password"]))
+
+    assert setup["user"]["type"] == "admin"
+    assert result["user"]["type"] == "admin"
+    admin_sessions_db.pop(result["access_token"], None)
+
+
+def test_sqlite_admin_account_search_works(tmp_path, monkeypatch):
+    import config
+    from routers.support import find_accounts
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./app.db")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "app.db"))
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+    with database.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO client "
+            "(client_id, name, email, password, id_number, date_of_birth, gender) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (
+                "client-1",
+                "Jordan Lee",
+                "jordan@example.test",
+                "password-hash",
+                "9005140012345",
+                "1990-05-14",
+                "female",
+            ),
+        )
+
+    assert find_accounts("jordan", actor=("admin", "admin-1")) == [
+        {
+            "id": "client-1",
+            "full_name": "Jordan Lee",
+            "email": "jordan@example.test",
+            "account_type": "client",
+        }
+    ]
+
+
+def test_sqlite_guest_ticket_rate_limit(tmp_path, monkeypatch):
+    import config
+    from fastapi import HTTPException
+    from routers.support import GuestTicket, guest_ticket
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./app.db")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "app.db"))
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+    ticket_data = GuestTicket(
+        contact_email="guest@example.test",
+        subject="Support request",
+        body="I need help.",
+    )
+
+    for _ in range(5):
+        guest_ticket(ticket_data)
+
+    with pytest.raises(HTTPException) as error:
+        guest_ticket(ticket_data)
+
+    assert error.value.status_code == 429
 
 
 def test_meal_planning_recipe_query_works_with_sqlite(tmp_path, monkeypatch):
