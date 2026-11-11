@@ -1493,7 +1493,6 @@ async function renderMyProfile() {
               ["ID number", profileUser.id_number],
               ["Gender", profileUser.gender],
               ["Date of birth", profileUser.date_of_birth],
-              ["Dietitian ID", profileUser.dietitian_id],
               ...(String(profileUser.gender || "").toLowerCase() === "male"
                   ? [["Testosterone", "Still under production"]]
                   : []),
@@ -2522,12 +2521,16 @@ async function renderClientAppointments(
             delete values.appointment_time;
             values.client_id = clientId;
             try {
-                await request("/api/v1/appointments", {
+                const result = await request("/api/v1/appointments", {
                     method: "POST",
                     body: JSON.stringify(values),
                 });
                 await renderClientAppointments(clientId, "upcoming");
-                showWorkspaceMessage("Appointment request sent. It is pending dietitian review.");
+                showWorkspaceMessage(
+                    result.email_notification?.status === "sent"
+                        ? "Appointment request sent. It is pending dietitian review."
+                        : "Appointment request sent, but we could not email the dietitian. Please contact the practice.",
+                );
             } catch (error) {
                 showWorkspaceMessage(error.message, true);
             }

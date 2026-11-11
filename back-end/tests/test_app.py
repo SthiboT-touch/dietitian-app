@@ -13,6 +13,7 @@ import config
 import state
 from state import client_sessions_db
 from routers import ai
+from routers import appointments as appointments_router
 from security import hash_password
 
 client = TestClient(app.app)
@@ -1054,6 +1055,53 @@ def test_appointments_can_be_filtered_by_client():
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["client_id"] == "client-a"
+
+
+def test_appointment_creation_emails_assigned_dietitian(monkeypatch):
+    sent = {}
+    state.users_db["dietitian-email-test"] = {
+        "id": "dietitian-email-test",
+        "type": "dietitian",
+        "full_name": "Avery Chen",
+        "email": "avery@example.com",
+    }
+    state.users_db["client-email-test"] = {
+        "id": "client-email-test",
+        "type": "client",
+        "full_name": "Jordan Lee",
+        "email": "jordan@example.com",
+    }
+
+    def capture_email(**details):
+        sent.update(details)
+
+    monkeypatch.setattr(
+        appointments_router,
+        "send_appointment_created_email",
+        capture_email,
+    )
+    appointment_date = (datetime.now() + timedelta(days=8)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    )
+    response = client.post(
+        "/api/v1/appointments",
+        json={
+            "client_id": "client-email-test",
+            "dietitian_id": "dietitian-email-test",
+            "appointment_date": appointment_date.isoformat(),
+            "consultation_type": "FOLLOW_UP",
+        },
+        headers=authenticated_client_headers("client-email-test"),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["email_notification"] == {"status": "sent"}
+    assert sent["recipient_email"] == "avery@example.com"
+    assert sent["dietitian_name"] == "Avery Chen"
+    assert sent["client_name"] == "Jordan Lee"
+    assert sent["client_email"] == "jordan@example.com"
+    assert sent["appointment"]["consultation_type"] == "FOLLOW_UP"
+    assert sent["appointment"]["appointment_id"] == response.json()["appointment"]["appointment_id"]
 
 
 def test_appointment_checkin_qr_is_returned_and_stays_stable_in_appointment_list():

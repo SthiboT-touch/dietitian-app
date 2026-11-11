@@ -1,5 +1,6 @@
 """4. Appointments and goals."""
 
+import logging
 import uuid
 from fastapi import APIRouter, Header, HTTPException, Response
 from typing import Optional
@@ -7,6 +8,10 @@ from datetime import datetime, timezone, timedelta
 import database
 import config
 
+from appointment_notifications import (
+    AppointmentNotificationError,
+    send_appointment_created_email,
+)
 from state import (
  appointments_db,goals_db,
 users_db, clients_db, checkin_events_db,
@@ -27,6 +32,33 @@ APPOINTMENT_SLOT_INTERVAL_MINUTES = APPOINTMENT_DURATION_MINUTES + APPOINTMENT_B
 APPOINTMENT_FIRST_SLOT_MINUTES = 8 * 60
 APPOINTMENT_LAST_SLOT_MINUTES = 16 * 60 + 15
 ACTIVE_APPOINTMENT_STATUSES = ("PENDING", "CONFIRMED", "SCHEDULED")
+logger = logging.getLogger(__name__)
+
+
+def _send_appointment_notification(appointment, recipient):
+    if not recipient or not recipient.get("email"):
+        logger.error(
+            "Unable to notify dietitian for appointment %s: assigned email is missing",
+            appointment["appointment_id"],
+        )
+        return "failed"
+
+    try:
+        send_appointment_created_email(
+            recipient_email=recipient["email"],
+            dietitian_name=recipient.get("dietitian_name") or "Dietitian",
+            client_name=recipient.get("client_name") or appointment["client_id"],
+            client_email=recipient.get("client_email") or "Not provided",
+            appointment=appointment,
+        )
+    except AppointmentNotificationError as error:
+        logger.error(
+            "Unable to send appointment notification for %s: %s",
+            appointment["appointment_id"],
+            error,
+        )
+        return "failed"
+    return "sent"
 
 
 def _validate_appointment_slot(appointment_date: datetime) -> None:
@@ -201,6 +233,19 @@ def create_appointment(
                 ),
             )
             row = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT d.email,
+                       d.first_name || ' ' || d.last_name AS dietitian_name,
+                       c.name AS client_name,
+                       c.email AS client_email
+                FROM dietitian d
+                JOIN client c ON c.client_id = %s
+                WHERE d.dietitian_id = %s
+                """,
+                (data.client_id, data.dietitian_id),
+            )
+            notification_recipient = cursor.fetchone()
 
         appointment = {
             "appointment_id": appt_id,
@@ -215,10 +260,15 @@ def create_appointment(
             "visit_type": row["visit_type"],
             "duration": row["duration"],
         }
+        notification_status = _send_appointment_notification(
+            appointment,
+            notification_recipient,
+        )
 
         return {
             "message": "Appointment scheduled",
             "appointment": _include_appointment_qr(appointment, identity[0]),
+            "email_notification": {"status": notification_status},
         }
 
     for existing in appointments_db.values():
@@ -247,10 +297,22 @@ def create_appointment(
     }
 
     appointments_db[appt_id] = appointment
+    dietitian = users_db.get(data.dietitian_id, {})
+    client = clients_db.get(data.client_id) or users_db.get(data.client_id, {})
+    notification_status = _send_appointment_notification(
+        appointment,
+        {
+            "email": dietitian.get("email"),
+            "dietitian_name": dietitian.get("full_name") or dietitian.get("name"),
+            "client_name": client.get("full_name") or client.get("name"),
+            "client_email": client.get("email"),
+        },
+    )
 
     return {
         "message": "Appointment scheduled",
         "appointment": _include_appointment_qr(appointment, identity[0]),
+        "email_notification": {"status": notification_status},
     }
 
 @router.get("/api/v1/appointments/calendar", tags=["4. Appointments & Goals"])
