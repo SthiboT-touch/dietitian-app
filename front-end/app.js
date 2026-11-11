@@ -149,7 +149,7 @@ document.addEventListener("visibilitychange", () => {
 
 // Medical documents are protected API resources, not public file links.
 // A regular <a href> navigation does not send the bearer token.
-async function openPrivateMedicalDocument(url) {
+async function openPrivateMedicalDocument(url, fileName) {
     const token =
         sessionStorage.getItem(adminTokenKey) ||
         sessionStorage.getItem(dietitianTokenKey) ||
@@ -171,7 +171,9 @@ async function openPrivateMedicalDocument(url) {
     const blobUrl = URL.createObjectURL(file);
     const temporaryLink = document.createElement("a");
     temporaryLink.href = blobUrl;
-    temporaryLink.download = "medical-document";
+    temporaryLink.download =
+        String(fileName || "medical-document").replace(/[\\/:*?"<>|]/g, "_") ||
+        "medical-document";
     document.body.appendChild(temporaryLink);
     temporaryLink.click();
     temporaryLink.remove();
@@ -182,15 +184,16 @@ workspaceContent.addEventListener("click", async (event) => {
     const link = event.target.closest("[data-private-medical-document]");
     if (!link || !workspaceContent.contains(link)) return;
     event.preventDefault();
-    const originalLabel = link.textContent;
     link.setAttribute("aria-busy", "true");
     try {
-        await openPrivateMedicalDocument(link.dataset.privateMedicalDocument);
+        await openPrivateMedicalDocument(
+            link.dataset.privateMedicalDocument,
+            link.dataset.fileName,
+        );
     } catch (error) {
         window.alert(error.message);
     } finally {
         link.removeAttribute("aria-busy");
-        link.textContent = originalLabel;
     }
 });
 
@@ -731,6 +734,12 @@ async function fetchPatientContext(clientId) {
     };
 }
 
+function medicalDocumentDownloadLinkMarkup(clientId, document) {
+    const fileName = escapeHtml(document.file_name);
+    const url = `/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}`;
+    return `<a class="document-download-link" href="${url}" aria-label="Download ${fileName}" data-file-name="${fileName}" data-private-medical-document="${url}"><span>${fileName}</span><svg class="download-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 2.5v9m0 0 3.5-3.5M10 11.5 6.5 8M3.5 13.5v3h13v-3" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/></svg></a>`;
+}
+
 function patientContextMarkup(client, profile, lactation = {}, documents = []) {
     const allergies = profile.allergies || [];
     const conditions = profile.conditions || [];
@@ -790,7 +799,7 @@ function patientContextMarkup(client, profile, lactation = {}, documents = []) {
         ? documents
               .map(
                   (document) =>
-                      `<li class="result-item"><a href="/api/v1/clients/${encodeURIComponent(client.id)}/medical-documents/${encodeURIComponent(document.document_id)}" data-private-medical-document="/api/v1/clients/${encodeURIComponent(client.id)}/medical-documents/${encodeURIComponent(document.document_id)}">${escapeHtml(document.file_name)}</a> Â· ${escapeHtml(document.condition_name || "Medical condition")} Â· Dr ${escapeHtml(document.doctor_name || "not provided")}<br>${escapeHtml(document.doctor_information || "")}</li>`,
+                      `<li class="result-item"><span>${medicalDocumentDownloadLinkMarkup(client.id, document)} Â· ${escapeHtml(document.condition_name || "Medical condition")} Â· Dr ${escapeHtml(document.doctor_name || "not provided")}<br>${escapeHtml(document.doctor_information || "")}</span></li>`,
               )
               .join("")
         : '<li class="result-item">No supporting medical documents uploaded.</li>';
@@ -1711,7 +1720,7 @@ async function renderClientHealth(clientId, section) {
           <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Upload medical document</button></div>
         </form>
         <div class="section-heading"><h2>Previous documents</h2><span>${documents.length} SAVED</span></div>
-        <div class="document-list">${documents.length ? documents.map((document) => `<article class="document-row"><div class="document-details"><h3><a href="/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}" data-private-medical-document="/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}">${escapeHtml(document.file_name)}</a></h3><p>${escapeHtml(document.condition_name || "Medical condition")} Â· ${escapeHtml(document.doctor_name || "Doctor not provided")}</p><p>${escapeHtml(document.doctor_information || "")}</p></div></article>`).join("") : '<p class="empty-state">No supporting medical documents uploaded yet.</p>'}</div>
+        <div class="document-list">${documents.length ? documents.map((document) => `<article class="document-row"><div class="document-details"><h3>${medicalDocumentDownloadLinkMarkup(clientId, document)}</h3><p>${escapeHtml(document.condition_name || "Medical condition")} Â· ${escapeHtml(document.doctor_name || "Doctor not provided")}</p><p>${escapeHtml(document.doctor_information || "")}</p></div></article>`).join("") : '<p class="empty-state">No supporting medical documents uploaded yet.</p>'}</div>
       </section>`,
         );
         document.querySelector("#medicalDocumentForm").addEventListener("submit", async (event) => {

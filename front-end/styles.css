@@ -1400,6 +1400,30 @@ textarea {
     font-weight: 600;
     overflow-wrap: anywhere;
 }
+.document-download-link {
+    display: inline-flex;
+    min-height: 30px;
+    align-items: center;
+    gap: 7px;
+    padding: 3px 8px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--white);
+    color: var(--green-deep);
+    text-decoration: none;
+}
+.document-download-link:hover {
+    text-decoration: underline;
+}
+.document-download-link[aria-busy="true"] {
+    opacity: 0.65;
+    pointer-events: none;
+}
+.download-icon {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+}
 .document-details p {
     margin: 4px 0 0;
     color: var(--muted);
