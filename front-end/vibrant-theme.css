@@ -526,6 +526,63 @@ html[data-theme="dark"] .workspace-content .page-heading {
 html[data-theme="dark"] .workspace-content .page-heading::after {
     opacity: 0.25 !important;
 }
+html[data-theme="dark"] .workspace-content .nutrition-workspace-banner {
+    background-image:
+        linear-gradient(
+            90deg,
+            rgba(242, 246, 235, 0.98) 0%,
+            rgba(242, 246, 235, 0.94) 54%,
+            rgba(242, 246, 235, 0.25) 100%
+        ),
+        url("https://images.unsplash.com/photo-1498837167922-ddd27525d352?auto=format&fit=crop&w=1200&q=80") !important;
+}
+html[data-theme="dark"] .workspace-content .nutrition-workspace-banner .eyebrow,
+html[data-theme="dark"] .workspace-content .nutrition-workspace-banner h2,
+html[data-theme="dark"] .workspace-content .nutrition-workspace-banner p {
+    color: #111 !important;
+}
+html[data-theme="dark"] .workspace-content [data-fixed-theme="light"] {
+    background-color: #fffefa !important;
+    border-color: #e5e7dc !important;
+    color: #202820 !important;
+}
+html[data-theme="dark"] .workspace-content [data-fixed-theme="light"] * {
+    color: #202820 !important;
+}
+html[data-theme="dark"] .workspace-content [data-fixed-theme="light"] .assistant-topic {
+    background: #fffefa !important;
+    border: 1px solid #e5e7dc !important;
+    color: #586252 !important;
+}
+html[data-theme="dark"] .workspace-content [data-fixed-theme="light"] .assistant-topic.is-primary {
+    background: #096b65 !important;
+    border-color: #096b65 !important;
+    color: #fff !important;
+}
+html[data-theme="dark"] .workspace-content [data-fixed-theme="light"] .assistant-topic:hover {
+    background: #f0f3ea !important;
+}
+html[data-theme="dark"] .workspace-content [data-fixed-theme="light"] .chat-bubble {
+    background: #fdfdf8 !important;
+    border-color: #e5e7dc !important;
+}
+html[data-theme="dark"] .workspace-content [data-fixed-theme="light"] .chat-bubble.assistant {
+    background: #f2f7ee !important;
+    border-color: #dde7d6 !important;
+}
+html[data-theme="dark"] .workspace-content [data-fixed-theme="light"] .chat-form textarea {
+    background: #fff !important;
+    border-color: #dfe3d9 !important;
+    color: #202820 !important;
+}
+html[data-theme="dark"] .workspace-content [data-fixed-theme="light"] .chat-form textarea::placeholder {
+    color: #747c70 !important;
+}
+html[data-theme="dark"] .workspace-content [data-fixed-theme="light"] .chat-form .button-primary {
+    background: #096b65 !important;
+    border-color: #096b65 !important;
+    color: #fff !important;
+}
 html[data-theme="dark"] body button:not(.nav-item) {
     background: #555b62 !important;
     border: 1px solid #6c737b !important;

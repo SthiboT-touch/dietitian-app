@@ -1006,7 +1006,7 @@ async function renderAIChat() {
     );
     const messages = conversation.messages || [];
     panel.innerHTML = `
-    <section class="assistant-topics" aria-label="Nutrition assistant topics">
+    <section class="assistant-topics" data-fixed-theme="light" aria-label="Nutrition assistant topics">
       <div class="assistant-topics-heading"><span class="eyebrow eyebrow-green">AUTOMATED NUTRITION ASSISTANT</span><span>Choose a starting point or ask anything</span></div>
       <div class="assistant-topic-list">
         <button class="assistant-topic is-primary" data-topic="ask" type="button">Ask a question</button>
@@ -1023,7 +1023,7 @@ async function renderAIChat() {
         <button class="assistant-topic" data-ai-recommendations type="button">${role === "client" ? "My Recommendations" : "Review Recommendations"}</button>
       </div>
     </section>
-    <section class="content-panel chat-panel">
+    <section class="content-panel chat-panel" data-fixed-theme="light">
       <div class="chat-thread">
         ${messages
             .map(
