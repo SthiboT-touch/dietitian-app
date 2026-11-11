@@ -113,10 +113,10 @@ def test_qr_is_bound_to_one_visit_and_cannot_fall_back_to_another():
     assert qr.json()["appointment_id"] == "first"
     state.appointments_db["first"]["status"] = "CANCELLED"
     body = {"checkin_code": qr.json()["checkin_code"]}
-    assert api.post("/api/v1/reception/check-in", json=body, headers=auth("reception")).status_code == 409
+    assert api.post("/api/v1/check-in/scan", json=body, headers=auth("doctor")).status_code == 409
     assert not state.checkin_events_db
     qr = api.post(url, json={"appointment_id": "second"}, headers=auth("patient"))
-    scan = api.post("/api/v1/reception/check-in", json={"checkin_code": qr.json()["checkin_code"]}, headers=auth("reception"))
+    scan = api.post("/api/v1/check-in/scan", json={"checkin_code": qr.json()["checkin_code"]}, headers=auth("doctor"))
     assert scan.status_code == 201
     assert scan.json()["appointment_id"] == "second"
     assert state.checkin_events_db[0]["appointment_id"] == "second"

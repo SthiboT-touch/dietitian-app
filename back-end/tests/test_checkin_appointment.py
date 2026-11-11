@@ -1,4 +1,4 @@
-"""QR issue and reception scan require an eligible confirmed appointment."""
+"""QR issue and role-scoped scan require an eligible confirmed appointment."""
 from datetime import datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
@@ -16,12 +16,18 @@ def auth(token):
 @pytest.fixture(autouse=True)
 def setup(monkeypatch):
     monkeypatch.setattr(config, "DATABASE_ENABLED", False)
-    stores = [state.users_db, state.appointments_db, state.checkin_credentials_db,
-              state.checkin_events_db, state.staff_accounts_db, state.staff_sessions_db,
-              state.client_sessions_db]
+    stores = [
+        state.users_db, state.appointments_db, state.checkin_credentials_db,
+        state.checkin_events_db, state.staff_accounts_db, state.staff_sessions_db,
+        state.client_sessions_db, state.admin_sessions_db, state.dietitian_sessions_db,
+    ]
     for store in stores:
         store.clear()
     state.client_sessions_db.update({"patient": "c", "other": "x"})
+    state.admin_sessions_db["admin"] = "admin-account"
+    state.dietitian_sessions_db["dietitian"] = "d"
+    state.dietitian_sessions_db["other-dietitian"] = "other-dietitian"
+    state.users_db["d"] = {"branch_id": "b"}
     state.staff_sessions_db["reception"] = "staff"
     state.staff_accounts_db["staff"] = {"role": "reception", "is_active": True, "branch_id": "b"}
     yield
@@ -36,6 +42,14 @@ def appointment(status="CONFIRMED", days=1, branch="b"):
 
 def issue():
     return api.post("/api/v1/clients/c/checkin-code", headers=auth("patient"))
+
+
+def scan(token, code):
+    return api.post(
+        "/api/v1/check-in/scan",
+        json={"checkin_code": code},
+        headers=auth(token),
+    )
 
 
 def test_no_appointment_cannot_issue_code():
@@ -54,27 +68,41 @@ def test_past_appointment_cannot_issue_code():
     assert issue().status_code == 409
 
 
-def test_owner_only_and_confirmed_appointment_enables_single_use_qr():
+def test_only_admin_or_assigned_dietitian_can_scan_single_use_qr():
     appointment()
     assert api.post("/api/v1/clients/c/checkin-code").status_code == 401
     assert api.post("/api/v1/clients/c/checkin-code", headers=auth("other")).status_code == 403
     response = issue()
     assert response.status_code == 200
     body = {"checkin_code": response.json()["checkin_code"]}
-    assert api.post("/api/v1/reception/check-in", json=body, headers=auth("reception")).status_code == 201
-    assert api.post("/api/v1/reception/check-in", json=body, headers=auth("reception")).status_code == 404
+    assert scan("reception", body["checkin_code"]).status_code == 403
+    checked_in = scan("dietitian", body["checkin_code"])
+    assert checked_in.status_code == 201
+    assert state.checkin_events_db[0]["actor_role"] == "dietitian"
+    assert scan("dietitian", body["checkin_code"]).status_code == 404
+
+
+def test_admin_can_scan_qr_and_is_recorded_as_actor():
+    appointment()
+    code = issue().json()["checkin_code"]
+
+    response = scan("admin", code)
+
+    assert response.status_code == 201
+    assert state.checkin_events_db[0]["actor_id"] == "admin-account"
+    assert state.checkin_events_db[0]["actor_role"] == "admin"
 
 
 def test_cancelled_after_generation_cannot_be_scanned():
     appointment()
     code = issue().json()["checkin_code"]
     state.appointments_db["a"]["status"] = "CANCELLED"
-    assert api.post("/api/v1/reception/check-in", json={"checkin_code": code}, headers=auth("reception")).status_code == 409
+    assert scan("dietitian", code).status_code == 409
     assert not state.checkin_events_db
 
 
-def test_wrong_branch_cannot_scan():
-    appointment(branch="different")
+def test_dietitian_cannot_scan_another_dietitians_appointment():
+    appointment()
     code = issue().json()["checkin_code"]
-    assert api.post("/api/v1/reception/check-in", json={"checkin_code": code}, headers=auth("reception")).status_code == 409
+    assert scan("other-dietitian", code).status_code == 403
     assert not state.checkin_events_db

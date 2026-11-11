@@ -28,6 +28,9 @@ const staffRoleNames = {
 
 let currentUser = null;
 let profileAvatarObjectUrl = null;
+let qrCameraStream = null;
+let qrScanFrame = null;
+let qrScanBusy = false;
 
 function sessionToken() {
     return (
@@ -245,6 +248,9 @@ function showWorkspace(user, initialView = "overview") {
     document.querySelectorAll("[data-reception-only]").forEach((item) => {
         item.hidden = !["reception", "branch_manager"].includes(user.type);
     });
+    document.querySelectorAll("[data-checkin-scanner]").forEach((item) => {
+        item.hidden = !isAdmin;
+    });
     document.querySelectorAll("[data-compliance-only]").forEach((item) => {
         item.hidden = user.type !== "compliance_officer";
     });
@@ -320,6 +326,8 @@ if (isDietitian) {
         '<span class="nav-glyph">&#9633;</span>Dashboard';
     document.querySelector('[data-view="clients"]').innerHTML =
         '<span class="nav-glyph">&#9787;</span>My Patients';
+    document.querySelector('[data-view="reception-checkin"]').innerHTML =
+        '<span class="nav-glyph">&#9636;</span>Patient QR Check-In';
     if (isClient) refreshClientMaternalAccess();
     document.querySelector("#signOutButton").lastChild.textContent = isAdmin
         ? "Logout"
@@ -369,6 +377,7 @@ function openAccountProfile() {
 }
 
 function signOut() {
+    stopQRScanner();
     closeAccountMenu();
     sessionStorage.removeItem(sessionKey);
     sessionStorage.removeItem(adminTokenKey);
@@ -887,6 +896,7 @@ async function renderDietitianDashboard() {
       </div>
       <button class="button button-primary" data-go="meal-plans" type="button">Draft meal plan <span aria-hidden="true">&#8594;</span></button>
     </div>
+    <div class="qr-checkin-dashboard-action"><button class="button button-primary" data-go="reception-checkin" type="button">Scan patient QR code</button></div>
     ${approval ? dietitianApprovalMarkup(approval) : ""}
     ${
         dashboardErrors.length
@@ -2406,7 +2416,7 @@ async function renderClientAppointments(
         isVirtualAppointment(appointment) ? "Virtual" : "In-person"
     }</strong></p>
     ${appointmentMeetingMarkup(appointment)}
-    ${appointment.checkin_qr_svg ? `<div class="appointment-checkin-qr"><img alt="Appointment check-in QR code" src="data:image/svg+xml,${encodeURIComponent(appointment.checkin_qr_svg)}"><span>Show this QR to reception on your appointment day</span></div>` : ""}
+    ${appointment.checkin_qr_svg ? `<div class="appointment-checkin-qr"><img alt="Appointment check-in QR code" src="data:image/svg+xml,${encodeURIComponent(appointment.checkin_qr_svg)}"><span>Show this QR to an administrator or your dietitian on your appointment day</span></div>` : ""}
   </div>
 
   <span>${escapeHtml(dietitians.find((dietitian) => dietitian.id === appointment.dietitian_id)?.full_name || `Dietitian ${appointment.dietitian_id}`)}</span>
@@ -2943,6 +2953,7 @@ async function renderDietitians() {
 }
 
 async function loadView(view, initialAIPanel = "coach") {
+    stopQRScanner();
     workspaceContent.dataset.view = view;
     workspaceContent.classList.remove("view-enter");
     void workspaceContent.offsetWidth;
@@ -3008,7 +3019,7 @@ async function loadView(view, initialAIPanel = "coach") {
         } else if (view === "reception-onboarding") {
             await renderReceptionOnboarding();
         } else if (view === "reception-checkin") {
-            await renderReceptionCheckin();
+            await renderPatientCheckin();
         } else if (view === "my-profile") {
             await renderMyProfile();
         } else if (view === "admin-profile") {
@@ -3776,10 +3787,9 @@ async function renderStaffDashboard() {
           <section class="admin-stat"><span>Branch managers</span><strong>${Number(overview.branch_managers)}</strong></section>
         </div>
         <section class="content-panel"><h2 class="compact-heading">Branch operations</h2>
-          <p>Manage patient onboarding and check-in at your assigned branch. Staff statistics only cover this branch; confidential clinical records and system administration remain restricted.</p>
+          <p>Manage patient onboarding at your assigned branch. Staff statistics only cover this branch; confidential clinical records and system administration remain restricted.</p>
           <div class="quick-grid">
             <button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong><span aria-hidden="true">&#8599;</span></button>
-            <button class="quick-link" data-go="reception-checkin" type="button"><strong>Patient check-in</strong><span aria-hidden="true">&#8599;</span></button>
           </div>
         </section>`;
         bindGoButtons();
@@ -3792,7 +3802,7 @@ async function renderStaffDashboard() {
     <section class="content-panel"><h2 class="compact-heading">Secure staff access</h2>
     <p>Your practice role controls available tasks. Clinical records and administrative settings remain restricted.</p>
     <div class="quick-grid">
-    ${profile.role === "reception" ? '<button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong></button><button class="quick-link" data-go="reception-checkin" type="button"><strong>Check in a patient</strong></button>' : ""}
+    ${profile.role === "reception" ? '<button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong></button>' : ""}
     ${profile.role === "compliance_officer" ? '<button class="quick-link" type="button" data-go="staff-access-events"><strong>View access audit</strong><span aria-hidden="true">&#8599;</span></button>' : ""}</div></section>`;
     bindGoButtons();
 }
@@ -4633,7 +4643,7 @@ async function renderClientCheckin(clientId) {
             const svgBlob = new Blob([result.qr_svg], { type: "image/svg+xml" });
             const url = URL.createObjectURL(svgBlob);
             const target = document.querySelector("#clientQRDisplay");
-            target.innerHTML = `<img alt="Your private check-in QR code" src="${url}" width="260" height="260"><p>Show this QR to authorized reception staff.</p>`;
+            target.innerHTML = `<img alt="Your private check-in QR code" src="${url}" width="260" height="260"><p>Show this QR to an administrator or your assigned dietitian.</p>`;
             target
                 .querySelector("img")
                 .addEventListener("load", () => URL.revokeObjectURL(url), { once: true });
@@ -4690,31 +4700,134 @@ async function renderReceptionOnboarding() {
     });
 }
 
-async function renderReceptionCheckin() {
-    workspaceContent.innerHTML = `${pageHeading("RECEPTION", "Patient check-in.", "Scan the patient's QR with a keyboard-type scanner or paste the code.")}
+async function renderPatientCheckin() {
+    workspaceContent.innerHTML = `${pageHeading("PATIENT CHECK-IN", "Scan an appointment QR code.", "Admins can check in any appointment. Dietitians can check in appointments assigned to them.")}
   <div data-message class="workspace-message" hidden></div>
-  <section class="content-panel"><form id="receptionCheckinForm" class="form-grid">
-  <div class="form-field full-width"><label for="receptionQRValue">Check-in code</label><input id="receptionQRValue" class="text-input" name="checkin_code" autocomplete="off" required placeholder="Scan the QR code"></div>
-  <div class="form-field full-width"><button class="button button-primary" type="submit">Check in patient</button></div>
-  </form></section>`;
-    const form = document.querySelector("#receptionCheckinForm");
+  <section class="content-panel qr-checkin-panel">
+    <div class="qr-scanner-controls">
+      <button id="startQRScanner" class="button button-primary" type="button">Start camera scanner</button>
+      <button id="stopQRScanner" class="button qr-scanner-stop" type="button" disabled>Stop camera</button>
+    </div>
+    <video id="checkinScannerVideo" class="qr-scanner-video" muted playsinline hidden></video>
+    <p id="qrScannerStatus" class="qr-scanner-status" role="status" aria-live="polite">Use a camera-enabled browser over HTTPS, or enter a scanned code below.</p>
+    <form id="adminDietitianCheckinForm" class="form-grid">
+      <div class="form-field full-width"><label for="checkinQRValue">Check-in code</label><input id="checkinQRValue" class="text-input" name="checkin_code" autocomplete="off" required placeholder="Scan the QR code or enter its code"></div>
+      <div class="form-field full-width"><button class="button button-primary" type="submit">Record check-in</button></div>
+    </form>
+  </section>`;
+    const form = document.querySelector("#adminDietitianCheckinForm");
+    const startButton = document.querySelector("#startQRScanner");
+    const stopButton = document.querySelector("#stopQRScanner");
+    const video = document.querySelector("#checkinScannerVideo");
+    const status = document.querySelector("#qrScannerStatus");
+
+    startButton.addEventListener("click", async () => {
+        if (!("BarcodeDetector" in window)) {
+            status.textContent =
+                "Camera QR scanning is not supported by this browser. Use a QR-capable browser or enter the scanned code below.";
+            return;
+        }
+        if (!navigator.mediaDevices?.getUserMedia) {
+            status.textContent =
+                "Camera access is unavailable. Open this site over HTTPS or enter the scanned code below.";
+            return;
+        }
+
+        startButton.disabled = true;
+        try {
+            const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { facingMode: { ideal: "environment" } },
+            });
+            if (!video.isConnected) {
+                stream.getTracks().forEach((track) => track.stop());
+                return;
+            }
+            qrCameraStream = stream;
+            video.srcObject = qrCameraStream;
+            video.hidden = false;
+            await video.play();
+            stopButton.disabled = false;
+            status.textContent = "Camera is on. Hold the patient's QR code in view.";
+
+            const scanFrame = async () => {
+                if (!qrCameraStream || !video.isConnected) return;
+                if (!qrScanBusy) {
+                    qrScanBusy = true;
+                    try {
+                        const codes = await detector.detect(video);
+                        if (!qrCameraStream || !video.isConnected) return;
+                        const code = codes.find((item) => item.rawValue)?.rawValue;
+                        if (code) {
+                            form.elements.checkin_code.value = code;
+                            status.textContent = "QR code found. Recording check-in…";
+                            stopQRScanner();
+                            form.requestSubmit();
+                            return;
+                        }
+                    } catch (error) {
+                        stopQRScanner();
+                        status.textContent = `QR scanning stopped: ${error.message}`;
+                        return;
+                    } finally {
+                        qrScanBusy = false;
+                    }
+                }
+                qrScanFrame = requestAnimationFrame(scanFrame);
+            };
+            qrScanFrame = requestAnimationFrame(scanFrame);
+        } catch (error) {
+            stopQRScanner();
+            const message =
+                error.name === "NotAllowedError"
+                    ? "Camera permission was denied. Allow camera access or enter the scanned code below."
+                    : `Could not start the camera: ${error.message}`;
+            status.textContent = message;
+        }
+    });
+
+    stopButton.addEventListener("click", () => {
+        stopQRScanner();
+        status.textContent = "Camera stopped. You can start it again or enter a code below.";
+    });
+
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const button = form.querySelector("button");
         button.disabled = true;
         try {
-            const result = await request("/api/v1/reception/check-in", {
+            const result = await request("/api/v1/check-in/scan", {
                 method: "POST",
                 body: JSON.stringify({ checkin_code: form.elements.checkin_code.value }),
             });
             form.reset();
-            showWorkspaceMessage(`Check-in recorded for patient ${result.client_id}.`, false);
+            showWorkspaceMessage("Patient check-in recorded.", false);
+            status.textContent = `Check-in recorded for appointment ${result.appointment_id}.`;
         } catch (error) {
             showWorkspaceMessage(error.message, true);
         } finally {
             button.disabled = false;
         }
     });
+}
+
+function stopQRScanner() {
+    if (qrScanFrame !== null) cancelAnimationFrame(qrScanFrame);
+    qrScanFrame = null;
+    qrCameraStream?.getTracks().forEach((track) => track.stop());
+    qrCameraStream = null;
+    qrScanBusy = false;
+    const video = document.querySelector("#checkinScannerVideo");
+    if (video) {
+        video.pause();
+        video.srcObject = null;
+        video.hidden = true;
+    }
+    const startButton = document.querySelector("#startQRScanner");
+    if (startButton) startButton.disabled = false;
+    const stopButton = document.querySelector("#stopQRScanner");
+    if (stopButton) stopButton.disabled = true;
 }
 
 bindPasswordConfirmation("signupPassword", "signupConfirmPassword");

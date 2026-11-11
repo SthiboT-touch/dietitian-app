@@ -1,4 +1,4 @@
-"""Browser smoke test for reception-assisted registration and QR check-in menus."""
+"""Browser smoke test for receptionist onboarding and role-scoped QR scanning."""
 
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -27,7 +27,7 @@ with sync_playwright() as p:
     window.fetch=async(url,opts={}) => {
       if(url.includes('/api/v1/staff/me'))return {ok:true,status:200,json:async()=>({staff_id:'staff-a',full_name:'Test Reception',role:'reception',branch_id:'test-branch',is_active:true})};
       if(url.includes('/auth/register/client/assisted')) {window.__assisted.push(JSON.parse(opts.body));return {ok:true,status:200,json:async()=>({user:{id:'patient-a'},welcome_email:'queued'})};}
-      if(url.includes('/reception/check-in')) {window.__checkins.push(JSON.parse(opts.body));return {ok:true,status:201,json:async()=>({client_id:'patient-a'})};}
+      if(url.includes('/api/v1/check-in/scan')) {window.__checkins.push(JSON.parse(opts.body));return {ok:true,status:201,json:async()=>({client_id:'patient-a',appointment_id:'visit-a'})};}
       if(url.includes('/admin/setup-status'))return {ok:true,status:200,json:async()=>({available:false})};
       return {ok:true,status:200,json:async()=>([])};
     }
@@ -35,6 +35,7 @@ with sync_playwright() as p:
         page.add_script_tag(content=js)
         page.wait_for_timeout(150)
         assert page.locator('[data-view="reception-onboarding"]').is_visible()
+        assert page.locator('[data-checkin-scanner]').is_hidden()
         page.evaluate("loadView('reception-onboarding')")
         page.locator("#assistedFirst").fill("Taylor")
         page.locator("#assistedLast").fill("Sample")
@@ -51,14 +52,22 @@ with sync_playwright() as p:
         page.wait_for_timeout(100)
         assert page.evaluate("window.__assisted.length") == 1, errors
         assert page.evaluate("window.__assisted[0].consent_to_care") is True
-        page.evaluate("loadView('reception-checkin')")
-        page.locator("#receptionQRValue").fill(
+        page.evaluate("""() => {
+            sessionStorage.setItem('nutrition-practice-admin-token','admin-secret');
+            showWorkspace({id:'admin-a',type:'admin',full_name:'Test Admin'}, 'reception-checkin');
+        }""")
+        assert page.locator('[data-checkin-scanner]').is_visible()
+        page.locator("#checkinQRValue").fill(
             "NC1:EXAMPLElongrandomcodethatisnotarealcode123456789"
         )
-        page.locator("#receptionCheckinForm button").click()
+        page.locator("#adminDietitianCheckinForm button").click()
         page.wait_for_timeout(100)
         assert page.evaluate("window.__checkins.length") == 1, errors
+        page.evaluate("showWorkspace({id:'dietitian-a',type:'dietitian',full_name:'Test Dietitian'})")
+        page.wait_for_timeout(100)
+        assert page.locator('[data-checkin-scanner]').is_hidden()
+        assert page.locator('[data-go="reception-checkin"]').is_visible()
         assert not errors, errors
-        print(f"PASS: reception assisted consent and QR menu at {width}px")
+        print(f"PASS: receptionist restriction, admin scanner, and dietitian dashboard action at {width}px")
         page.close()
     browser.close()

@@ -107,7 +107,7 @@ Appointment requests are created as `PENDING`; dietitian decisions change them t
 
 Appointment requests use 50-minute visits with a 5-minute buffer, offered in 55-minute slots from 08:00 through 16:15. Clients must choose an initial visit or follow-up. For existing PostgreSQL databases, apply `python back-end/migrations/apply_022_appointment_visit_type.py` to store the visit type.
 
-Appointment check-in QR codes stay on the appointment record and are valid for reception scanning only on the appointment's date at its assigned branch.
+Appointment check-in QR codes stay on the appointment record and can be scanned only by administrators or the dietitian assigned to the appointment. The browser camera scanner requires HTTPS and a browser with QR `BarcodeDetector` support; a keyboard QR scanner or manual code entry is also available. For existing PostgreSQL deployments, apply `back-end/migrations/023_checkin_actor_roles.sql` after the check-in schema migrations. The deployment workflow applies it automatically.
 
 For running the API outside Compose, set `OLLAMA_BASE_URL` (default `http://localhost:11434`) and `OLLAMA_MODEL` (default `llama3.2`) to match an Ollama instance with the selected model downloaded.
 

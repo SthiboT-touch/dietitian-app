@@ -2903,3 +2903,38 @@ textarea {
     border-radius: 4px;
     background: #fff;
 }
+.qr-checkin-panel {
+    display: grid;
+    gap: 1rem;
+}
+.qr-scanner-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+}
+.qr-checkin-dashboard-action {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 1rem;
+}
+.qr-scanner-stop {
+    border: 1px solid var(--line);
+    background: var(--white);
+    color: var(--ink);
+}
+.qr-scanner-status {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.5;
+}
+.qr-scanner-video {
+    display: block;
+    width: min(100%, 36rem);
+    max-height: 65vh;
+    border-radius: 12px;
+    background: #171a17;
+    object-fit: cover;
+}
+.qr-scanner-video[hidden] {
+    display: none;
+}

@@ -1087,23 +1087,18 @@ def test_appointment_qr_checks_in_only_its_matching_appointment_once():
     from datetime import timezone
 
     appointment_id = "qr-checkin-test-appointment"
-    staff_id = "qr-checkin-test-staff"
+    dietitian_id = "qr-checkin-test-dietitian"
     staff_token = "qr-checkin-test-token"
     branch_id = "qr-checkin-test-branch"
-    state.users_db["qr-checkin-test-dietitian"] = {
+    state.users_db[dietitian_id] = {
         "type": "dietitian",
         "branch_id": branch_id,
     }
-    state.staff_accounts_db[staff_id] = {
-        "role": "reception",
-        "is_active": True,
-        "branch_id": branch_id,
-    }
-    state.staff_sessions_db[staff_token] = staff_id
+    state.dietitian_sessions_db[staff_token] = dietitian_id
     state.appointments_db[appointment_id] = {
         "appointment_id": appointment_id,
         "client_id": "qr-checkin-test-client",
-        "dietitian_id": "qr-checkin-test-dietitian",
+        "dietitian_id": dietitian_id,
         "appointment_date": datetime.now(timezone(timedelta(hours=2))).isoformat(),
         "status": "CONFIRMED",
     }
@@ -1112,19 +1107,18 @@ def test_appointment_qr_checks_in_only_its_matching_appointment_once():
 
     try:
         first_scan = client.post(
-            "/api/v1/reception/check-in", json=payload, headers=headers
+            "/api/v1/check-in/scan", json=payload, headers=headers
         )
         repeated_scan = client.post(
-            "/api/v1/reception/check-in", json=payload, headers=headers
+            "/api/v1/check-in/scan", json=payload, headers=headers
         )
 
         assert first_scan.status_code == 201
         assert first_scan.json()["client_id"] == "qr-checkin-test-client"
         assert repeated_scan.status_code == 409
     finally:
-        state.staff_sessions_db.pop(staff_token, None)
-        state.staff_accounts_db.pop(staff_id, None)
-        state.users_db.pop("qr-checkin-test-dietitian", None)
+        state.dietitian_sessions_db.pop(staff_token, None)
+        state.users_db.pop(dietitian_id, None)
         state.appointments_db.pop(appointment_id, None)
         state.checkin_events_db[:] = [
             event

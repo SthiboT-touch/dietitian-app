@@ -1078,11 +1078,14 @@ CREATE TABLE IF NOT EXISTS client_checkin_credential (
 CREATE TABLE IF NOT EXISTS client_checkin_event (
     checkin_id VARCHAR(36) PRIMARY KEY,
     client_id VARCHAR(36) NOT NULL REFERENCES client(client_id) ON DELETE RESTRICT,
-    staff_id VARCHAR(36) NOT NULL REFERENCES staff_account(staff_id) ON DELETE RESTRICT,
+    staff_id VARCHAR(36) REFERENCES staff_account(staff_id) ON DELETE RESTRICT,
     branch_id VARCHAR(36) NOT NULL REFERENCES branch(branch_id) ON DELETE RESTRICT,
     appointment_id VARCHAR(36) REFERENCES appointment(appointment_id) ON DELETE SET NULL,
     checked_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE client_checkin_event ALTER COLUMN staff_id DROP NOT NULL;
+ALTER TABLE client_checkin_event ADD COLUMN IF NOT EXISTS actor_id VARCHAR(36);
+ALTER TABLE client_checkin_event ADD COLUMN IF NOT EXISTS actor_role VARCHAR(32) NOT NULL DEFAULT 'reception';
 CREATE INDEX IF NOT EXISTS idx_client_checkin_event_client ON client_checkin_event(client_id, checked_in_at DESC);
 
 ALTER TABLE client_registration_consent ADD CONSTRAINT fk_registration_staff FOREIGN KEY (registered_by_staff_id) REFERENCES staff_account(staff_id) ON DELETE SET NULL;

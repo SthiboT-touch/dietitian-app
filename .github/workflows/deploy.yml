@@ -59,7 +59,7 @@ jobs:
             docker compose run --rm --no-deps api python migrations/apply_009_centralized_client_management.py
             docker compose run --rm --no-deps api python migrations/apply_010_popia_consent_details.py
             docker compose run --rm --no-deps api python migrations/apply_011_stytch_email_verification.py
-            for migration in 007_meal_plan_review 008_staff_roles_and_access_audit 009_client_registration_phone 010_client_registration_consent 011_registration_welcome_outbox 012_registration_uploads 013_client_qr_checkin 014_assisted_registration 022_appointment_visit_type; do
+            for migration in 007_meal_plan_review 008_staff_roles_and_access_audit 009_client_registration_phone 010_client_registration_consent 011_registration_welcome_outbox 012_registration_uploads 013_client_qr_checkin 014_assisted_registration 022_appointment_visit_type 023_checkin_actor_roles; do
               docker compose exec -T db psql -U black -d dietitian_db -v ON_ERROR_STOP=1 < "back-end/migrations/${migration}.sql"
             done
             docker compose run --rm --no-deps api python migrations/apply_015_support_tickets.py

@@ -1,6 +1,6 @@
-"""FR-1.6 patient photos and FR-1.7 reception-scanned QR check-ins."""
+"""FR-1.6 patient photos and FR-1.7 role-scoped QR check-ins."""
 
-import secrets
+import hmac
 from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -12,7 +12,7 @@ import database
 from onboarding_services import MAX_PHOTO_BYTES, new_checkin_credential, checkin_hash, qr_svg, validate_profile_photo
 from role_management import require_roles
 from security import current_identity, authorize_client_access
-from state import profile_photos_db, checkin_credentials_db, checkin_events_db, staff_accounts_db, appointments_db, users_db
+from state import profile_photos_db, checkin_credentials_db, checkin_events_db, appointments_db, users_db
 
 router = APIRouter(tags=["Digital Onboarding"])
 
@@ -96,7 +96,10 @@ def delete_my_profile_photo(authorization: Optional[str] = Header(default=None))
     return {"message": "Profile photo removed"}
 
 
-def require_checkin_appointment(client_id, cursor=None, branch_id=None, appointment_id=None, lock=False):
+def require_checkin_appointment(
+    client_id, cursor=None, branch_id=None, appointment_id=None, lock=False,
+    dietitian_id=None,
+):
     """Check-in is available after confirmation, for today's or upcoming visits."""
     if cursor is not None:
         cursor.execute(
@@ -106,8 +109,12 @@ def require_checkin_appointment(client_id, cursor=None, branch_id=None, appointm
             "AND a.date_time >= (NOW() AT TIME ZONE 'Africa/Johannesburg')::date "
             "AND (%s IS NULL OR COALESCE(a.branch_id,d.branch_id)=%s) "
             "AND (%s IS NULL OR a.appointment_id=%s) "
+            "AND (%s IS NULL OR a.dietitian_id=%s) "
             "ORDER BY a.date_time LIMIT 1" + (" FOR UPDATE OF a" if lock else ""),
-            (client_id, branch_id, branch_id, appointment_id, appointment_id),
+            (
+                client_id, branch_id, branch_id, appointment_id, appointment_id,
+                dietitian_id, dietitian_id,
+            ),
         )
         found = cursor.fetchone()
     else:
@@ -117,6 +124,8 @@ def require_checkin_appointment(client_id, cursor=None, branch_id=None, appointm
         for appointment in appointments_db.values():
             if appointment_id and appointment["appointment_id"] != appointment_id:
                 continue
+            if dietitian_id and str(appointment.get("dietitian_id")) != str(dietitian_id):
+                continue
             if appointment.get("client_id") != client_id or appointment.get("status") not in {"CONFIRMED", "SCHEDULED"}:
                 continue
             appointment_date = datetime.fromisoformat(appointment["appointment_date"].replace("Z", "+00:00"))
@@ -125,6 +134,18 @@ def require_checkin_appointment(client_id, cursor=None, branch_id=None, appointm
             if local_date >= today and (branch_id is None or location == branch_id):
                 found = appointment
                 break
+    if not found and dietitian_id and appointment_id:
+        if cursor is not None:
+            cursor.execute(
+                "SELECT dietitian_id FROM appointment "
+                "WHERE appointment_id=%s AND client_id=%s",
+                (appointment_id, client_id),
+            )
+            assigned = cursor.fetchone()
+        else:
+            assigned = appointments_db.get(appointment_id)
+        if assigned and str(assigned["dietitian_id"]) != str(dietitian_id):
+            raise HTTPException(403, "Dietitians can only check in their own appointments")
     if not found:
         raise HTTPException(409, "A confirmed appointment for today or an upcoming date is required for check-in at this branch" if branch_id else "Book an appointment and wait for confirmation before generating your check-in QR")
     return str(found["appointment_id"])
@@ -189,7 +210,7 @@ def new_client_checkin_code(
         "appointment_id": appointment_id,
         "qr_svg": qr_svg("NC1:" + token),
         "checkin_code": "NC1:" + token,
-        "instructions": "Show this code to reception within 10 minutes. Generating a new code revokes the old one.",
+        "instructions": "Show this code to an administrator or your assigned dietitian within 10 minutes. Generating a new code revokes the old one.",
     }
 
 
@@ -213,12 +234,11 @@ def _appointment_qr_is_valid_today(appointment: dict) -> bool:
     return local_date == datetime.now(timezone(timedelta(hours=2))).date()
 
 
-@router.post("/api/v1/reception/check-in", status_code=201)
-def scan_checkin(
-    data: CheckinRequest, identity=Depends(require_roles("reception", "branch_manager"))
-):
-    """Staff-only check-in; never derive a client ID from scanned text."""
-    staff_role, staff_id = identity
+@router.post("/api/v1/reception/check-in", status_code=201, include_in_schema=False)
+@router.post("/api/v1/check-in/scan", status_code=201)
+def scan_checkin(data: CheckinRequest, identity=Depends(require_roles("admin", "dietitian"))):
+    """Record an appointment check-in by an administrator or its assigned dietitian."""
+    actor_role, actor_id = identity
     token = data.checkin_code.removeprefix("NC1:").strip()
     if len(token) < 32:
         raise HTTPException(422, "Invalid check-in code")
@@ -229,14 +249,7 @@ def scan_checkin(
         if config.DATABASE_ENABLED:
             with database.cursor() as cursor:
                 cursor.execute(
-                    "SELECT branch_id, is_active FROM staff_account WHERE staff_id=%s",
-                    (staff_id,),
-                )
-                staff = cursor.fetchone()
-                if not staff or not staff["is_active"] or not staff["branch_id"]:
-                    raise HTTPException(403, "An active branch assignment is required")
-                cursor.execute(
-                    "SELECT a.client_id, a.status, a.date_time, "
+                    "SELECT a.client_id, a.dietitian_id, a.status, a.date_time, "
                     "COALESCE(a.branch_id, d.branch_id) AS appointment_branch "
                     "FROM appointment a JOIN dietitian d ON d.dietitian_id=a.dietitian_id "
                     "WHERE a.appointment_id=%s FOR UPDATE OF a",
@@ -245,8 +258,10 @@ def scan_checkin(
                 appointment = cursor.fetchone()
                 if not appointment:
                     raise HTTPException(404, "Appointment QR not found")
-                if str(appointment["appointment_branch"]) != str(staff["branch_id"]):
-                    raise HTTPException(403, "This appointment belongs to another branch")
+                if actor_role == "dietitian" and str(appointment["dietitian_id"]) != actor_id:
+                    raise HTTPException(403, "Dietitians can only check in their own appointments")
+                if not appointment["appointment_branch"]:
+                    raise HTTPException(409, "This appointment has no assigned branch")
                 if not _appointment_qr_is_valid_today(appointment):
                     raise HTTPException(
                         409, "This QR is valid only on its active appointment date"
@@ -260,28 +275,28 @@ def scan_checkin(
                 client_id = appointment["client_id"]
                 cursor.execute(
                     "INSERT INTO client_checkin_event "
-                    "(checkin_id, client_id, staff_id, branch_id, appointment_id) "
-                    "VALUES (%s,%s,%s,%s,%s)",
+                    "(checkin_id, client_id, staff_id, branch_id, appointment_id, actor_id, actor_role) "
+                    "VALUES (%s,%s,NULL,%s,%s,%s,%s)",
                     (
                         str(uuid4()),
                         client_id,
-                        staff_id,
-                        staff["branch_id"],
+                        appointment["appointment_branch"],
                         appointment_id,
+                        actor_id,
+                        actor_role,
                     ),
                 )
-                branch_id = staff["branch_id"]
+                branch_id = appointment["appointment_branch"]
         else:
-            staff = staff_accounts_db.get(staff_id)
-            if not staff or not staff.get("is_active") or not staff.get("branch_id"):
-                raise HTTPException(403, "An active branch assignment is required")
             appointment = appointments_db.get(appointment_id)
             if not appointment:
                 raise HTTPException(404, "Appointment QR not found")
+            if actor_role == "dietitian" and str(appointment.get("dietitian_id")) != actor_id:
+                raise HTTPException(403, "Dietitians can only check in their own appointments")
             dietitian = users_db.get(appointment.get("dietitian_id"), {})
             appointment_branch = appointment.get("branch_id") or dietitian.get("branch_id")
-            if str(appointment_branch) != str(staff["branch_id"]):
-                raise HTTPException(403, "This appointment belongs to another branch")
+            if not appointment_branch:
+                raise HTTPException(409, "This appointment has no assigned branch")
             if not _appointment_qr_is_valid_today(appointment):
                 raise HTTPException(
                     409, "This QR is valid only on its active appointment date"
@@ -296,13 +311,15 @@ def scan_checkin(
                 {
                     "checkin_id": str(uuid4()),
                     "client_id": client_id,
-                    "staff_id": staff_id,
-                    "branch_id": staff["branch_id"],
+                    "staff_id": None,
+                    "actor_id": actor_id,
+                    "actor_role": actor_role,
+                    "branch_id": appointment_branch,
                     "appointment_id": appointment_id,
                     "checked_in_at": datetime.now(timezone.utc),
                 }
             )
-            branch_id = staff["branch_id"]
+            branch_id = appointment_branch
         return {
             "message": "Patient checked in",
             "appointment_id": appointment_id,
@@ -314,12 +331,6 @@ def scan_checkin(
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT branch_id, is_active FROM staff_account WHERE staff_id=%s", (staff_id,)
-            )
-            staff = cursor.fetchone()
-            if not staff or not staff["is_active"] or not staff["branch_id"]:
-                raise HTTPException(403, "An active branch assignment is required")
-            cursor.execute(
                 "SELECT client_id, appointment_id FROM client_checkin_credential WHERE token_hash=%s AND expires_at > NOW() FOR UPDATE",
                 (digest,),
             )
@@ -330,7 +341,23 @@ def scan_checkin(
             appointment_id = credential["appointment_id"]
             if not appointment_id:
                 raise HTTPException(409, "Generate a new QR code for a confirmed appointment")
-            require_checkin_appointment(client_id, cursor, staff["branch_id"], appointment_id, lock=True)
+            require_checkin_appointment(
+                client_id,
+                cursor,
+                appointment_id=appointment_id,
+                lock=True,
+                dietitian_id=actor_id if actor_role == "dietitian" else None,
+            )
+            cursor.execute(
+                "SELECT COALESCE(a.branch_id, d.branch_id) AS appointment_branch "
+                "FROM appointment a JOIN dietitian d ON d.dietitian_id=a.dietitian_id "
+                "WHERE a.appointment_id=%s",
+                (appointment_id,),
+            )
+            appointment = cursor.fetchone()
+            if not appointment or not appointment["appointment_branch"]:
+                raise HTTPException(409, "This appointment has no assigned branch")
+            branch_id = appointment["appointment_branch"]
             cursor.execute(
                 "SELECT 1 FROM client_checkin_event WHERE appointment_id=%s LIMIT 1",
                 (appointment_id,),
@@ -339,19 +366,17 @@ def scan_checkin(
                 raise HTTPException(409, "This appointment has already been checked in")
             cursor.execute("DELETE FROM client_checkin_credential WHERE client_id=%s", (client_id,))
             cursor.execute(
-                "INSERT INTO client_checkin_event (checkin_id, client_id, staff_id, branch_id, appointment_id) "
-                "VALUES (%s,%s,%s,%s,%s)",
-                (str(uuid4()), client_id, staff_id, staff["branch_id"], appointment_id),
+                "INSERT INTO client_checkin_event "
+                "(checkin_id, client_id, staff_id, branch_id, appointment_id, actor_id, actor_role) "
+                "VALUES (%s,%s,NULL,%s,%s,%s,%s)",
+                (str(uuid4()), client_id, branch_id, appointment_id, actor_id, actor_role),
             )
     else:
-        staff = staff_accounts_db.get(staff_id)
-        if not staff or not staff.get("is_active") or not staff.get("branch_id"):
-            raise HTTPException(403, "An active branch assignment is required")
         client_id = next(
             (
                 cid
                 for cid, details in checkin_credentials_db.items()
-                if secrets.compare_digest(details["token_hash"], digest)
+                if hmac.compare_digest(details["token_hash"], digest)
                 and details["expires_at"] > datetime.now(timezone.utc).timestamp()
             ),
             None,
@@ -361,7 +386,19 @@ def scan_checkin(
         appointment_id = checkin_credentials_db[client_id].get("appointment_id")
         if not appointment_id:
             raise HTTPException(409, "Generate a new QR code for a confirmed appointment")
-        require_checkin_appointment(client_id, branch_id=staff["branch_id"], appointment_id=appointment_id)
+        require_checkin_appointment(
+            client_id,
+            appointment_id=appointment_id,
+            dietitian_id=actor_id if actor_role == "dietitian" else None,
+        )
+        appointment = appointments_db.get(appointment_id)
+        if not appointment:
+            raise HTTPException(404, "Appointment not found")
+        branch_id = appointment.get("branch_id") or users_db.get(
+            appointment.get("dietitian_id"), {}
+        ).get("branch_id")
+        if not branch_id:
+            raise HTTPException(409, "This appointment has no assigned branch")
         if any(
             event.get("appointment_id") == appointment_id
             for event in checkin_events_db
@@ -373,8 +410,10 @@ def scan_checkin(
                 "checkin_id": str(uuid4()),
                 "client_id": client_id,
                 "appointment_id": appointment_id,
-                "staff_id": staff_id,
-                "branch_id": staff["branch_id"],
+                "staff_id": None,
+                "actor_id": actor_id,
+                "actor_role": actor_role,
+                "branch_id": branch_id,
                 "checked_in_at": datetime.now(timezone.utc),
             }
         )
@@ -382,5 +421,5 @@ def scan_checkin(
         "message": "Patient checked in",
         "appointment_id": appointment_id,
         "client_id": client_id,
-        "branch_id": staff["branch_id"],
+        "branch_id": branch_id,
     }
