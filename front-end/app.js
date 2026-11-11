@@ -845,13 +845,30 @@ async function renderDietitianDashboard() {
     const doctorName =
         currentUser && currentUser.full_name ? currentUser.full_name.split(" ")[0] : "John";
     const query = `?dietitian_id=${encodeURIComponent(currentUser.id)}`;
-    const [clients, appointments, recommendations, plans, approval] = await Promise.all([
+    const results = await Promise.allSettled([
         request(`/api/v1/clients${query}`),
         request(`/api/v1/appointments${query}`),
         request("/api/v1/ai/recommendations/pending"),
         request(`/api/v1/meal-plans${query}`),
         request("/api/v1/dietitians/me/approval"),
     ]);
+    const dashboardErrors = [];
+    const resultValue = (result, label, fallback) => {
+        if (result.status === "fulfilled") return result.value;
+        const detail =
+            result.reason instanceof Error ? result.reason.message : String(result.reason);
+        dashboardErrors.push(`${label}: ${detail}`);
+        return fallback;
+    };
+    const clients = resultValue(results[0], "Patients", []);
+    const appointments = resultValue(results[1], "Appointments", []);
+    const recommendations = resultValue(results[2], "Pending recommendations", []);
+    const plans = resultValue(results[3], "Meal plans", []);
+    const approval = resultValue(results[4], "Registration status", null);
+    const clientsLoaded = results[0].status === "fulfilled";
+    const appointmentsLoaded = results[1].status === "fulfilled";
+    const recommendationsLoaded = results[2].status === "fulfilled";
+    const plansLoaded = results[3].status === "fulfilled";
     workspaceContent.innerHTML = `
     <div class="page-heading">
       <div>
@@ -861,7 +878,12 @@ async function renderDietitianDashboard() {
       </div>
       <button class="button button-primary" data-go="meal-plans" type="button">Draft meal plan <span aria-hidden="true">&#8594;</span></button>
     </div>
-    ${dietitianApprovalMarkup(approval)}
+    ${approval ? dietitianApprovalMarkup(approval) : ""}
+    ${
+        dashboardErrors.length
+            ? `<div class="workspace-message error" role="alert"><strong>Some dashboard information could not be loaded:</strong><ul>${dashboardErrors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul></div>`
+            : ""
+    }
     <section class="feature-panel dietitian-home-feature">
       <div class="feature-panel-copy">
         <span class="eyebrow">PERSON-CENTRED NUTRITION</span>
@@ -875,32 +897,34 @@ async function renderDietitianDashboard() {
       <section class="stat-panel">
         <div>
           <span class="stat-label">Patients</span>
-          <strong class="stat-number">${clients.length}</strong>
+          <strong class="stat-number">${clientsLoaded ? clients.length : "—"}</strong>
         </div>
       </section>
       <section class="stat-panel">
         <div>
           <span class="stat-label">Appointments</span>
-          <strong class="stat-number">${appointments.length}</strong>
+          <strong class="stat-number">${appointmentsLoaded ? appointments.length : "—"}</strong>
         </div>
       </section>
       <section class="stat-panel">
         <div>
           <span class="stat-label">Pending Recommendations</span>
-          <strong class="stat-number">${recommendations.length}</strong>
+          <strong class="stat-number">${recommendationsLoaded ? recommendations.length : "—"}</strong>
         </div>
       </section>
       <section class="stat-panel">
         <div>
           <span class="stat-label">Meal Plans</span>
-          <strong class="stat-number">${plans.length}</strong>
+          <strong class="stat-number">${plansLoaded ? plans.length : "—"}</strong>
         </div>
       </section>
     </div>
-    <div class="section-heading"><h2>My Patients</h2><span>${clients.length} PATIENTS</span></div>
+    <div class="section-heading"><h2>My Patients</h2><span>${clientsLoaded ? `${clients.length} PATIENTS` : "UNAVAILABLE"}</span></div>
     <div class="dietitian-directory">
       ${
-          clients.length
+          !clientsLoaded
+              ? '<p class="workspace-message error">Patient list unavailable.</p>'
+              : clients.length
               ? clients
                     .map(
                         (client) => `
@@ -1323,7 +1347,7 @@ function appearanceSettingsMarkup() {
     <section class="content-panel appearance-settings">
       <div class="section-heading"><h2>Appearance</h2><span>PERSONAL PREFERENCE</span></div>
       <label class="appearance-toggle" for="darkModeToggle">
-        <span class="appearance-toggle-copy"><strong>Dark mode</strong><small>Use the opposite colors of light mode throughout the app.</small></span>
+        <span class="appearance-toggle-copy"><strong>Dark mode</strong><small>Use a dark gray palette with light text and lighter gray buttons.</small></span>
         <input id="darkModeToggle" type="checkbox" role="switch" aria-label="Dark mode" ${isDark ? "checked" : ""}>
         <span class="appearance-switch" aria-hidden="true"></span>
       </label>
@@ -1593,6 +1617,9 @@ function bindProfilePhotoControls() {
 }
 
 function dietitianApprovalMarkup(approval) {
+    if (!approval) {
+        return '<section class="notice approval-feedback" role="status"><strong>Registration status unavailable.</strong></section>';
+    }
     if (approval.status === "APPROVED") return "";
     const statusText =
         approval.status === "REJECTED" ? "Registration rejected" : "Registration pending";

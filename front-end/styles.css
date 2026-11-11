@@ -27,15 +27,6 @@ body {
     font-family: var(--sans);
     font-size: 14px;
 }
-html[data-theme="dark"]::after {
-    position: fixed;
-    z-index: 2147483647;
-    inset: 0;
-    background: #fff;
-    content: "";
-    mix-blend-mode: difference;
-    pointer-events: none;
-}
 .appearance-toggle {
     display: flex;
     min-height: 56px;

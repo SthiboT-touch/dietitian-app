@@ -119,3 +119,9 @@ def test_legacy_endpoints_scope_to_dietitian():
     with pytest.raises(HTTPException) as e:
         mp.get_meal_plan("m2", "d1")
     assert e.value.status_code == 403
+
+
+def test_legacy_meal_notes_support_plain_text_and_json():
+    assert mp._meal_notes_as_list("Breakfast oats") == ["Breakfast oats"]
+    assert mp._meal_notes_as_list('["Oats", "Fruit"]') == ["Oats", "Fruit"]
+    assert mp._meal_notes_as_list(None) == []

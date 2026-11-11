@@ -16,6 +16,20 @@ from pydantic import BaseModel, Field
 router = APIRouter()
 
 
+def _meal_notes_as_list(notes: Optional[str]) -> List[str]:
+    if not notes:
+        return []
+    try:
+        parsed = json.loads(notes)
+    except json.JSONDecodeError:
+        return [notes]
+    if isinstance(parsed, list):
+        return [str(item) for item in parsed]
+    if isinstance(parsed, str):
+        return [parsed] if parsed else []
+    return [json.dumps(parsed)]
+
+
 class MealPlanScreeningRequest(BaseModel):
     client_id: str
     diet_type: str
@@ -407,7 +421,7 @@ def list_meal_plans(dietitian_id: str = Depends(require_dietitian)):
                 plans.append(
                     {
                         **dict(plan),
-                        "meals": json.loads(day["notes"]) if day and day["notes"] else [],
+                        "meals": _meal_notes_as_list(day["notes"] if day else None),
                         "status": "GENERATED",
                     }
                 )
@@ -449,7 +463,7 @@ def get_meal_plan(meal_plan_id: str, dietitian_id: str = Depends(require_dietiti
             day = cursor.fetchone()
         return {
             **dict(plan),
-            "meals": json.loads(day["notes"]) if day and day["notes"] else [],
+            "meals": _meal_notes_as_list(day["notes"] if day else None),
             "status": "GENERATED",
         }
     plan = meal_plans_db.get(meal_plan_id)
