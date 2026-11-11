@@ -471,6 +471,25 @@ html[data-theme="dark"] body {
     background: #24272b !important;
     color: #edf0f2 !important;
 }
+html[data-theme="dark"] #accountMenuPanel {
+    background: #34383d !important;
+    border-color: #555b62 !important;
+}
+html[data-theme="dark"] #accountMenuPanel .account-menu-heading strong,
+html[data-theme="dark"] #accountMenuPanel .account-menu-heading span {
+    color: #edf0f2 !important;
+}
+html[data-theme="dark"] #accountMenuPanel .account-menu-item {
+    background: #c9cdd2 !important;
+    border: 1px solid #d8dce0 !important;
+    color: #24272b !important;
+}
+html[data-theme="dark"] #accountMenuPanel .account-menu-item:hover {
+    background: #e1e4e7 !important;
+}
+html[data-theme="dark"] #accountMenuPanel .account-menu-signout {
+    border-top-color: #555b62 !important;
+}
 html[data-theme="dark"] body * {
     color: #e4e7ea !important;
 }
