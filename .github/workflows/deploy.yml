@@ -7,7 +7,6 @@ on:
 
 jobs:
   deploy:
-    if: ${{ !contains(github.event.head_commit.message, '[proxy-inspect]') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -83,18 +82,6 @@ jobs:
             docker compose run --rm --no-deps api python migrations/apply_020_care_workflow.py
             docker compose run --rm --no-deps api python migrations/apply_021_account_profile_photos.py
             docker compose run --rm --no-deps api python migrations/apply_024_hpcsa_verification.py
-            for container_id in $(docker ps --filter publish=80 --format '{{.ID}}'); do
-              compose_project=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$container_id")
-              compose_service=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$container_id")
-              if [[ "$compose_project" == dietitian-app* && "$compose_service" == "frontend" ]]; then
-                echo "Removing stale NutriCare frontend container $container_id from project $compose_project to release port 80."
-                docker rm --force "$container_id"
-              else
-                container_name=$(docker inspect --format '{{.Name}}' "$container_id")
-                echo "Cannot deploy: port 80 is occupied by unrelated container $container_name (project: ${compose_project:-unknown}, service: ${compose_service:-unknown})." >&2
-                exit 1
-              fi
-            done
             docker compose up -d --build
             for attempt in $(seq 1 30); do
               if docker compose exec -T api python -c 'import urllib.request,json; h=json.load(urllib.request.urlopen("http://localhost:8000/health")); assert h["database"] == "online"'; then
@@ -107,11 +94,11 @@ jobs:
               sleep 3
             done
             for attempt in $(seq 1 30); do
-              if curl --fail --silent --max-time 5 http://127.0.0.1/health >/dev/null; then
+              if curl --fail --silent --max-time 5 http://127.0.0.1:3000/health >/dev/null; then
                 break
               fi
               if [ "$attempt" -eq 30 ]; then
-                echo "Frontend/API health check through Nginx did not pass" >&2
+                echo "Frontend/API health check on port 3000 did not pass" >&2
                 docker compose ps
                 docker compose logs --tail=100 frontend api
                 exit 1
@@ -119,11 +106,9 @@ jobs:
               sleep 3
             done
       - name: Verify public application endpoint
-        env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
         run: |
           for attempt in $(seq 1 10); do
-            if curl --fail --silent --max-time 10 "http://${SERVER_HOST}/health" >/dev/null; then
+            if curl --fail --silent --max-time 10 "https://health4lyf.co.za/health" >/dev/null; then
               echo "Public health check passed"
               exit 0
             fi
@@ -131,66 +116,3 @@ jobs:
           done
           echo "Public health check failed; verify server ingress/firewall and deployment logs" >&2
           exit 1
-
-  inspect-host-proxy:
-    if: ${{ contains(github.event.head_commit.message, '[proxy-inspect]') }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Inspect server listeners and domain proxy
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          script: |
-            set -eu
-            echo "Listening services on ports 80 and 443:"
-            if command -v ss >/dev/null 2>&1; then
-              sudo -n ss -ltnp '( sport = :80 or sport = :443 )' 2>/dev/null || ss -ltnp '( sport = :80 or sport = :443 )'
-            else
-              echo "ss is unavailable"
-            fi
-            for service in nginx apache2 httpd caddy; do
-              if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$service"; then
-                echo "Active host service: $service"
-              fi
-            done
-            if command -v nginx >/dev/null 2>&1; then
-              nginx_config=$(sudo -n nginx -T 2>/dev/null || nginx -T 2>/dev/null || true)
-              if [ -n "$nginx_config" ]; then
-                printf '%s\n' "$nginx_config" | awk '
-                  /^# configuration file / { current_file = $0 }
-                  /^[[:space:]]*server[[:space:]]*\{/ {
-                    in_server = 1
-                    depth = 1
-                    block_file = current_file
-                    block = $0
-                    next
-                  }
-                  in_server {
-                    block = block "\n" $0
-                    opens = gsub(/\{/, "{")
-                    closes = gsub(/\}/, "}")
-                    depth += opens - closes
-                    if (depth == 0) {
-                      if (block ~ /server_name[^;]*health4lyf[.]co[.]za/) {
-                        print block_file
-                        count = split(block, lines, "\n")
-                        for (i = 1; i <= count; i++) {
-                          if (lines[i] ~ /^[[:space:]]*(listen|server_name|proxy_pass|return|root|ssl_certificate)[[:space:]]/) {
-                            print lines[i]
-                          }
-                        }
-                      }
-                      in_server = 0
-                      block = ""
-                    }
-                  }
-                '
-              else
-                echo "Nginx configuration could not be read"
-              fi
-            else
-              echo "Nginx is not installed on the host"
-            fi
