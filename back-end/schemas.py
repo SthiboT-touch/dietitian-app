@@ -3,7 +3,6 @@
 from pydantic import BaseModel, Field, field_validator, ValidationInfo
 from typing import List, Literal, Optional
 from datetime import date
-from hpcsa_verification import normalize_hpcsa_number
 from urllib.parse import urlparse
 from registration_validation import (
     validate_email,
@@ -13,27 +12,11 @@ from registration_validation import (
 )
 
 
-class DietitianProfessionalDetails(BaseModel):
-    first_name: str = Field(..., min_length=1, max_length=100)
-    last_name: str = Field(..., min_length=1, max_length=100)
-    license_number: str
-
-    @field_validator("first_name", "last_name")
-    @classmethod
-    def legal_name(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Enter your full legal name as it appears on the HPCSA register")
-        return value
-
-    @field_validator("license_number")
-    @classmethod
-    def hpcsa_number(cls, value: str) -> str:
-        return normalize_hpcsa_number(value)
-
-
-class DietitianRegister(DietitianProfessionalDetails):
+class DietitianRegister(BaseModel):
+    first_name: str = Field(..., min_length=1)
+    last_name: str = Field(..., min_length=1)
     email: str
+    license_number: str
     password: str = Field(..., min_length=8)
 
     @field_validator("email")
@@ -156,8 +139,6 @@ class AdminApproval(BaseModel):
     dietitian_id: str
     status: Literal["APPROVED", "REJECTED"]
     notes: Optional[str] = None
-    hpcsa_register_checked: bool = False
-    practising_card_document_id: Optional[str] = None
 
 
 class BranchCreate(BaseModel):

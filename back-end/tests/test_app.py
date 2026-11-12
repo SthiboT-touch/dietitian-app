@@ -124,7 +124,7 @@ def authenticated_client_headers(client_id):
 def authenticated_dietitian_headers(dietitian_id):
     token = f"test_dietitian_token_{dietitian_id}"
     clinician = state.users_db.setdefault(dietitian_id, {"id": dietitian_id, "type": "dietitian"})
-    clinician.update(status="APPROVED", hpcsa_verified_until="2099-03-31")
+    clinician.update(status="APPROVED")
     state.dietitian_sessions_db[token] = dietitian_id
     return {"Authorization": f"Bearer {token}"}
 
@@ -283,7 +283,6 @@ def test_patient_without_assigned_dietitian_can_book_with_directory_dietitian():
         },
     ).json()["user"]
     state.users_db[dietitian["id"]]["status"] = "APPROVED"
-    state.users_db[dietitian["id"]]["hpcsa_verified_until"] = "2099-03-31"
     patient = client.post(
         "/api/v1/auth/register/client",
         json={
@@ -543,7 +542,6 @@ def test_dietitian_directory_lists_registered_dietitians():
         )
         dietitian_id = response.json()["user"]["id"]
         state.users_db[dietitian_id]["status"] = "APPROVED"
-        state.users_db[dietitian_id]["hpcsa_verified_until"] = "2099-03-31"
         dietitian_ids.append(dietitian_id)
 
     response = client.get("/api/v1/dietitians")
@@ -565,7 +563,6 @@ def test_approved_dietitian_can_add_practice_branch_as_current_base():
         },
     ).json()["user"]
     state.users_db[dietitian["id"]]["status"] = "APPROVED"
-    state.users_db[dietitian["id"]]["hpcsa_verified_until"] = "2099-03-31"
     state.dietitian_sessions_db["branch-dietitian-token"] = dietitian["id"]
     state.admin_sessions_db["branch-admin-token"] = "admin-branch-test"
     dietitian_headers = {"Authorization": "Bearer branch-dietitian-token"}
@@ -642,7 +639,6 @@ def test_verification_documents_require_branch_name_and_location():
         "/api/v1/dietitians/me/documents",
         headers={"Authorization": "Bearer applicant-token"},
         files={"file": ("license.pdf", b"%PDF-1.4\nverification document", "application/pdf")},
-        data={"practising_card_expires_at": date(date.today().year + (date.today().month > 3), 3, 31).isoformat()},
     )
 
     assert response.status_code == 409
@@ -687,8 +683,6 @@ def test_dietitian_rejection_requires_reason_and_allows_resubmission():
     assert approval.json() == {
         "status": "REJECTED",
         "rejection_reason": "Please upload a current license.",
-        "hpcsa_verified_until": None,
-        "verification_current": False,
     }
 
     resubmission = client.post(
@@ -1681,7 +1675,6 @@ def test_admin_setup_login_and_audited_dietitian_approval():
         "/api/v1/dietitians/me/documents",
         headers=dietitian_authorization,
         files={"file": ("license.pdf", b"%PDF-1.4\nverification document", "application/pdf")},
-        data={"practising_card_expires_at": date(date.today().year + (date.today().month > 3), 3, 31).isoformat()},
     )
     assert upload.status_code == 201
     submitted_branch = upload.json()["branch"]
@@ -1733,8 +1726,6 @@ def test_admin_setup_login_and_audited_dietitian_approval():
             "dietitian_id": dietitian["id"],
             "status": "APPROVED",
             "notes": "Credentials verified",
-            "hpcsa_register_checked": True,
-            "practising_card_document_id": upload.json()["document_id"],
         },
     )
 

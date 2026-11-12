@@ -20,7 +20,6 @@ from onboarding_services import qr_svg
 from schemas import AppointmentCreate, AppointmentDecision, GoalCreate
 from security import current_identity, authorize_client_access
 from consultations import completed_consultation
-from hpcsa_verification import verification_is_current
 from virtual_meetings import (
     ACTIVE_MEETING_STATUSES, ensure_meeting_link, is_virtual, meeting_lock, public_appointment,
 )
@@ -166,12 +165,12 @@ def create_appointment(
     if data.branch_id:
         if config.DATABASE_ENABLED:
             with database.cursor() as cursor:
-                cursor.execute("SELECT branch_id, status, hpcsa_verified_until FROM dietitian WHERE dietitian_id=%s", (data.dietitian_id,))
+                cursor.execute("SELECT branch_id, status FROM dietitian WHERE dietitian_id=%s", (data.dietitian_id,))
                 dietitian = cursor.fetchone()
         else:
             dietitian = users_db.get(data.dietitian_id)
-        if not verification_is_current(dietitian):
-            raise HTTPException(422, "Choose a dietitian with current HPCSA verification")
+        if not dietitian or dietitian.get("status") != "APPROVED":
+            raise HTTPException(422, "Choose an approved dietitian")
         if str(dietitian.get("branch_id")) != data.branch_id:
             raise HTTPException(422, "Dietitian does not practice at the selected branch")
     appt_id = str(uuid.uuid4())

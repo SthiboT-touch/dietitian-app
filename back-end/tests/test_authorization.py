@@ -56,7 +56,7 @@ def isolated_in_memory(monkeypatch):
     # Clinical sessions represent practitioners with a current reviewed card.
     for clinician_id in state.dietitian_sessions_db.values():
         clinician = state.users_db.setdefault(clinician_id, {"id": clinician_id, "type": "dietitian"})
-        clinician.update(status="APPROVED", hpcsa_verified_until="2099-03-31")
+        clinician.update(status="APPROVED")
     yield
     for store in (
         state.users_db,

@@ -11,8 +11,7 @@ import truststore
 # keeping certificate and hostname verification enabled.
 truststore.inject_into_ssl()
 
-from fastapi import FastAPI, Depends
-from hpcsa_verification import require_current_verification
+from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -100,10 +99,4 @@ for _router in (
     support.router,
     care.router,
 ):
-    clinical = _router in (
-        clients.router, appointments.router, meal_planning.router,
-        food_recipes.router, ai.router, care.router,
-    )
-    app.include_router(
-        _router, dependencies=[Depends(require_current_verification)] if clinical else []
-    )
+    app.include_router(_router)

@@ -36,7 +36,7 @@ def isolated(monkeypatch):
     # Clinical sessions represent practitioners with a current reviewed card.
     for clinician_id in state.dietitian_sessions_db.values():
         clinician = state.users_db.setdefault(clinician_id, {"id": clinician_id, "type": "dietitian"})
-        clinician.update(status="APPROVED", hpcsa_verified_until="2099-03-31")
+        clinician.update(status="APPROVED")
     yield
     for store in stores:
         store.clear()
@@ -171,7 +171,7 @@ def test_postgres_link_backfill_locks_existing_row_and_reuses_its_link(monkeypat
                 row["meeting_link"] = params[0]
         def fetchone(self):
             if "FROM dietitian WHERE dietitian_id" in self.sql:
-                return {"status": "APPROVED", "hpcsa_verified_until": "2099-03-31"}
+                return {"status": "APPROVED"}
             return dict(row)
     @contextmanager
     def cursor():
@@ -197,7 +197,7 @@ def test_postgres_approval_stores_generated_link_with_status_change(monkeypatch)
                 row["status"], row["meeting_link"] = params[:2]
         def fetchone(self):
             if "FROM dietitian WHERE dietitian_id" in self.sql:
-                return {"status": "APPROVED", "hpcsa_verified_until": "2099-03-31"}
+                return {"status": "APPROVED"}
             return {**row, "appointment_date": datetime.now() + timedelta(days=1)}
     @contextmanager
     def cursor():
