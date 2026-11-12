@@ -19,7 +19,11 @@ from fastapi.responses import Response
 from datetime import date, datetime, timezone
 from hpcsa_verification import normalize_hpcsa_number, validate_card_expiry, verification_is_current
 from onboarding_services import validate_attachment
-from role_management import require_roles
+from role_management import (
+    branch_id_for_manager,
+    require_admin_or_branch_manager,
+    require_roles,
+)
 from registration_consent import consent_details
 import database
 import config
@@ -1088,16 +1092,32 @@ async def submit_dietitian_document(
 
 
 @router.get("/api/v1/admin/dietitian-documents/{document_id}", tags=["1. Auth & Admin"])
-def download_dietitian_document(document_id: str, admin_id: str = Depends(require_admin)):
+def download_dietitian_document(
+    document_id: str,
+    identity=Depends(require_admin_or_branch_manager),
+):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute(
-                "SELECT content_type, file_data FROM dietitian_document WHERE document_id = %s",
-                (document_id,),
-            )
+            if branch_id:
+                cursor.execute(
+                    "SELECT dd.content_type, dd.file_data FROM dietitian_document dd "
+                    "JOIN dietitian d ON d.dietitian_id = dd.dietitian_id "
+                    "WHERE dd.document_id = %s AND d.branch_id = %s",
+                    (document_id, branch_id),
+                )
+            else:
+                cursor.execute(
+                    "SELECT content_type, file_data FROM dietitian_document WHERE document_id = %s",
+                    (document_id,),
+                )
             document = cursor.fetchone()
     else:
         document = dietitian_documents_db.get(document_id)
+        if document and branch_id:
+            dietitian = users_db.get(document.get("dietitian_id"))
+            if not dietitian or str(dietitian.get("branch_id")) != branch_id:
+                document = None
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     return Response(
@@ -1436,22 +1456,28 @@ def get_admin_dashboard(admin_id: str = Depends(require_admin)):
 
 
 @router.get("/api/v1/admin/dietitians", tags=["1. Auth & Admin"])
-def list_admin_dietitians(admin_id: str = Depends(require_admin)):
+def list_admin_dietitians(identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute(
+            query = (
                 "SELECT d.dietitian_id, TRIM(d.first_name || ' ' || d.last_name) AS full_name, "
                 "d.email, d.registration_number AS license_number, d.status, d.hpcsa_verified_until, b.name AS branch_name, "
                 "b.address AS branch_address, "
                 "bus.name AS business_name FROM dietitian d "
                 "JOIN branch b ON b.branch_id = d.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
-                "ORDER BY LOWER(d.last_name), LOWER(d.first_name)"
             )
+            if branch_id:
+                query += "WHERE d.branch_id = %s "
+            query += "ORDER BY LOWER(d.last_name), LOWER(d.first_name)"
+            cursor.execute(query, (branch_id,) if branch_id else None)
             return [dict(row) for row in cursor.fetchall()]
     rows = []
     for user in users_db.values():
         if user.get("type") != "dietitian":
+            continue
+        if branch_id and str(user.get("branch_id")) != branch_id:
             continue
         branch = branches_db.get(user.get("branch_id"), {})
         rows.append(
@@ -1471,9 +1497,18 @@ def list_admin_dietitians(admin_id: str = Depends(require_admin)):
 
 
 @router.get("/api/v1/admin/dietitians/{dietitian_id}", tags=["1. Auth & Admin"])
-def inspect_admin_dietitian(dietitian_id: str, admin_id: str = Depends(require_admin)):
-    record = next((row for row in list_admin_dietitians(admin_id)
-                   if str(row["dietitian_id"]) == dietitian_id), None)
+def inspect_admin_dietitian(
+    dietitian_id: str,
+    identity=Depends(require_admin_or_branch_manager),
+):
+    record = next(
+        (
+            row
+            for row in list_admin_dietitians(identity)
+            if str(row["dietitian_id"]) == dietitian_id
+        ),
+        None,
+    )
     if not record:
         raise HTTPException(404, "Dietitian not found")
     if config.DATABASE_ENABLED:

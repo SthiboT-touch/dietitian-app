@@ -336,6 +336,9 @@ function showWorkspace(user, initialView = "overview") {
     document.querySelectorAll("[data-admin-only]").forEach((item) => {
         item.hidden = !isAdmin;
     });
+    document.querySelectorAll("[data-manager-dietitian-only]").forEach((item) => {
+        item.hidden = !isAdmin && user.type !== "branch_manager";
+    });
     // Keep the Dietitian sidebar limited to the six requested menu items.
 if (isDietitian) {
     const nav = document.querySelector(".side-nav");
@@ -3879,13 +3882,15 @@ async function renderStaffDashboard() {
         ${pageHeading("BRANCH MANAGEMENT", `Welcome, ${escapeHtml(profile.full_name)}.`, `Managing ${escapeHtml(overview.branch_name)}.`)}
         <div class="admin-stat-grid">
           <section class="admin-stat"><span>Assigned branch</span><strong class="staff-role-card">${escapeHtml(overview.branch_name)}</strong></section>
+          <section class="admin-stat"><span>Branch dietitians</span><strong>${Number(overview.dietitians)}</strong></section>
           <section class="admin-stat"><span>Active branch staff</span><strong>${Number(overview.active_staff)}</strong></section>
           <section class="admin-stat"><span>Reception staff</span><strong>${Number(overview.reception_staff)}</strong></section>
           <section class="admin-stat"><span>Branch managers</span><strong>${Number(overview.branch_managers)}</strong></section>
         </div>
         <section class="content-panel"><h2 class="compact-heading">Branch operations</h2>
-          <p>Manage patient onboarding at your assigned branch. Staff statistics only cover this branch; confidential clinical records and system administration remain restricted.</p>
+          <p>Manage dietitian records and patient onboarding at your assigned branch. Dietitian registration approvals and system administration remain restricted.</p>
           <div class="quick-grid">
+            <button class="quick-link" data-go="admin-dietitians" type="button"><strong>Manage branch dietitians</strong><span aria-hidden="true">&#8599;</span></button>
             <button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong><span aria-hidden="true">&#8599;</span></button>
           </div>
         </section>`;
@@ -4046,8 +4051,9 @@ async function renderAdminStaff() {
 
 async function renderAdminDietitians() {
     const dietitians = await request("/api/v1/admin/dietitians");
+    const isBranchManager = currentUser.type === "branch_manager";
     workspaceContent.innerHTML = `
-    ${pageHeading("ADMINISTRATION", "Dietitians.", "Review registered practitioners and their organization assignments.")}
+    ${pageHeading(isBranchManager ? "BRANCH MANAGEMENT" : "ADMINISTRATION", isBranchManager ? "Your branch dietitians." : "Dietitians.", isBranchManager ? "Review dietitian registration details and practising-card evidence for your assigned branch." : "Review registered practitioners and their organization assignments.")}
     <div data-message class="workspace-message" hidden></div>
     ${adminDietitianInspectionCards(dietitians)}`;
     bindAdminDietitianInspection();
@@ -4084,8 +4090,9 @@ function bindAdminDietitianInspection() {
 
 async function renderAdminDietitianInspection(dietitianId) {
     const item = await request(`/api/v1/admin/dietitians/${encodeURIComponent(dietitianId)}`);
+    const isBranchManager = currentUser.type === "branch_manager";
     workspaceContent.innerHTML = `
-    ${pageHeading("ADMIN INSPECTION", escapeHtml(item.full_name), "Inspect registration details, practising-card evidence and review history.")}
+    ${pageHeading(isBranchManager ? "BRANCH DIETITIAN" : "ADMIN INSPECTION", escapeHtml(item.full_name), "Inspect registration details, practising-card evidence and review history.")}
     <div data-message class="workspace-message" hidden></div>
     <section class="content-panel"><dl class="profile-details">
       ${[["Email", item.email], ["HPCSA number", item.license_number], ["Account status", item.status],
@@ -4097,10 +4104,10 @@ async function renderAdminDietitianInspection(dietitianId) {
     ${item.documents.length ? item.documents.map((document) => `<div class="admin-document-row"><div><strong>${escapeHtml(document.file_name)}</strong><p>Card expiry: ${escapeHtml(document.practising_card_expires_at || "Not supplied")}</p></div><button class="button quiet-button" data-document-id="${escapeHtml(document.document_id)}" data-file-name="${escapeHtml(document.file_name)}" type="button">View document</button></div>`).join("") : '<p class="empty-state">No practising card submitted yet. You can inspect the account now; approval requires a current card and an HPCSA register check.</p>'}
     </section><section class="content-panel"><h2>Review history</h2>
     ${renderAdminTable(["Date", "Administrator", "Decision", "Notes"], item.reviews.map((review) => [review.action_date, review.admin_id, review.action, review.comments]), "No review decisions recorded yet.")}</section>
-    <div class="review-actions"><button class="button quiet-button" data-go="admin-dietitians" type="button">All dietitians</button><button class="button button-primary" data-inspection-review type="button">Open registration review</button></div>`;
+    <div class="review-actions"><button class="button quiet-button" data-go="admin-dietitians" type="button">${isBranchManager ? "Branch dietitians" : "All dietitians"}</button>${isBranchManager ? "" : '<button class="button button-primary" data-inspection-review type="button">Open registration review</button>'}</div>`;
     bindGoButtons();
     workspaceContent.querySelectorAll("[data-document-id]").forEach((button) => button.addEventListener("click", viewDietitianDocument));
-    workspaceContent.querySelector("[data-inspection-review]").addEventListener("click", async () => {
+    workspaceContent.querySelector("[data-inspection-review]")?.addEventListener("click", async () => {
         try {
             await renderAdminApprovals(dietitianId);
         } catch (error) {

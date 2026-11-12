@@ -124,6 +124,11 @@ def branch_manager_overview(identity=Depends(require_roles("branch_manager"))):
                 (branch["branch_id"],),
             )
             role_counts = {row["role"]: row["total"] for row in cursor.fetchall()}
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM dietitian WHERE branch_id = %s",
+                (branch["branch_id"],),
+            )
+            dietitian_count = cursor.fetchone()["total"]
     else:
         manager = staff_accounts_db.get(staff_id)
         if not manager or not manager.get("is_active") or manager.get("role") != "branch_manager":
@@ -136,6 +141,11 @@ def branch_manager_overview(identity=Depends(require_roles("branch_manager"))):
             if member.get("is_active") and member.get("branch_id") == manager["branch_id"]:
                 role = member["role"]
                 role_counts[role] = role_counts.get(role, 0) + 1
+        dietitian_count = sum(
+            user.get("type") == "dietitian"
+            and str(user.get("branch_id")) == str(manager["branch_id"])
+            for user in users_db.values()
+        )
         branch = {"branch_id": manager["branch_id"], "branch_name": branch.get("name", "Branch")}
     return {
         "branch_id": branch["branch_id"],
@@ -143,6 +153,7 @@ def branch_manager_overview(identity=Depends(require_roles("branch_manager"))):
         "active_staff": sum(role_counts.values()),
         "reception_staff": role_counts.get("reception", 0),
         "branch_managers": role_counts.get("branch_manager", 0),
+        "dietitians": dietitian_count,
     }
 
 
