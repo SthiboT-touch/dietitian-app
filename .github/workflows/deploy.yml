@@ -7,6 +7,7 @@ on:
 
 jobs:
   deploy:
+    if: ${{ !contains(github.event.head_commit.message, '[proxy-inspect]') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -130,3 +131,66 @@ jobs:
           done
           echo "Public health check failed; verify server ingress/firewall and deployment logs" >&2
           exit 1
+
+  inspect-host-proxy:
+    if: ${{ contains(github.event.head_commit.message, '[proxy-inspect]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect server listeners and domain proxy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -eu
+            echo "Listening services on ports 80 and 443:"
+            if command -v ss >/dev/null 2>&1; then
+              sudo -n ss -ltnp '( sport = :80 or sport = :443 )' 2>/dev/null || ss -ltnp '( sport = :80 or sport = :443 )'
+            else
+              echo "ss is unavailable"
+            fi
+            for service in nginx apache2 httpd caddy; do
+              if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$service"; then
+                echo "Active host service: $service"
+              fi
+            done
+            if command -v nginx >/dev/null 2>&1; then
+              nginx_config=$(sudo -n nginx -T 2>/dev/null || nginx -T 2>/dev/null || true)
+              if [ -n "$nginx_config" ]; then
+                printf '%s\n' "$nginx_config" | awk '
+                  /^# configuration file / { current_file = $0 }
+                  /^[[:space:]]*server[[:space:]]*\{/ {
+                    in_server = 1
+                    depth = 1
+                    block_file = current_file
+                    block = $0
+                    next
+                  }
+                  in_server {
+                    block = block "\n" $0
+                    opens = gsub(/\{/, "{")
+                    closes = gsub(/\}/, "}")
+                    depth += opens - closes
+                    if (depth == 0) {
+                      if (block ~ /server_name[^;]*health4lyf[.]co[.]za/) {
+                        print block_file
+                        count = split(block, lines, "\n")
+                        for (i = 1; i <= count; i++) {
+                          if (lines[i] ~ /^[[:space:]]*(listen|server_name|proxy_pass|return|root|ssl_certificate)[[:space:]]/) {
+                            print lines[i]
+                          }
+                        }
+                      }
+                      in_server = 0
+                      block = ""
+                    }
+                  }
+                '
+              else
+                echo "Nginx configuration could not be read"
+              fi
+            else
+              echo "Nginx is not installed on the host"
+            fi
