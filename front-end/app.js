@@ -112,6 +112,73 @@ async function refreshAccountAvatar() {
     }
 }
 
+function profilePhotoAvatarMarkup(role, accountId, name) {
+    const initials = name
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((part) => part[0] || "")
+        .join("")
+        .toUpperCase();
+    return `<div class="dietitian-avatar profile-photo-avatar" aria-hidden="true">
+      <span>${escapeHtml(initials)}</span>
+      <img data-profile-photo-role="${escapeHtml(role)}" data-profile-photo-account="${escapeHtml(accountId)}" alt="" hidden>
+    </div>`;
+}
+
+async function loadVisibleProfilePhotos(root = workspaceContent) {
+    const images = root.querySelectorAll(
+        "img[data-profile-photo-role]:not([data-profile-photo-loaded])",
+    );
+    await Promise.all(
+        [...images].map(async (image) => {
+            image.dataset.profilePhotoLoaded = "true";
+            const role = image.dataset.profilePhotoRole;
+            const accountId = image.dataset.profilePhotoAccount;
+            const query = new URLSearchParams({
+                account_type: role,
+                account_id: accountId,
+            });
+            try {
+                const headers = {};
+                const token = sessionToken();
+                if (token) headers.Authorization = `Bearer ${token}`;
+                const response = await fetch(
+                    `/api/v1/profile/photos?${query.toString()}`,
+                    { headers, cache: "no-store" },
+                );
+                if (response.status === 404) return;
+                if (!response.ok) {
+                    throw new Error(`Could not load profile photo (${response.status}).`);
+                }
+                const photoUrl = URL.createObjectURL(await response.blob());
+                image.src = photoUrl;
+                image.hidden = false;
+                image.previousElementSibling.hidden = true;
+                image.dataset.objectUrl = photoUrl;
+            } catch (error) {
+                console.error("Could not load an account profile photo.", error);
+            }
+        }),
+    );
+}
+
+const profilePhotoObserver = new MutationObserver((changes) => {
+    for (const change of changes) {
+        change.removedNodes.forEach((node) => {
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+            const removedImages = [
+                ...(node.matches?.("img[data-profile-photo-role]") ? [node] : []),
+                ...node.querySelectorAll("img[data-profile-photo-role]"),
+            ];
+            for (const image of removedImages) {
+                if (image.dataset.objectUrl) URL.revokeObjectURL(image.dataset.objectUrl);
+            }
+        });
+    }
+    void loadVisibleProfilePhotos();
+});
+profilePhotoObserver.observe(workspaceContent, { childList: true, subtree: true });
+
 // The health indicator reflects the real API/database result, not a hardcoded
 // "connected" badge. It doesn't display connection strings or patient details.
 function setConnectionState(state, label) {
@@ -653,6 +720,8 @@ function updateSignupRole() {
     document.querySelector("#dietitianFields").hidden = isClient;
     document.querySelector("#clientFields").hidden = !isClient;
     signupForm.elements.license_number.required = !isClient;
+    signupForm.querySelector('label[for="signupFirstName"]').textContent = isClient ? "First name" : "Legal first names (as on HPCSA register)";
+    signupForm.querySelector('label[for="signupLastName"]').textContent = isClient ? "Last name" : "Legal surname (as on HPCSA register)";
     signupForm.elements.id_number.required = isClient;
     signupForm.elements.phone.required = isClient;
     Object.values(registrationFields).forEach((field) => {
@@ -860,6 +929,16 @@ function bindPatientContextButtons() {
 }
 
 async function renderDietitianDashboard() {
+    const registration = await request("/api/v1/dietitians/me/approval");
+    if (!registration.verification_current) {
+        workspaceContent.innerHTML = `${pageHeading("HPCSA VERIFICATION", "Complete your professional verification.", "Clinical tools become available after an administrator checks your current HPCSA registration.")}
+        <div data-message class="workspace-message" hidden></div>
+        ${dietitianApprovalMarkup(registration)}
+        <button class="button button-primary" data-go="verification-documents" type="button">Upload practising card</button>`;
+        bindApprovalResubmission();
+        bindGoButtons();
+        return;
+    }
     const doctorName =
         currentUser && currentUser.full_name ? currentUser.full_name.split(" ")[0] : "John";
     const query = `?dietitian_id=${encodeURIComponent(currentUser.id)}`;
@@ -868,7 +947,7 @@ async function renderDietitianDashboard() {
         request(`/api/v1/appointments${query}`),
         request("/api/v1/ai/recommendations/pending"),
         request(`/api/v1/meal-plans${query}`),
-        request("/api/v1/dietitians/me/approval"),
+        Promise.resolve(registration),
     ]);
     const dashboardErrors = [];
     const resultValue = (result, label, fallback) => {
@@ -948,13 +1027,7 @@ async function renderDietitianDashboard() {
                     .map(
                         (client) => `
         <article class="dietitian-row">
-          <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(
-              client.name
-                  .split(/\s+/)
-                  .slice(0, 2)
-                  .map((part) => part[0])
-                  .join(""),
-          )}</div>
+          ${profilePhotoAvatarMarkup("client", client.id, client.name)}
           <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} Â· ${escapeHtml(client.status)}</p></div>
           <div class="review-actions">
             <button class="button button-small button-approve" data-open-client="${escapeHtml(client.id)}" type="button">View</button>
@@ -1277,13 +1350,7 @@ async function renderClientManagementList() {
                     .map(
                         (client) => `
         <article class="dietitian-row" data-search="${escapeHtml([client.id, client.name, client.status].join(" "))}">
-          <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(
-              client.name
-                  .split(/\s+/)
-                  .slice(0, 2)
-                  .map((part) => part[0])
-                  .join(""),
-          )}</div>
+          ${profilePhotoAvatarMarkup("client", client.id, client.name)}
           <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} Â· ${escapeHtml(client.status)}</p></div>
           <div class="review-actions">
             <button class="button button-small button-approve" data-open-client="${escapeHtml(client.id)}" type="button">View</button>
@@ -1334,14 +1401,7 @@ function renderDietitianRows(dietitians) {
         .map(
             (dietitian) => `
     <article class="dietitian-row">
-      <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(
-          dietitian.full_name
-              .split(/\s+/)
-              .slice(0, 2)
-              .map((part) => part[0])
-              .join("")
-              .toUpperCase(),
-      )}</div>
+      ${profilePhotoAvatarMarkup("dietitian", dietitian.id, dietitian.full_name)}
       <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` Â· ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` Â· ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
       <span class="dietitian-status status-${escapeHtml(dietitian.status.toLowerCase())}">${escapeHtml(dietitian.status.replaceAll("_", " "))}</span>
     </article>`,
@@ -1424,14 +1484,7 @@ async function renderClientDashboard(firstName) {
                   .map(
                       (dietitian) => `
       <article class="dietitian-row">
-        <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(
-            dietitian.full_name
-                .split(/\s+/)
-                .slice(0, 2)
-                .map((part) => part[0])
-                .join("")
-                .toUpperCase(),
-        )}</div>
+        ${profilePhotoAvatarMarkup("dietitian", dietitian.id, dietitian.full_name)}
         <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` Â· ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` Â· ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
         <button class="button button-small button-approve" data-book-dietitian="${escapeHtml(dietitian.id)}" type="button">Book appointment</button>
       </article>`,
@@ -1638,14 +1691,15 @@ function dietitianApprovalMarkup(approval) {
     if (!approval) {
         return '<section class="notice approval-feedback" role="status"><strong>Registration status unavailable.</strong></section>';
     }
-    if (approval.status === "APPROVED") return "";
+    if (approval.status === "APPROVED" && approval.verification_current) return "";
     const statusText =
+        approval.status === "APPROVED" ? "HPCSA verification renewal required" :
         approval.status === "REJECTED" ? "Registration rejected" : "Registration pending";
     const reason = approval.rejection_reason
         ? `<p><strong>Admin feedback:</strong> ${escapeHtml(approval.rejection_reason)}</p>`
         : "";
     const action =
-        approval.status === "REJECTED"
+        approval.status === "REJECTED" || approval.status === "APPROVED"
             ? '<button class="button button-small button-primary" data-approval-resubmit type="button">Resubmit to admin</button>'
             : "";
     return `<section class="notice approval-feedback" aria-live="polite"><strong>${statusText}</strong>${reason}${approval.status === "PENDING" ? "<p>Your registration is awaiting admin review.</p>" : "<p>Address the feedback, upload any corrected verification documents, then resubmit for review.</p>"}${action}</section>`;
@@ -3166,8 +3220,17 @@ async function renderDietitianDocuments() {
     );
     const branchReady = Boolean(currentBranch?.name?.trim() && currentBranch?.address?.trim());
     workspaceContent.innerHTML = `
-    ${pageHeading("REGISTRATION", "Verification documents.", "Submit license and identity documents for admin review.")}
+    ${pageHeading("REGISTRATION", "HPCSA verification.", "Submit your current annual HPCSA practising card. An administrator will check your legal name and DT registration number against the HPCSA register.")}
     <div data-message class="workspace-message" hidden></div>
+    <section class="content-panel"><h2>Legal registration details</h2>
+      <p>Use the details on the HPCSA register. Changes require a new review and are available while verification is pending, rejected or expired.</p>
+      <form id="professionalDetailsForm" class="form-grid">
+        <label class="form-field"><span class="field-label">Legal first names</span><input class="text-input" name="first_name" maxlength="100" value="${escapeHtml(currentUser.first_name || "")}" required></label>
+        <label class="form-field"><span class="field-label">Legal surname</span><input class="text-input" name="last_name" maxlength="100" value="${escapeHtml(currentUser.last_name || "")}" required></label>
+        <label class="form-field"><span class="field-label">HPCSA dietitian number</span><input class="text-input" name="license_number" value="${escapeHtml(currentUser.license_number || "")}" placeholder="DT0012345" required></label>
+        <div class="form-field form-actions"><button class="button button-primary" type="submit">Save registration details</button></div>
+      </form>
+    </section>
     <section class="content-panel">
       <div class="section-heading form-section-heading"><h2>Practice branch and location</h2><span>REQUIRED</span></div>
       ${
@@ -3183,6 +3246,7 @@ async function renderDietitianDocuments() {
     </section>
     <section class="content-panel document-upload-panel">
       <form id="verificationUploadForm" class="form-grid">
+        <div class="form-field full-width"><label for="cardExpiry">Practising-card expiry date</label><input class="text-input" id="cardExpiry" name="practising_card_expires_at" type="date" required ${branchReady ? "" : "disabled"}><p class="document-hint">Enter 31 March at the end of the current registration year. Approval expires on this date.</p></div>
         <div class="form-field full-width"><label for="verificationFile">Choose a PDF, JPEG, or PNG document</label><input class="text-input file-input" id="verificationFile" name="file" type="file" accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png" ${branchReady ? "required" : "disabled required"}></div>
         <div class="form-field full-width"><p class="document-hint">Maximum file size: 10 MB. Documents are stored securely and visible only to you and administrators reviewing your registration.</p></div>
         <div class="form-field full-width form-actions"><button class="button button-primary" type="submit" ${branchReady ? "" : "disabled"}>Submit for review <span aria-hidden="true">&#8594;</span></button></div>
@@ -3197,8 +3261,28 @@ async function renderDietitianDocuments() {
       <article class="document-row"><span class="document-icon" aria-hidden="true">&#9636;</span><div class="document-details"><h3>${escapeHtml(document.file_name)}</h3><p>${escapeHtml(document.content_type)} Â· ${new Date(document.uploaded_at).toLocaleDateString()}</p><p>${escapeHtml(document.branch_name)} Â· ${escapeHtml(document.branch_address)}</p></div><span class="plan-status">SUBMITTED</span></article>`,
                   )
                   .join("")
-            : '<p class="empty-state">No documents submitted. Add a license or identity document to continue approval.</p>'
+            : '<p class="empty-state">Upload your current HPCSA practising card to continue verification.</p>'
     }</div>`;
+    document
+        .querySelector("#professionalDetailsForm")
+        .addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const button = form.querySelector("button");
+            button.disabled = true;
+            try {
+                const result = await request("/api/v1/dietitians/me/registration", {
+                    method: "PATCH", body: JSON.stringify(Object.fromEntries(new FormData(form))),
+                });
+                Object.assign(currentUser, result);
+                sessionStorage.setItem(sessionKey, JSON.stringify(currentUser));
+                showWorkspaceMessage("Registration details saved for admin review.");
+            } catch (error) {
+                showWorkspaceMessage(error.message, true);
+            } finally {
+                button.disabled = false;
+            }
+        });
     document
         .querySelector("#registrationBranchForm")
         .addEventListener("submit", saveRegistrationBranch);
@@ -3236,6 +3320,7 @@ async function submitVerificationDocument(event) {
     try {
         const body = new FormData();
         body.append("file", file);
+        body.append("practising_card_expires_at", form.elements.practising_card_expires_at.value);
         await request("/api/v1/dietitians/me/documents", { method: "POST", body });
         await renderDietitianDocuments();
         showWorkspaceMessage("Document submitted for review.");
@@ -3752,20 +3837,27 @@ function renderAdminTable(headers, rows, emptyMessage) {
 }
 
 async function renderAdminDashboard() {
-    const summary = await request("/api/v1/admin/dashboard");
+    const [summary, pending] = await Promise.all([
+        request("/api/v1/admin/dashboard"), request("/api/v1/admin/approvals/pending"),
+    ]);
     const cards = [
         ["Dietitians", summary.dietitians],
         ["Patients", summary.clients],
         ["Branches", summary.branches],
         ["Businesses", summary.businesses],
-        ["Pending approvals", summary.pending_approvals],
+        ["Awaiting inspection", pending.length],
         ["Appointments", summary.appointments],
         ["Meal plans", summary.meal_plans],
         ["Approval actions", summary.audit_events],
     ];
     workspaceContent.innerHTML = `
     ${pageHeading("ADMIN DASHBOARD", "Practice overview.", "Monitor registrations, care activity, and organization records.")}
+    <div data-message class="workspace-message" hidden></div>
     <div class="admin-stat-grid">${cards.map(([label, value]) => `<section class="admin-stat"><span>${escapeHtml(label)}</span><strong>${Number(value).toLocaleString()}</strong></section>`).join("")}</div>
+    <section class="content-panel"><div class="section-heading"><h2>Dietitians awaiting inspection</h2><span>${pending.length} TO REVIEW</span></div>
+    <p>New registrations appear here immediately, even before a practising card is uploaded. Expired approvals also need review.</p>
+    ${adminDietitianInspectionCards(pending)}
+    <button class="button quiet-button" data-go="admin-approvals" type="button">View full review queue</button></section>
     <div class="section-heading"><h2>Administration</h2><span>QUICK ACCESS</span></div>
     <div class="quick-grid admin-quick-grid">
       <button class="quick-link" data-go="admin-approvals" type="button"><strong>Review dietitian approvals</strong><span aria-hidden="true">&#8599;</span></button>
@@ -3774,6 +3866,8 @@ async function renderAdminDashboard() {
       <button class="quick-link" data-go="admin-reports" type="button"><strong>View reports</strong><span aria-hidden="true">&#8599;</span></button>
     </div>`;
     bindGoButtons();
+    bindAdminDietitianInspection();
+    document.querySelector("#adminApprovalCount").textContent = String(pending.length);
 }
 
 async function renderStaffDashboard() {
@@ -3954,19 +4048,65 @@ async function renderAdminDietitians() {
     const dietitians = await request("/api/v1/admin/dietitians");
     workspaceContent.innerHTML = `
     ${pageHeading("ADMINISTRATION", "Dietitians.", "Review registered practitioners and their organization assignments.")}
-    ${renderAdminTable(
-        ["Name", "Email", "License", "Business", "Branch", "Location", "Status"],
-        dietitians.map((item) => [
-            item.full_name,
-            item.email,
-            item.license_number,
-            item.business_name,
-            item.branch_name,
-            item.branch_address,
-            item.status,
-        ]),
-        "No dietitians are registered yet.",
-    )}`;
+    <div data-message class="workspace-message" hidden></div>
+    ${adminDietitianInspectionCards(dietitians)}`;
+    bindAdminDietitianInspection();
+}
+
+
+function adminDietitianInspectionCards(dietitians) {
+    if (!dietitians.length) return '<p class="empty-state">No dietitians to inspect.</p>';
+    return `<div class="admin-approval-list">${dietitians.map((item) => `
+        <article class="admin-approval-row"><div class="admin-approval-main">
+        <div class="dietitian-details"><h3>${escapeHtml(item.full_name)}</h3>
+        <p>${escapeHtml(item.email)} · HPCSA ${escapeHtml(item.license_number)}</p>
+        <p>${escapeHtml(item.business_name || item.practice_name || "Practice not provided")} · ${escapeHtml(item.branch_name || "Branch not provided")} · ${escapeHtml(item.branch_address || "Location not provided")}</p>
+        <p>${escapeHtml(item.status)}${item.documents ? ` · ${item.documents.length ? `${item.documents.length} document(s) submitted` : "Awaiting practising card"}` : ""}</p></div>
+        <button class="button button-primary button-small" data-inspect-dietitian="${escapeHtml(item.dietitian_id)}" type="button">Inspect dietitian</button>
+        </div></article>`).join("")}</div>`;
+}
+
+
+function bindAdminDietitianInspection() {
+    workspaceContent.querySelectorAll("[data-inspect-dietitian]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            button.disabled = true;
+            try {
+                await renderAdminDietitianInspection(button.dataset.inspectDietitian);
+            } catch (error) {
+                button.disabled = false;
+                showWorkspaceMessage(error.message, true);
+            }
+        });
+    });
+}
+
+
+async function renderAdminDietitianInspection(dietitianId) {
+    const item = await request(`/api/v1/admin/dietitians/${encodeURIComponent(dietitianId)}`);
+    workspaceContent.innerHTML = `
+    ${pageHeading("ADMIN INSPECTION", escapeHtml(item.full_name), "Inspect registration details, practising-card evidence and review history.")}
+    <div data-message class="workspace-message" hidden></div>
+    <section class="content-panel"><dl class="profile-details">
+      ${[["Email", item.email], ["HPCSA number", item.license_number], ["Account status", item.status],
+         ["HPCSA verification", item.verification_current ? "Current" : "Requires review"],
+         ["Verified until", item.hpcsa_verified_until || "Not verified"], ["Practice", item.business_name],
+         ["Branch", item.branch_name], ["Location", item.branch_address]].map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "Not provided")}</dd></div>`).join("")}
+    </dl></section>
+    <section class="content-panel"><h2>Submitted documents</h2>
+    ${item.documents.length ? item.documents.map((document) => `<div class="admin-document-row"><div><strong>${escapeHtml(document.file_name)}</strong><p>Card expiry: ${escapeHtml(document.practising_card_expires_at || "Not supplied")}</p></div><button class="button quiet-button" data-document-id="${escapeHtml(document.document_id)}" data-file-name="${escapeHtml(document.file_name)}" type="button">View document</button></div>`).join("") : '<p class="empty-state">No practising card submitted yet. You can inspect the account now; approval requires a current card and an HPCSA register check.</p>'}
+    </section><section class="content-panel"><h2>Review history</h2>
+    ${renderAdminTable(["Date", "Administrator", "Decision", "Notes"], item.reviews.map((review) => [review.action_date, review.admin_id, review.action, review.comments]), "No review decisions recorded yet.")}</section>
+    <div class="review-actions"><button class="button quiet-button" data-go="admin-dietitians" type="button">All dietitians</button><button class="button button-primary" data-inspection-review type="button">Open registration review</button></div>`;
+    bindGoButtons();
+    workspaceContent.querySelectorAll("[data-document-id]").forEach((button) => button.addEventListener("click", viewDietitianDocument));
+    workspaceContent.querySelector("[data-inspection-review]").addEventListener("click", async () => {
+        try {
+            await renderAdminApprovals(dietitianId);
+        } catch (error) {
+            showWorkspaceMessage(error.message, true);
+        }
+    });
 }
 
 async function renderAdminBusinesses() {
@@ -4080,7 +4220,7 @@ async function renderDietitianSettings() {
 
     const status = String(approval.status || "UNKNOWN").toUpperCase();
 
-    const statusLabel = {
+    const statusLabel = status === "APPROVED" && !approval.verification_current ? "HPCSA renewal required" : {
         APPROVED: "Approved",
         PENDING: "Pending review",
         REJECTED: "Registration rejected",
@@ -4110,6 +4250,7 @@ async function renderDietitianSettings() {
                 <dt>Registration status</dt>
                 <dd>${escapeHtml(statusLabel)}</dd>
             </div>
+            <div><dt>HPCSA approval valid until</dt><dd>${escapeHtml(approval.hpcsa_verified_until || "Awaiting review")}</dd></div>
         </dl>
 
         ${feedback}
@@ -4168,10 +4309,12 @@ async function renderAdminSettings() {
     bindAppearanceSettings();
 }
 
-async function renderAdminApprovals() {
-    const pending = await request("/api/v1/admin/approvals/pending");
+async function renderAdminApprovals(dietitianId = null) {
+    const queue = await request("/api/v1/admin/approvals/pending");
+    const pending = dietitianId ? queue.filter((item) => item.dietitian_id === dietitianId) : queue;
     workspaceContent.innerHTML = `
-    ${pageHeading("ADMINISTRATION", "Dietitian approvals.", "Review license registrations before adding dietitians to the directory.")}
+    ${pageHeading("ADMINISTRATION", "Dietitian approvals.", "Check the legal name, DT number and current practising card against the HPCSA register before approval. Expired approvals also appear here.")}
+    <p><a href="https://hpcsa.co.za/" target="_blank" rel="noopener noreferrer">Open HPCSA and choose Search the Register</a></p>
     <div data-message class="workspace-message" hidden></div>
     <div class="admin-approval-list">${
         pending.length
@@ -4180,16 +4323,9 @@ async function renderAdminApprovals() {
                       (dietitian) => `
       <article class="admin-approval-row" data-dietitian-id="${escapeHtml(dietitian.dietitian_id)}">
         <div class="admin-approval-main">
-          <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(
-              dietitian.full_name
-                  .split(/\s+/)
-                  .slice(0, 2)
-                  .map((part) => part[0])
-                  .join("")
-                  .toUpperCase(),
-          )}</div>
+          ${profilePhotoAvatarMarkup("dietitian", dietitian.dietitian_id, dietitian.full_name)}
           <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.email)} Â· License ${escapeHtml(dietitian.license_number)}</p><p>${escapeHtml(dietitian.practice_name || "Nutrition practice")} Â· ${escapeHtml(dietitian.branch_name || "Branch not provided")} Â· ${escapeHtml(dietitian.branch_address || "Address not provided")}</p><p class="document-hint">Branch ID: ${escapeHtml(dietitian.branch_id || "â€”")} Â· Business ID: ${escapeHtml(dietitian.business_id || "â€”")}</p></div>
-          <span class="dietitian-status status-pending">PENDING</span>
+          <span class="dietitian-status status-pending">${dietitian.status === "APPROVED" ? "RENEWAL REQUIRED" : "PENDING"}</span>
         </div>
         <div class="admin-document-list">${
             dietitian.documents.length
@@ -4201,6 +4337,8 @@ async function renderAdminApprovals() {
                       .join("")
                 : '<p class="document-hint">No verification documents submitted yet.</p>'
         }</div>
+        <label class="form-field"><span class="field-label">Practising card checked</span><select class="text-input" name="practising_card_document_id"><option value="">Select the current card</option>${dietitian.documents.filter((document) => document.practising_card_expires_at).map((document) => `<option value="${escapeHtml(document.document_id)}">${escapeHtml(document.file_name)} — expires ${escapeHtml(document.practising_card_expires_at)}</option>`).join("")}</select></label>
+        <label class="form-field"><span><input type="checkbox" name="hpcsa_register_checked"> I checked the legal name, DT number, active registration and practising card against the HPCSA register.</span></label>
         <label class="form-field admin-approval-notes"><span class="field-label">Decision note <span class="stat-caption">(required for rejection; optional for approval)</span></span><input class="text-input" name="notes" placeholder="Explain the reason for rejection or approval"></label>
         <div class="review-actions"><button class="button button-small button-reject" data-admin-decision="REJECTED" type="button">Reject</button><button class="button button-small button-approve" data-admin-decision="APPROVED" type="button" ${dietitian.documents.length ? "" : "disabled"}>Approve</button></div>
       </article>`,
@@ -4214,7 +4352,7 @@ async function renderAdminApprovals() {
     workspaceContent.querySelectorAll("[data-document-id]").forEach((button) => {
         button.addEventListener("click", viewDietitianDocument);
     });
-    document.querySelector("#adminApprovalCount").textContent = String(pending.length);
+    document.querySelector("#adminApprovalCount").textContent = String(queue.length);
 }
 
 async function viewDietitianDocument(event) {
@@ -4274,6 +4412,8 @@ async function reviewDietitianRegistration(event) {
                 dietitian_id: card.dataset.dietitianId,
                 status: button.dataset.adminDecision,
                 notes,
+                hpcsa_register_checked: card.querySelector("[name=hpcsa_register_checked]").checked,
+                practising_card_document_id: card.querySelector("[name=practising_card_document_id]").value || null,
             }),
         });
         await renderAdminApprovals();

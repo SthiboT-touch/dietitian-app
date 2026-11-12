@@ -86,6 +86,36 @@ def test_each_account_role_can_upload_and_read_own_photo(role):
     assert state.profile_photos_db[f"{role}:account-1"]["bytes"] == image
 
 
+def test_signed_in_users_can_view_another_accounts_photo():
+    owner_headers = auth_for("client", "patient-1")
+    viewer_headers = auth_for("dietitian", "dietitian-1")
+    image = png_image()
+    assert api.put(
+        "/api/v1/profile/photo",
+        headers=owner_headers,
+        files={"file": ("profile.png", image, "image/png")},
+    ).status_code == 200
+
+    response = api.get(
+        "/api/v1/profile/photos",
+        params={"account_type": "client", "account_id": "patient-1"},
+        headers=viewer_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.content == image
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_other_account_photo_endpoint_requires_authentication():
+    response = api.get(
+        "/api/v1/profile/photos",
+        params={"account_type": "client", "account_id": "patient-1"},
+    )
+
+    assert response.status_code == 401
+
+
 def test_photo_can_be_replaced_and_removed():
     headers = auth_for("client", "patient-1")
     first = png_image()
@@ -167,4 +197,8 @@ def test_removing_client_photo_also_removes_legacy_registration_photo():
 
 def test_profile_photo_endpoints_require_authentication():
     assert api.get("/api/v1/profile/photo").status_code == 401
+    assert api.get(
+        "/api/v1/profile/photos",
+        params={"account_type": "client", "account_id": "patient-1"},
+    ).status_code == 401
     assert api.delete("/api/v1/profile/photo").status_code == 401

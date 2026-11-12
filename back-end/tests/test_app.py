@@ -10,19 +10,28 @@ from langchain_core.runnables import RunnableLambda
 
 import app
 import config
+import email_verification
 import state
 from state import client_sessions_db
 from routers import ai
+from routers import auth_admin
 from routers import appointments as appointments_router
 from security import hash_password
 
 client = TestClient(app.app)
+require_verified_registration_email = auth_admin._require_verified_registration_email
 
 
 @pytest.fixture(autouse=True)
 def clear_in_memory_data(monkeypatch):
     monkeypatch.setattr(config, "DATABASE_ENABLED", False)
+    monkeypatch.setattr(
+        auth_admin,
+        "_require_verified_registration_email",
+        lambda email: {"stytch_user_id": None},
+    )
     client_sessions_db.clear()
+    state.verified_email_db.clear()
     state.ai_recommendations_db.clear()
     state.ai_conversations_db.clear()
     state.admins_db.clear()
@@ -37,6 +46,7 @@ def clear_in_memory_data(monkeypatch):
     state.goals_db.clear()
     state.recipes_db.clear()
     state.users_db.clear()
+    state.verified_email_db.clear()
     yield
     client_sessions_db.clear()
     state.ai_recommendations_db.clear()
@@ -53,6 +63,56 @@ def clear_in_memory_data(monkeypatch):
     state.goals_db.clear()
     state.recipes_db.clear()
     state.users_db.clear()
+    state.verified_email_db.clear()
+
+
+def test_registration_requires_verified_email(monkeypatch):
+    monkeypatch.setattr(
+        auth_admin,
+        "_require_verified_registration_email",
+        require_verified_registration_email,
+    )
+    monkeypatch.setattr(config, "RESEND_API_KEY", "test-api-key")
+    monkeypatch.setattr(config, "RESEND_FROM_EMAIL", "care@example.com")
+    monkeypatch.setattr(email_verification.secrets, "randbelow", lambda upper: 123456)
+    monkeypatch.setattr(email_verification.secrets, "token_urlsafe", lambda length: "method-id")
+    payload = {
+        "first_name": "Avery",
+        "last_name": "Chen",
+        "email": "verified@example.com",
+        "license_number": "DT9122103",
+        "password": "nutrition-safe-pass",
+    }
+
+    with patch(
+        "email_verification.resend.Emails.send",
+        return_value={"id": "test-email-id"},
+    ):
+        send_result = client.post(
+            "/api/v1/auth/email/send-code",
+            json={"email": payload["email"]},
+        )
+        assert send_result.status_code == 200
+        method_id = send_result.json()["method_id"]
+
+        unverified = client.post("/api/v1/auth/register/dietitian", json=payload)
+        assert unverified.status_code == 403
+
+        verified = client.post(
+            "/api/v1/auth/email/verify-code",
+            json={
+                "email": payload["email"],
+                "method_id": method_id,
+                "code": "123456",
+            },
+        )
+        assert verified.status_code == 200
+        assert verified.json()["verified"] is True
+
+    registration = client.post("/api/v1/auth/register/dietitian", json=payload)
+
+    assert registration.status_code == 200
+    assert registration.json()["user"]["email_verified"] is True
 
 
 def authenticated_client_headers(client_id):
@@ -63,6 +123,8 @@ def authenticated_client_headers(client_id):
 
 def authenticated_dietitian_headers(dietitian_id):
     token = f"test_dietitian_token_{dietitian_id}"
+    clinician = state.users_db.setdefault(dietitian_id, {"id": dietitian_id, "type": "dietitian"})
+    clinician.update(status="APPROVED", hpcsa_verified_until="2099-03-31")
     state.dietitian_sessions_db[token] = dietitian_id
     return {"Authorization": f"Bearer {token}"}
 
@@ -74,7 +136,7 @@ def test_signup_and_login_use_saved_credentials():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     )
@@ -105,6 +167,7 @@ def test_database_client_login_includes_date_of_birth(monkeypatch):
         "full_name": "Jordan Lee",
         "email": "jordan@example.com",
         "dietitian_id": "dietitian-1",
+        "email_verified": True,
         "date_of_birth": date(1990, 5, 14),
         "password_hash": hash_password("client-safe-pass"),
     }
@@ -155,7 +218,7 @@ def test_signup_rejects_duplicate_email():
         "first_name": "Avery",
         "last_name": "Chen",
         "email": "avery@example.com",
-        "license_number": "RD-2048",
+        "license_number": "DT9122103",
         "password": "nutrition-safe-pass",
     }
     client.post("/api/v1/auth/register/dietitian", json=payload)
@@ -215,11 +278,12 @@ def test_patient_without_assigned_dietitian_can_book_with_directory_dietitian():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
     state.users_db[dietitian["id"]]["status"] = "APPROVED"
+    state.users_db[dietitian["id"]]["hpcsa_verified_until"] = "2099-03-31"
     patient = client.post(
         "/api/v1/auth/register/client",
         json={
@@ -262,7 +326,7 @@ def test_approved_appointment_links_patient_to_dietitian_for_dashboard():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -316,7 +380,7 @@ def test_client_signup_joins_registered_dietitian():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     )
@@ -351,7 +415,7 @@ def test_client_list_is_scoped_to_dietitian():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -396,7 +460,7 @@ def test_admin_workspace_data_routes_require_admin_and_return_practice_data():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -473,12 +537,13 @@ def test_dietitian_directory_lists_registered_dietitians():
                 "first_name": full_name.split(" ", 1)[0],
                 "last_name": full_name.split(" ", 1)[1],
                 "email": email,
-                "license_number": f"RD-{email.split('@')[0]}",
+                "license_number": "DT" + str(int.from_bytes(email.encode(), "big") % 10000000).zfill(7),
                 "password": "nutrition-safe-pass",
             },
         )
         dietitian_id = response.json()["user"]["id"]
         state.users_db[dietitian_id]["status"] = "APPROVED"
+        state.users_db[dietitian_id]["hpcsa_verified_until"] = "2099-03-31"
         dietitian_ids.append(dietitian_id)
 
     response = client.get("/api/v1/dietitians")
@@ -495,11 +560,12 @@ def test_approved_dietitian_can_add_practice_branch_as_current_base():
             "first_name": "Riley",
             "last_name": "Parker",
             "email": "riley@example.com",
-            "license_number": "RD-BRANCH",
+            "license_number": "DT0669200",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
     state.users_db[dietitian["id"]]["status"] = "APPROVED"
+    state.users_db[dietitian["id"]]["hpcsa_verified_until"] = "2099-03-31"
     state.dietitian_sessions_db["branch-dietitian-token"] = dietitian["id"]
     state.admin_sessions_db["branch-admin-token"] = "admin-branch-test"
     dietitian_headers = {"Authorization": "Bearer branch-dietitian-token"}
@@ -542,7 +608,7 @@ def test_pending_dietitian_can_add_branch_before_registration_approval():
             "first_name": "Pending",
             "last_name": "Practitioner",
             "email": "pending-branch@example.com",
-            "license_number": "RD-PENDING-BRANCH",
+            "license_number": "DT1866211",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -566,7 +632,7 @@ def test_verification_documents_require_branch_name_and_location():
             "first_name": "New",
             "last_name": "Applicant",
             "email": "new-applicant@example.com",
-            "license_number": "RD-NEW-APPLICANT",
+            "license_number": "DT7034873",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -576,6 +642,7 @@ def test_verification_documents_require_branch_name_and_location():
         "/api/v1/dietitians/me/documents",
         headers={"Authorization": "Bearer applicant-token"},
         files={"file": ("license.pdf", b"%PDF-1.4\nverification document", "application/pdf")},
+        data={"practising_card_expires_at": date(date.today().year + (date.today().month > 3), 3, 31).isoformat()},
     )
 
     assert response.status_code == 409
@@ -589,7 +656,7 @@ def test_dietitian_rejection_requires_reason_and_allows_resubmission():
             "first_name": "Taylor",
             "last_name": "Morgan",
             "email": "taylor@example.com",
-            "license_number": "RD-REJECTED",
+            "license_number": "DT2437604",
             "password": "dietitian-safe-password",
         },
     ).json()["user"]
@@ -620,6 +687,8 @@ def test_dietitian_rejection_requires_reason_and_allows_resubmission():
     assert approval.json() == {
         "status": "REJECTED",
         "rejection_reason": "Please upload a current license.",
+        "hpcsa_verified_until": None,
+        "verification_current": False,
     }
 
     resubmission = client.post(
@@ -651,7 +720,7 @@ def test_pending_dietitian_is_not_in_client_directory():
             "first_name": "Waiting",
             "last_name": "Dietitian",
             "email": "waiting@example.com",
-            "license_number": "RD-WAITING",
+            "license_number": "DT8063331",
             "password": "nutrition-safe-pass",
         },
     )
@@ -1428,6 +1497,11 @@ def test_pending_recommendations_only_returns_pending_items():
 
 
 def test_client_health_profile_loads_conditions_allergies_and_pregnancy():
+    state.users_db["client-health"] = {
+        "id": "client-health",
+        "type": "client",
+        "maternal_care_enabled": True,
+    }
     state.clients_db["client-health"] = {
         "allergies": [{"allergen": "Peanuts", "severity": "severe"}],
         "conditions": [{"condition_name": "Asthma"}],
@@ -1448,7 +1522,12 @@ def test_client_health_profile_loads_conditions_allergies_and_pregnancy():
 
 
 def test_health_history_entries_save_for_a_client():
-    state.users_db["client-health"] = {"id": "client-health", "type": "client", "dietitian_id": "health-dietitian"}
+    state.users_db["client-health"] = {
+        "id": "client-health",
+        "type": "client",
+        "dietitian_id": "health-dietitian",
+        "maternal_care_enabled": True,
+    }
     state.clients_db["client-health"] = {
         "allergies": [],
         "conditions": [],
@@ -1570,7 +1649,7 @@ def test_admin_setup_login_and_audited_dietitian_approval():
             "first_name": "Pending",
             "last_name": "Dietitian",
             "email": "pending@example.com",
-            "license_number": "RD-PENDING",
+            "license_number": "DT1647441",
             "password": "dietitian-safe-password",
         },
     ).json()["user"]
@@ -1602,6 +1681,7 @@ def test_admin_setup_login_and_audited_dietitian_approval():
         "/api/v1/dietitians/me/documents",
         headers=dietitian_authorization,
         files={"file": ("license.pdf", b"%PDF-1.4\nverification document", "application/pdf")},
+        data={"practising_card_expires_at": date(date.today().year + (date.today().month > 3), 3, 31).isoformat()},
     )
     assert upload.status_code == 201
     submitted_branch = upload.json()["branch"]
@@ -1653,6 +1733,8 @@ def test_admin_setup_login_and_audited_dietitian_approval():
             "dietitian_id": dietitian["id"],
             "status": "APPROVED",
             "notes": "Credentials verified",
+            "hpcsa_register_checked": True,
+            "practising_card_document_id": upload.json()["document_id"],
         },
     )
 

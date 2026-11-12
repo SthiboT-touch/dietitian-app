@@ -3,17 +3,21 @@
 import secrets
 import uuid
 import time
+from contextlib import contextmanager
+from psycopg2.errors import UniqueViolation
 from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Request as FastAPIRequest,
     status,
     UploadFile,
 )
 from fastapi.responses import Response
-from datetime import date
+from datetime import date, datetime, timezone
+from hpcsa_verification import normalize_hpcsa_number, validate_card_expiry, verification_is_current
 from onboarding_services import validate_attachment
 from role_management import require_roles
 from registration_consent import consent_details
@@ -41,6 +45,7 @@ from state import (
 )
 from schemas import (
     DietitianRegister,
+    DietitianProfessionalDetails,
     ClientRegister,
     LoginRequest,
     EmailVerificationSend,
@@ -68,6 +73,15 @@ from email_verification import (
 )
 
 router = APIRouter()
+
+
+@contextmanager
+def _dietitian_registration_cursor():
+    try:
+        with database.cursor() as cursor:
+            yield cursor
+    except UniqueViolation as error:
+        raise HTTPException(409, "This email or HPCSA registration number is already registered") from error
 
 
 def _set_email_verification(email: str, verified: bool, stytch_user_id: str | None = None) -> None:
@@ -148,9 +162,9 @@ def register_dietitian(data: DietitianRegister):
         password_hash = hash_password(data.password)
         business_id = str(uuid.uuid4())
         branch_id = str(uuid.uuid4())
-        with database.cursor() as cursor:
+        with _dietitian_registration_cursor() as cursor:
             cursor.execute(
-                "SELECT 1 FROM dietitian WHERE registration_number = %s", (data.license_number,)
+                "SELECT 1 FROM dietitian WHERE upper(regexp_replace(registration_number, '\\s+', '', 'g')) = %s", (data.license_number,)
             )
             if cursor.fetchone():
                 raise HTTPException(
@@ -190,6 +204,12 @@ def register_dietitian(data: DietitianRegister):
             "password_hash": password_hash,
         }
         return {"message": "Dietitian registered successfully", "user": public_user(user)}
+    if any(
+        user.get("type") == "dietitian"
+        and "".join(user.get("license_number", "").split()).upper() == data.license_number
+        for user in users_db.values()
+    ):
+        raise HTTPException(409, "This HPCSA registration number is already registered")
     business_id = f"business_{uuid.uuid4().hex[:8]}"
     branch_id = f"branch_{uuid.uuid4().hex[:8]}"
     businesses_db[business_id] = {
@@ -546,7 +566,7 @@ def login(data: LoginRequest):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT dietitian_id AS id, 'dietitian' AS type, "
+                "SELECT dietitian_id AS id, 'dietitian' AS type, first_name, last_name, "
                 "TRIM(first_name || ' ' || last_name) AS full_name, email, "
                 "registration_number AS license_number, status, email_verified, password AS password_hash "
                 "FROM dietitian WHERE LOWER(email) = LOWER(%s)",
@@ -654,7 +674,7 @@ def get_dietitians():
                 "b.branch_id, b.name AS branch_name, b.address AS branch_address, bus.name AS practice_name "
                 "FROM dietitian d JOIN branch b ON b.branch_id = d.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
-                "WHERE d.status = 'APPROVED' "
+                "WHERE d.status = 'APPROVED' AND d.hpcsa_verified_until >= (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Johannesburg')::date "
                 "ORDER BY LOWER(d.last_name), LOWER(d.first_name)"
             )
             return [dict(row) for row in cursor.fetchall()]
@@ -671,7 +691,7 @@ def get_dietitians():
             "practice_name": branches_db.get(user.get("branch_id"), {}).get("business_name"),
         }
         for user in users_db.values()
-        if user.get("type") == "dietitian" and user.get("status") == "APPROVED"
+        if user.get("type") == "dietitian" and verification_is_current(user)
     ]
     return sorted(dietitians, key=lambda user: user["full_name"].casefold())
 
@@ -834,7 +854,7 @@ def get_my_dietitian_approval(dietitian_id: str = Depends(require_dietitian)):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT d.status, ("
+                "SELECT d.status, d.hpcsa_verified_until, ("
                 "SELECT al.comments FROM approval_log al "
                 "WHERE al.entity_type = 'DIETITIAN' AND al.entity_id = d.dietitian_id "
                 "AND al.action = 'REJECTED' ORDER BY al.action_date DESC LIMIT 1"
@@ -844,7 +864,7 @@ def get_my_dietitian_approval(dietitian_id: str = Depends(require_dietitian)):
             approval = cursor.fetchone()
         if not approval:
             raise HTTPException(status_code=404, detail="Dietitian not found")
-        return dict(approval)
+        return {**dict(approval), "verification_current": verification_is_current(approval)}
 
     user = users_db.get(dietitian_id)
     if not user or user.get("type") != "dietitian":
@@ -862,7 +882,43 @@ def get_my_dietitian_approval(dietitian_id: str = Depends(require_dietitian)):
     return {
         "status": user.get("status", "PENDING"),
         "rejection_reason": latest_rejection.get("comments") if latest_rejection else None,
+        "hpcsa_verified_until": user.get("hpcsa_verified_until"),
+        "verification_current": verification_is_current(user),
     }
+
+
+@router.patch("/api/v1/dietitians/me/registration", tags=["1. Auth & Admin"])
+def update_my_registration(data: DietitianProfessionalDetails, dietitian_id: str = Depends(require_dietitian)):
+    """Correct rejected or legacy registration details without retaining approval."""
+    values = {**data.model_dump(), "full_name": build_full_name(data.first_name, data.last_name)}
+    if config.DATABASE_ENABLED:
+        with _dietitian_registration_cursor() as cursor:
+            cursor.execute(
+                "SELECT status, hpcsa_verified_until FROM dietitian WHERE dietitian_id = %s FOR UPDATE",
+                (dietitian_id,),
+            )
+            record = cursor.fetchone()
+            if not record:
+                raise HTTPException(404, "Dietitian not found")
+            if verification_is_current(record):
+                raise HTTPException(409, "Contact an administrator to change currently verified registration details")
+            cursor.execute(
+                "UPDATE dietitian SET first_name = %s, last_name = %s, registration_number = %s, "
+                "status = 'PENDING', hpcsa_verified_until = NULL WHERE dietitian_id = %s",
+                (data.first_name, data.last_name, data.license_number, dietitian_id),
+            )
+    else:
+        record = users_db.get(dietitian_id)
+        if not record or record.get("type") != "dietitian":
+            raise HTTPException(404, "Dietitian not found")
+        if verification_is_current(record):
+            raise HTTPException(409, "Contact an administrator to change currently verified registration details")
+        if any(user.get("type") == "dietitian" and user.get("id") != dietitian_id
+               and "".join(user.get("license_number", "").split()).upper() == data.license_number
+               for user in users_db.values()):
+            raise HTTPException(409, "This HPCSA registration number is already registered")
+        record.update(values, status="PENDING", hpcsa_verified_until=None)
+    return {**values, "status": "PENDING", "hpcsa_verified_until": None}
 
 
 @router.post("/api/v1/dietitians/me/approval/resubmit", tags=["1. Auth & Admin"])
@@ -871,7 +927,8 @@ def resubmit_dietitian_approval(dietitian_id: str = Depends(require_dietitian)):
         with database.cursor() as cursor:
             cursor.execute(
                 "UPDATE dietitian SET status = 'PENDING' "
-                "WHERE dietitian_id = %s AND status = 'REJECTED' "
+                "WHERE dietitian_id = %s AND (status = 'REJECTED' OR "
+                "(status = 'APPROVED' AND (hpcsa_verified_until IS NULL OR hpcsa_verified_until < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Johannesburg')::date))) "
                 "RETURNING dietitian_id",
                 (dietitian_id,),
             )
@@ -882,15 +939,17 @@ def resubmit_dietitian_approval(dietitian_id: str = Depends(require_dietitian)):
             if not dietitian:
                 raise HTTPException(status_code=404, detail="Dietitian not found")
             raise HTTPException(
-                status_code=409, detail="Only rejected registrations can be resubmitted"
+                status_code=409, detail="Only rejected registrations or expired approvals can be resubmitted"
             )
 
     user = users_db.get(dietitian_id)
     if not user or user.get("type") != "dietitian":
         raise HTTPException(status_code=404, detail="Dietitian not found")
-    if user.get("status") != "REJECTED":
+    if user.get("status") != "REJECTED" and not (
+        user.get("status") == "APPROVED" and not verification_is_current(user)
+    ):
         raise HTTPException(
-            status_code=409, detail="Only rejected registrations can be resubmitted"
+            status_code=409, detail="Only rejected registrations or expired approvals can be resubmitted"
         )
     user["status"] = "PENDING"
     return {"message": "Registration resubmitted for admin review", "status": "PENDING"}
@@ -903,7 +962,7 @@ def list_my_dietitian_documents(dietitian_id: str = Depends(require_dietitian)):
             cursor.execute(
                 "SELECT dd.document_id, dd.branch_id, b.business_id, b.name AS branch_name, "
                 "b.address AS branch_address, bus.name AS practice_name, "
-                "dd.file_name, dd.content_type, dd.uploaded_at "
+                "dd.file_name, dd.content_type, dd.uploaded_at, dd.practising_card_expires_at "
                 "FROM dietitian_document dd JOIN branch b ON b.branch_id = dd.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
                 "WHERE dd.dietitian_id = %s ORDER BY dd.uploaded_at DESC",
@@ -934,8 +993,14 @@ def list_my_dietitian_documents(dietitian_id: str = Depends(require_dietitian)):
 )
 async def submit_dietitian_document(
     file: UploadFile = File(...),
+    practising_card_expires_at: date | None = Form(default=None),
     dietitian_id: str = Depends(require_dietitian),
 ):
+    if practising_card_expires_at is not None:
+        try:
+            validate_card_expiry(practising_card_expires_at)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -987,9 +1052,9 @@ async def submit_dietitian_document(
         with database.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO dietitian_document "
-                "(document_id, dietitian_id, branch_id, file_name, content_type, file_data) "
-                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING uploaded_at",
-                (document_id, dietitian_id, branch["branch_id"], file_name, content_type, contents),
+                "(document_id, dietitian_id, branch_id, file_name, content_type, file_data, practising_card_expires_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING uploaded_at",
+                (document_id, dietitian_id, branch["branch_id"], file_name, content_type, contents, practising_card_expires_at),
             )
             uploaded_at = cursor.fetchone()["uploaded_at"]
     else:
@@ -1002,12 +1067,14 @@ async def submit_dietitian_document(
             "content_type": content_type,
             "file_data": contents,
             "uploaded_at": uploaded_at,
+            "practising_card_expires_at": practising_card_expires_at,
         }
     return {
         "document_id": document_id,
         "file_name": file_name,
         "content_type": content_type,
         "uploaded_at": uploaded_at,
+        "practising_card_expires_at": practising_card_expires_at,
         "branch": {
             "branch_id": branch["branch_id"],
             "business_id": branch["business_id"],
@@ -1036,7 +1103,8 @@ def download_dietitian_document(document_id: str, admin_id: str = Depends(requir
     return Response(
         content=bytes(document["file_data"]),
         media_type=document["content_type"],
-        headers={"Content-Disposition": "inline; filename=verification-document"},
+        headers={"Content-Disposition": "inline; filename=verification-document",
+                 "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -1052,7 +1120,9 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
                 "bus.name AS practice_name FROM dietitian d "
                 "JOIN branch b ON b.branch_id = d.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
-                "WHERE d.status = 'PENDING' ORDER BY LOWER(d.last_name), LOWER(d.first_name)"
+                "WHERE d.status = 'PENDING' OR (d.status = 'APPROVED' AND "
+                "(d.hpcsa_verified_until IS NULL OR d.hpcsa_verified_until < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Johannesburg')::date)) "
+                "ORDER BY LOWER(d.last_name), LOWER(d.first_name)"
             )
             dietitians = cursor.fetchall()
             pending = []
@@ -1060,7 +1130,7 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
                 cursor.execute(
                     "SELECT dd.document_id, dd.branch_id, b.business_id, b.name AS branch_name, "
                     "b.address AS branch_address, bus.name AS practice_name, "
-                    "dd.file_name, dd.content_type, dd.uploaded_at "
+                    "dd.file_name, dd.content_type, dd.uploaded_at, dd.practising_card_expires_at "
                     "FROM dietitian_document dd JOIN branch b ON b.branch_id = dd.branch_id "
                     "JOIN business bus ON bus.business_id = b.business_id "
                     "WHERE dd.dietitian_id = %s ORDER BY dd.uploaded_at DESC",
@@ -1102,20 +1172,42 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
             ],
         }
         for user in users_db.values()
-        if user.get("type") == "dietitian" and user.get("status") == "PENDING"
+        if user.get("type") == "dietitian" and (
+            user.get("status") == "PENDING" or
+            (user.get("status") == "APPROVED" and not verification_is_current(user))
+        )
     ]
 
 
 @router.post("/api/v1/admin/approvals", tags=["1. Auth & Admin"])
 def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)):
     notes = data.notes.strip() if data.notes else ""
+    verified_until = None
+    if data.status == "APPROVED" and (
+        not data.hpcsa_register_checked or not data.practising_card_document_id
+    ):
+        raise HTTPException(409, "Confirm the HPCSA register check and select a current practising card before approval")
     if data.status == "REJECTED" and not notes:
         raise HTTPException(
             status_code=422, detail="A reason is required when rejecting a dietitian"
         )
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT registration_number FROM dietitian WHERE dietitian_id = %s FOR UPDATE",
+                (data.dietitian_id,),
+            )
+            dietitian = cursor.fetchone()
+            if not dietitian:
+                raise HTTPException(404, "Dietitian not found")
             if data.status == "APPROVED":
+                cursor.execute(
+                    "SELECT practising_card_expires_at FROM dietitian_document "
+                    "WHERE document_id::text = %s AND dietitian_id = %s",
+                    (data.practising_card_document_id, data.dietitian_id),
+                )
+                card = cursor.fetchone()
+                verified_until = _validate_hpcsa_approval(dietitian["registration_number"], card)
                 cursor.execute(
                     "SELECT b.name, b.address FROM dietitian d "
                     "JOIN branch b ON b.branch_id = d.branch_id "
@@ -1140,20 +1232,27 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
                         detail="A verification document is required before approval",
                     )
             cursor.execute(
-                "UPDATE dietitian SET status = %s WHERE dietitian_id = %s RETURNING dietitian_id",
-                (data.status, data.dietitian_id),
+                "UPDATE dietitian SET status = %s, hpcsa_verified_until = %s WHERE dietitian_id = %s RETURNING dietitian_id",
+                (data.status, verified_until, data.dietitian_id),
             )
             if not cursor.fetchone():
                 raise HTTPException(status_code=404, detail="Dietitian not found")
             cursor.execute(
-                "INSERT INTO approval_log (admin_id, entity_type, entity_id, action, comments) "
-                "VALUES (%s, 'DIETITIAN', %s, %s, %s)",
-                (admin_id, data.dietitian_id, data.status, notes or None),
+                "INSERT INTO approval_log (admin_id, entity_type, entity_id, action, comments, "
+                "practising_card_document_id, hpcsa_verified_until, hpcsa_register_checked) "
+                "VALUES (%s, 'DIETITIAN', %s, %s, %s, %s, %s, %s)",
+                (admin_id, data.dietitian_id, data.status, notes or None,
+                 data.practising_card_document_id if data.status == "APPROVED" else None,
+                 verified_until, data.status == "APPROVED" and data.hpcsa_register_checked),
             )
         return {"message": f"Dietitian status updated to {data.status}"}
-    if data.dietitian_id not in users_db:
+    if data.dietitian_id not in users_db or users_db[data.dietitian_id].get("type") != "dietitian":
         raise HTTPException(status_code=404, detail="Dietitian not found")
     if data.status == "APPROVED":
+        card = dietitian_documents_db.get(data.practising_card_document_id)
+        if not card or card.get("dietitian_id") != data.dietitian_id:
+            raise HTTPException(409, "Select this dietitian's current practising card")
+        verified_until = _validate_hpcsa_approval(users_db[data.dietitian_id].get("license_number", ""), card)
         branch = branches_db.get(users_db[data.dietitian_id].get("branch_id"))
         if (
             not branch
@@ -1172,6 +1271,7 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
             status_code=409, detail="A verification document is required before approval"
         )
     users_db[data.dietitian_id]["status"] = data.status
+    users_db[data.dietitian_id]["hpcsa_verified_until"] = verified_until
     approval_log_db.append(
         {
             "admin_id": admin_id,
@@ -1179,9 +1279,26 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
             "entity_id": data.dietitian_id,
             "action": data.status,
             "comments": notes or None,
+            "practising_card_document_id": data.practising_card_document_id if data.status == "APPROVED" else None,
+            "hpcsa_verified_until": verified_until,
+            "hpcsa_register_checked": data.status == "APPROVED" and data.hpcsa_register_checked,
+            "action_date": datetime.now(timezone.utc).isoformat(),
         }
     )
     return {"message": f"Dietitian status updated to {data.status}"}
+
+
+def _validate_hpcsa_approval(number, card):
+    try:
+        normalize_hpcsa_number(number)
+        if not card or not card.get("practising_card_expires_at"):
+            raise ValueError("A current HPCSA practising card is required before approval")
+        expiry = card["practising_card_expires_at"]
+        if isinstance(expiry, str):
+            expiry = date.fromisoformat(expiry)
+        return validate_card_expiry(expiry)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
 
 
 @router.post("/api/v1/branches", tags=["1. Auth & Admin"])
@@ -1324,7 +1441,7 @@ def list_admin_dietitians(admin_id: str = Depends(require_admin)):
         with database.cursor() as cursor:
             cursor.execute(
                 "SELECT d.dietitian_id, TRIM(d.first_name || ' ' || d.last_name) AS full_name, "
-                "d.email, d.registration_number AS license_number, d.status, b.name AS branch_name, "
+                "d.email, d.registration_number AS license_number, d.status, d.hpcsa_verified_until, b.name AS branch_name, "
                 "b.address AS branch_address, "
                 "bus.name AS business_name FROM dietitian d "
                 "JOIN branch b ON b.branch_id = d.branch_id "
@@ -1344,12 +1461,44 @@ def list_admin_dietitians(admin_id: str = Depends(require_admin)):
                 "email": user["email"],
                 "license_number": user.get("license_number", ""),
                 "status": user.get("status", "PENDING"),
+                "hpcsa_verified_until": user.get("hpcsa_verified_until"),
                 "branch_name": branch.get("name", "Main Practice"),
                 "branch_address": branch.get("address"),
                 "business_name": branch.get("business_name", f"{user['full_name']} Practice"),
             }
         )
     return sorted(rows, key=lambda item: item["full_name"].casefold())
+
+
+@router.get("/api/v1/admin/dietitians/{dietitian_id}", tags=["1. Auth & Admin"])
+def inspect_admin_dietitian(dietitian_id: str, admin_id: str = Depends(require_admin)):
+    record = next((row for row in list_admin_dietitians(admin_id)
+                   if str(row["dietitian_id"]) == dietitian_id), None)
+    if not record:
+        raise HTTPException(404, "Dietitian not found")
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT document_id, file_name, content_type, uploaded_at, practising_card_expires_at "
+                "FROM dietitian_document WHERE dietitian_id = %s ORDER BY uploaded_at DESC",
+                (dietitian_id,),
+            )
+            documents = [dict(row) for row in cursor.fetchall()]
+            cursor.execute(
+                "SELECT admin_id, action, comments, action_date, practising_card_document_id, "
+                "hpcsa_verified_until, hpcsa_register_checked FROM approval_log "
+                "WHERE entity_type = 'DIETITIAN' AND entity_id = %s ORDER BY action_date DESC",
+                (dietitian_id,),
+            )
+            reviews = [dict(row) for row in cursor.fetchall()]
+    else:
+        documents = [{key: value for key, value in document.items() if key != "file_data"}
+                     for document in dietitian_documents_db.values()
+                     if document["dietitian_id"] == dietitian_id]
+        reviews = [dict(entry) for entry in reversed(approval_log_db)
+                   if entry.get("entity_type") == "DIETITIAN" and entry.get("entity_id") == dietitian_id]
+    return {**record, "verification_current": verification_is_current(record),
+            "documents": documents, "reviews": reviews}
 
 
 @router.get("/api/v1/admin/businesses", tags=["1. Auth & Admin"])
@@ -1427,7 +1576,8 @@ def list_admin_audit_logs(admin_id: str = Depends(require_admin)):
             cursor.execute(
                 "SELECT al.approval_log_id AS log_id, al.admin_id, "
                 "TRIM(a.first_name || ' ' || a.last_name) AS admin_name, al.entity_type, "
-                "al.entity_id, al.action, al.comments, al.action_date "
+                "al.entity_id, al.action, al.comments, al.action_date, al.practising_card_document_id, "
+                "al.hpcsa_verified_until, al.hpcsa_register_checked "
                 "FROM approval_log al JOIN admin a ON a.admin_id = al.admin_id "
                 "ORDER BY al.action_date DESC LIMIT 500"
             )

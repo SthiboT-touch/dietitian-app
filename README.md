@@ -43,7 +43,7 @@ they do not grant access to an account or its tickets. Replies are kept in the
 admin ticket thread; email delivery is not automatic. Existing databases also
 need `python back-end/migrations/apply_016_guest_support.py` after migration 015.
 
-## Run with Llama
+## Run the nutrition AI
 
 Create a root `.env` file with the database password before starting the API, database, and Ollama service:
 
@@ -57,12 +57,12 @@ Start the services:
 
 ```powershell
 docker compose up --build -d
-docker compose exec ollama ollama pull llama3.2
+docker compose exec ollama ollama pull qwen2.5:0.5b
 ```
 
-The model download is several gigabytes and is stored in the `ollama_data` volume. The API uses `llama3.2` by default. To select another model, set `OLLAMA_MODEL` in a `.env` file before starting Compose, then pull that model with `docker compose exec ollama ollama pull <model>`.
+The selected model is stored in the `ollama_data` volume. Compose uses `qwen2.5:0.5b` by default. To select another model, set `OLLAMA_MODEL` in `.env` before starting Compose, then pull the same model with `docker compose exec ollama ollama pull <model>`. Deployments automatically pull the configured model before starting the API.
 
-The API container connects to Ollama at `http://ollama:11434` over the Compose network and waits for the Ollama service to become healthy. If the AI still cannot reply, confirm the model is installed with `docker compose exec ollama ollama list`, then pull it if needed with `docker compose exec ollama ollama pull llama3.2`. Rebuild and restart the API after changing its configuration with `docker compose up --build -d api`.
+The API container connects to Ollama at `http://ollama:11434` over the Compose network. If the AI still cannot reply, confirm the configured model is installed with `docker compose exec ollama ollama list`, and pull it with `docker compose exec ollama ollama pull qwen2.5:0.5b` if it is missing. Rebuild and restart the API after changing its configuration with `docker compose up --build -d api`.
 
 LangSmith tracing is optional. The root `.env.example` has a blank `LANGSMITH_API_KEY` slot. Copy it to `.env` if you do not already have a `.env`, keep your existing database password, paste your LangSmith key into that slot, and set tracing to `true`:
 
@@ -101,7 +101,7 @@ AI workflows use LangGraph `StateGraph`s: chat loads recent context, routes gree
 
 The Oracle Cloud deployment workflow applies the client health schema repair and dietitian document-branch association before starting the API. It creates any missing client health tables, adds the missing lactation end date column, and associates existing verification documents with each dietitian's current branch without replacing existing records. For other deployments, run `python back-end/migrations/apply_002_client_health_schema.py` and `python back-end/migrations/apply_003_dietitian_document_branch.py` once with `DATABASE_URL` configured.
 
-All signed-in account roles can upload, replace, or remove a JPEG/PNG profile picture (up to 1 MB) from **My Profile**. For an existing PostgreSQL database outside the deployment workflow, run `python back-end/migrations/apply_021_account_profile_photos.py` after `012_registration_uploads.sql`; existing patient registration photos are carried forward.
+All signed-in account roles can upload, replace, or remove a JPEG/PNG profile picture (up to 1 MB) from **My Profile**. Uploaded pictures appear in signed-in user and dietitian listings; signed-out visitors cannot view them. For an existing PostgreSQL database outside the deployment workflow, run `python back-end/migrations/apply_021_account_profile_photos.py` after `012_registration_uploads.sql`; existing patient registration photos are carried forward.
 
 Appointment requests are created as `PENDING`; dietitian decisions change them to `CONFIRMED` or `REJECTED`, and patients can cancel future pending or confirmed appointments. Patients may create an account before joining a dietitian. For an existing PostgreSQL database, apply the status migration once with `python back-end/migrations/apply_001_appointment_approval_states.py`.
 
@@ -114,6 +114,12 @@ Appointment check-in QR codes stay on the appointment record and can be scanned 
 For running the API outside Compose, set `OLLAMA_BASE_URL` (default `http://localhost:11434`) and `OLLAMA_MODEL` (default `llama3.2`) to match an Ollama instance with the selected model downloaded.
 
 ## Admin approvals
+
+HPCSA verification uses the existing `PENDING` / `APPROVED` / `REJECTED` workflow. New dietitians enter their full legal name and a DT number (5–8 digits); format validation does not verify council registration. Pending, rejected or expired accounts can correct their own legal name and HPCSA number from the verification screen; currently verified details cannot be changed through this endpoint. After adding their branch, they upload the current annual HPCSA practising card with its 31 March expiry date. Supporting documents without a card expiry cannot be used as practising-card evidence. Administrators must select the card and explicitly confirm a manual HPCSA register check before approval. The decision, administrator, evidence document and expiry are stored in the approval audit log. Documents remain private in PostgreSQL and are served through authenticated admin endpoints, without public URLs or a new storage provider.
+
+Before running this version against PostgreSQL, apply `python back-end/migrations/apply_024_hpcsa_verification.py` with the existing database environment configured. The deployment workflow applies it automatically. It adds evidence and expiry fields and a unique index over normalized registration numbers; conflicting legacy numbers must be resolved before the index can be created. Existing approvals have no evidenced expiry and therefore require a fresh review. No database migration is needed for isolated in-memory tests.
+
+Clinical API requests recheck approval and expiry every time, including existing sessions; expiry takes effect immediately after 31 March in South African time without relying on a scheduled job. Expired approvals disappear from the directory, appear in the admin queue, and retain access to document submission, registration details and support. Renewals can be resubmitted for review. This is a manual verification workflow, not a live HPCSA lookup or an automatic guarantee of current registration between reviews. This app currently accepts dietitians (`DT`), not nutritionists (`NT`).
 
 When the database has no administrator, the **Admin setup** tab appears on the local sign-in page. Create the first admin from this computer; the setup endpoint is loopback-only and becomes unavailable after that account is created. Dietitians can upload PDF, JPEG, or PNG verification documents up to 10 MB from the **Verification documents** screen. Admins can preview them before approving or rejecting a registration; decisions and notes are recorded in `approval_log`. Admin and dietitian document sessions are held in process memory, so sign in again after an API restart.
 

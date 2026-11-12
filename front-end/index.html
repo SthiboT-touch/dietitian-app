@@ -279,18 +279,23 @@
                                 aria-live="polite"
                                 >Use a valid email address.</small
                             >
-                            <div id="dietitianFields">
+                            <div id="dietitianFields" class="professional-verification-fields">
+                                <strong class="professional-verification-title">Required: dietitian verification</strong>
+                                <p id="dietitianVerificationHelp" class="professional-verification-help">We will use your full legal name and HPCSA dietitian number to verify your professional registration. Enter your details exactly as they appear on the HPCSA register.</p>
                                 <label
                                     class="field-label"
                                     for="licenseNumber"
-                                    >License number</label
+                                    >HPCSA dietitian number</label
                                 >
                                 <input
                                     id="licenseNumber"
                                     name="license_number"
-                                    placeholder="e.g. RD-2048"
+                                    placeholder="e.g. DT0012345"
+                                    pattern="[Dd][Tt][0-9]{5,8}"
+                                    aria-describedby="dietitianVerificationHelp dietitianVerificationNext"
                                     required
                                 />
+                                <small id="dietitianVerificationNext" class="professional-verification-help">After creating your account, upload your current HPCSA practising card. An administrator must check your registration and approve your account before you can use clinical tools.</small>
                             </div>
                         </section>
                         <section

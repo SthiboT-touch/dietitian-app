@@ -31,6 +31,10 @@ def isolated(monkeypatch):
     state.dietitian_sessions_db.update({"doctor": "d", "other-doctor": "other"})
     state.staff_sessions_db["reception"] = "r"
     state.staff_accounts_db["r"] = {"role": "reception", "is_active": True, "branch_id": "b"}
+    # Clinical sessions represent practitioners with a current reviewed card.
+    for clinician_id in state.dietitian_sessions_db.values():
+        clinician = state.users_db.setdefault(clinician_id, {"id": clinician_id, "type": "dietitian"})
+        clinician.update(status="APPROVED", hpcsa_verified_until="2099-03-31")
     yield
     for store in stores:
         store.clear()

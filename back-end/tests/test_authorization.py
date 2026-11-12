@@ -34,7 +34,13 @@ def isolated_in_memory(monkeypatch):
         store.clear()
     state.users_db.update(
         {
-            "c1": {"id": "c1", "type": "client", "full_name": "Client One", "dietitian_id": "d1"},
+            "c1": {
+                "id": "c1",
+                "type": "client",
+                "full_name": "Client One",
+                "dietitian_id": "d1",
+                "maternal_care_enabled": True,
+            },
             "c2": {"id": "c2", "type": "client", "full_name": "Client Two", "dietitian_id": "d2"},
         }
     )
@@ -47,6 +53,10 @@ def isolated_in_memory(monkeypatch):
     state.client_sessions_db.update({"client-1": "c1", "client-2": "c2"})
     state.dietitian_sessions_db.update({"dietitian-1": "d1", "dietitian-2": "d2"})
     state.admin_sessions_db["admin-1"] = "a1"
+    # Clinical sessions represent practitioners with a current reviewed card.
+    for clinician_id in state.dietitian_sessions_db.values():
+        clinician = state.users_db.setdefault(clinician_id, {"id": clinician_id, "type": "dietitian"})
+        clinician.update(status="APPROVED", hpcsa_verified_until="2099-03-31")
     yield
     for store in (
         state.users_db,
@@ -163,6 +173,15 @@ def test_client_meal_and_lactation_routes_are_protected():
         == 403
     )
     assert api.get("/api/v1/clients/c1/meals").status_code == 401
+
+
+def test_maternal_care_access_is_limited_to_assigned_dietitian():
+    url = "/api/v1/clients/c1/maternal-care"
+    payload = {"enabled": True}
+
+    assert api.patch(url, json=payload).status_code == 401
+    assert api.patch(url, json=payload, headers=headers("dietitian-2")).status_code == 403
+    assert api.patch(url, json=payload, headers=headers("dietitian-1")).status_code == 200
 
 
 def test_assigned_dietitian_can_review_client_meal_logs():
@@ -315,19 +334,25 @@ def test_every_client_record_route_has_the_authorization_dependency():
     """Make newly introduced health endpoints fail tests if left unprotected."""
     from fastapi.routing import APIRoute
     from routers.clients import require_metric_editor, router as clients_router
-    from security import require_client_record_access
+    from security import require_client_record_access, require_maternal_care_access
 
     routes = [
         route
         for route in clients_router.routes
-        if isinstance(route, APIRoute) and "/api/v1/clients/{client_id}" in route.path
+        if isinstance(route, APIRoute)
+        and "/api/v1/clients/{client_id}" in route.path
+        and not route.path.endswith("/maternal-care")
     ]
     assert routes, "Expected to discover clinical client routes"
     for route in routes:
         expected_dependency = (
             require_metric_editor
             if route.path.endswith(("/metrics", "/progress")) and "POST" in route.methods
-            else require_client_record_access
+            else (
+                require_maternal_care_access
+                if "/pregnancy" in route.path or "/lactation" in route.path
+                else require_client_record_access
+            )
         )
         assert any(
             dependency.call is expected_dependency

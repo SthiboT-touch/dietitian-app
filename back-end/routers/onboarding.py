@@ -41,6 +41,32 @@ def profile_photo_record(role, account_id):
 @router.get("/api/v1/profile/photo")
 def get_my_profile_photo(authorization: Optional[str] = Header(default=None)):
     role, account_id = current_identity(authorization)
+    return render_profile_photo(role, account_id)
+
+
+@router.get("/api/v1/profile/photos")
+def get_account_profile_photo(
+    account_type: str,
+    account_id: str,
+    authorization: Optional[str] = Header(default=None),
+):
+    current_identity(authorization)
+    allowed_roles = {
+        "client",
+        "dietitian",
+        "admin",
+        "reception",
+        "branch_manager",
+        "compliance_officer",
+        "executive",
+        "content_manager",
+    }
+    if account_type not in allowed_roles:
+        raise HTTPException(404, "No profile photo uploaded")
+    return render_profile_photo(account_type, account_id)
+
+
+def render_profile_photo(role, account_id):
     image = profile_photo_record(role, account_id)
     if not image:
         raise HTTPException(404, "No profile photo uploaded")

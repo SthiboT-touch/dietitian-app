@@ -33,6 +33,10 @@ def isolated(monkeypatch):
     state.client_sessions_db.update({"patient": "private-patient-id", "stranger": "someone-else"})
     state.dietitian_sessions_db.update({"doctor": "private-doctor-id", "other-doctor": "different-doctor"})
     state.admin_sessions_db["admin"] = "admin-account"
+    # Clinical sessions represent practitioners with a current reviewed card.
+    for clinician_id in state.dietitian_sessions_db.values():
+        clinician = state.users_db.setdefault(clinician_id, {"id": clinician_id, "type": "dietitian"})
+        clinician.update(status="APPROVED", hpcsa_verified_until="2099-03-31")
     yield
     for store in stores:
         store.clear()
@@ -161,10 +165,13 @@ def test_postgres_link_backfill_locks_existing_row_and_reuses_its_link(monkeypat
     statements = []
     class Cursor:
         def execute(self, sql, params):
+            self.sql = sql
             statements.append((sql, params))
             if sql.startswith("UPDATE appointment SET meeting_link"):
                 row["meeting_link"] = params[0]
         def fetchone(self):
+            if "FROM dietitian WHERE dietitian_id" in self.sql:
+                return {"status": "APPROVED", "hpcsa_verified_until": "2099-03-31"}
             return dict(row)
     @contextmanager
     def cursor():
@@ -184,10 +191,13 @@ def test_postgres_approval_stores_generated_link_with_status_change(monkeypatch)
     statements = []
     class Cursor:
         def execute(self, sql, params):
+            self.sql = sql
             statements.append((sql, params))
             if "SET status = %s, meeting_link = %s" in sql:
                 row["status"], row["meeting_link"] = params[:2]
         def fetchone(self):
+            if "FROM dietitian WHERE dietitian_id" in self.sql:
+                return {"status": "APPROVED", "hpcsa_verified_until": "2099-03-31"}
             return {**row, "appointment_date": datetime.now() + timedelta(days=1)}
     @contextmanager
     def cursor():

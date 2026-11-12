@@ -20,9 +20,15 @@ client = TestClient(app.app)
 def in_memory_mode(monkeypatch):
     monkeypatch.setattr(config, "DATABASE_ENABLED", False)
     state.clients_db.clear()
+    state.users_db["C1"] = {
+        "id": "C1",
+        "type": "client",
+        "maternal_care_enabled": True,
+    }
     state.client_sessions_db["lactation-client-token"] = "C1"
     yield
     state.clients_db.clear()
+    state.users_db.pop("C1", None)
     state.client_sessions_db.pop("lactation-client-token", None)
 
 

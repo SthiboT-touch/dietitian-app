@@ -28,6 +28,10 @@ def setup(monkeypatch):
     state.clients_db["c"] = {"progress": []}
     state.client_sessions_db.update({"patient": "c", "stranger": "other"})
     state.dietitian_sessions_db.update({"clinician": "d", "unassigned": "x"})
+    # Clinical sessions represent practitioners with a current reviewed card.
+    for clinician_id in state.dietitian_sessions_db.values():
+        clinician = state.users_db.setdefault(clinician_id, {"id": clinician_id, "type": "dietitian"})
+        clinician.update(status="APPROVED", hpcsa_verified_until="2099-03-31")
     yield
     for store in stores:
         store.clear()

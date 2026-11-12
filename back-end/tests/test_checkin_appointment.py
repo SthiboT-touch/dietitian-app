@@ -30,6 +30,10 @@ def setup(monkeypatch):
     state.users_db["d"] = {"branch_id": "b"}
     state.staff_sessions_db["reception"] = "staff"
     state.staff_accounts_db["staff"] = {"role": "reception", "is_active": True, "branch_id": "b"}
+    # Clinical sessions represent practitioners with a current reviewed card.
+    for clinician_id in state.dietitian_sessions_db.values():
+        clinician = state.users_db.setdefault(clinician_id, {"id": clinician_id, "type": "dietitian"})
+        clinician.update(status="APPROVED", hpcsa_verified_until="2099-03-31")
     yield
     for store in stores:
         store.clear()
