@@ -82,6 +82,18 @@ jobs:
             docker compose run --rm --no-deps api python migrations/apply_020_care_workflow.py
             docker compose run --rm --no-deps api python migrations/apply_021_account_profile_photos.py
             docker compose run --rm --no-deps api python migrations/apply_024_hpcsa_verification.py
+            for container_id in $(docker ps --filter publish=80 --format '{{.ID}}'); do
+              compose_project=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$container_id")
+              compose_service=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$container_id")
+              if [[ "$compose_project" == dietitian-app* && "$compose_service" == "frontend" ]]; then
+                echo "Removing stale NutriCare frontend container $container_id from project $compose_project to release port 80."
+                docker rm --force "$container_id"
+              else
+                container_name=$(docker inspect --format '{{.Name}}' "$container_id")
+                echo "Cannot deploy: port 80 is occupied by unrelated container $container_name (project: ${compose_project:-unknown}, service: ${compose_service:-unknown})." >&2
+                exit 1
+              fi
+            done
             docker compose up -d --build
             for attempt in $(seq 1 30); do
               if docker compose exec -T api python -c 'import urllib.request,json; h=json.load(urllib.request.urlopen("http://localhost:8000/health")); assert h["database"] == "online"'; then
