@@ -35,6 +35,19 @@ ACTIVE_APPOINTMENT_STATUSES = ("PENDING", "CONFIRMED", "SCHEDULED")
 logger = logging.getLogger(__name__)
 
 
+def _ensure_goal_status_column() -> None:
+    if not config.DATABASE_ENABLED:
+        return
+    with database.cursor() as cursor:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_name = 'nutrition_goal' AND column_name = 'status'"
+        )
+        if cursor.fetchone() is None:
+            cursor.execute(
+                "ALTER TABLE nutrition_goal ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'REACHED'))"
+            )
+
+
 def _send_appointment_notification(appointment, recipient):
     if not recipient or not recipient.get("email"):
         logger.error(
@@ -762,6 +775,7 @@ def set_goal(data: GoalCreate, authorization: Optional[str] = Header(default=Non
     authorize_client_access(data.client_id, identity)
     data.appointment_id = completed_consultation(data.client_id, identity[1], data.appointment_id)
     if config.DATABASE_ENABLED:
+        _ensure_goal_status_column()
         with database.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO nutrition_goal (client_id, goal_type, target_value, appointment_id, status) VALUES (%s, %s, %s, %s, %s) "
@@ -786,6 +800,7 @@ def update_goal_status(
 ):
     role, account_id = current_identity(authorization)
     if config.DATABASE_ENABLED:
+        _ensure_goal_status_column()
         with database.cursor() as cursor:
             cursor.execute(
                 "SELECT client_id FROM nutrition_goal WHERE goal_id = %s",
@@ -816,6 +831,7 @@ def update_goal_status(
 def get_goals(client_id: str, authorization: Optional[str] = Header(default=None)):
     authorize_client_access(client_id, current_identity(authorization))
     if config.DATABASE_ENABLED:
+        _ensure_goal_status_column()
         with database.cursor() as cursor:
             cursor.execute(
                 "SELECT goal_id, appointment_id, goal_type AS target_metric, current_value, target_value, target_date, COALESCE(status, 'ACTIVE') AS status "
