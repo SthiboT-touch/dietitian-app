@@ -45,6 +45,20 @@ need `python back-end/migrations/apply_016_guest_support.py` after migration 015
 
 ## Run the nutrition AI
 
+AI responses use a bounded, process-local cache (five minutes, up to 128 entries
+by default). Exact repeats can reuse successful chat answers and generated plan
+drafts. Keys include the authenticated user/patient scope, effective conversation,
+patient records and clinician guidance, retrieved references, and model settings.
+Changing these inputs generates a fresh answer; follow-up questions with changed
+history are not treated as repeats. Access and assignment checks still run before
+cache lookup. Live food-catalog tool results and failed responses are not cached.
+Plan drafts still create separate recommendations requiring review.
+
+Set `AI_CACHE_TTL_SECONDS` and `AI_CACHE_MAX_ENTRIES` in `.env` to adjust caching;
+set either to `0` to disable it. Compose forwards both settings to the API.
+Cached responses stay in API process memory, are not written to disk, and are
+cleared on restart. Separate API workers keep separate caches.
+
 In a dietitian's **Nutrition Coach** workspace, choose an assigned patient, add
 clinical guidance or restrictions, and select **Activate patient assistant**.
 Questions then use that patient's recorded allergies, conditions, measurements,
