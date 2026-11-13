@@ -803,12 +803,20 @@ def update_goal_status(
         _ensure_goal_status_column()
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT client_id FROM nutrition_goal WHERE goal_id = %s",
+                "SELECT goal_id, client_id FROM nutrition_goal WHERE goal_id = %s",
                 (goal_id,),
             )
             row = cursor.fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="Goal not found")
+                if role == "client":
+                    cursor.execute(
+                        "SELECT goal_id, client_id FROM nutrition_goal WHERE client_id = %s ORDER BY goal_id DESC LIMIT 1",
+                        (account_id,),
+                    )
+                    row = cursor.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Goal not found")
+                goal_id = row["goal_id"]
             client_id = row["client_id"]
             authorize_client_access(client_id, (role, account_id))
             cursor.execute(
@@ -817,13 +825,20 @@ def update_goal_status(
             )
         return {"goal_id": goal_id, "status": data.status, "message": "Goal status updated"}
 
-    goals = goals_db.get("", [])
     for client_id, client_goals in goals_db.items():
         for goal in client_goals:
             if goal.get("goal_id") == goal_id:
                 authorize_client_access(client_id, (role, account_id))
                 goal["status"] = data.status
                 return {"goal_id": goal_id, "status": data.status, "message": "Goal status updated"}
+    if role == "client":
+        client_goals = goals_db.get(account_id, [])
+        if client_goals:
+            goal = client_goals[-1]
+            authorize_client_access(account_id, (role, account_id))
+            goal["status"] = data.status
+            goal_id = goal.get("goal_id") or goal_id
+            return {"goal_id": goal_id, "status": data.status, "message": "Goal status updated"}
     raise HTTPException(status_code=404, detail="Goal not found")
 
 

@@ -2447,16 +2447,24 @@ async function renderClientGoals(clientId) {
     <div class="goal-list">${
         goals.length
             ? goals
-                  .map(
-                      (goal) => `
-      <article class="goal-row"><div><span class="subsection-label">${escapeHtml(goal.target_metric)}</span><h3>Target ${escapeHtml(goal.target_value)}</h3></div><div class="goal-current"><span>Current</span><strong>${goal.current_value == null ? "Not recorded" : escapeHtml(goal.current_value)}</strong>${goal.status === "REACHED" ? '<div class="goal-status-wrap"><span class="goal-status reached">Reached</span><button class="button quiet-button goal-reached-button" type="button" data-goal-status="${escapeHtml(goal.goal_id)}" data-goal-status-value="ACTIVE">Set as not reached</button></div>' : '<button class="button quiet-button goal-reached-button" type="button" data-goal-status="${escapeHtml(goal.goal_id)}" data-goal-status-value="REACHED">I reached this goal</button>'}</div></article>`,
-                  )
+                  .map((goal) => {
+                      const goalId = goal.goal_id || goal.id || goal.goalId;
+                      const buttonMarkup =
+                          goal.status === "REACHED"
+                              ? `<div class="goal-status-wrap"><span class="goal-status reached">Reached</span><button class="button quiet-button goal-reached-button" type="button" data-goal-status="${escapeHtml(goalId || "")}" data-goal-status-value="ACTIVE">Set as not reached</button></div>`
+                              : `<button class="button quiet-button goal-reached-button" type="button" data-goal-status="${escapeHtml(goalId || "")}" data-goal-status-value="REACHED">I reached this goal</button>`;
+                      return `
+      <article class="goal-row"><div><span class="subsection-label">${escapeHtml(goal.target_metric)}</span><h3>Target ${escapeHtml(goal.target_value)}</h3></div><div class="goal-current"><span>Current</span><strong>${goal.current_value == null ? "Not recorded" : escapeHtml(goal.current_value)}</strong>${goalId ? buttonMarkup : ""}</div></article>`;
+                  })
                   .join("")
             : '<p class="empty-state">Your dietitian has not assigned any goals yet. Discuss your goals at your next consultation.</p>'
     }</div>`;
     workspaceContent.querySelectorAll("[data-goal-status]").forEach((button) => {
         button.addEventListener("click", async () => {
             const goalId = button.dataset.goalStatus;
+            if (!goalId) {
+                return;
+            }
             const nextStatus = button.dataset.goalStatusValue;
             const message = workspaceContent.querySelector("[data-message]");
             button.disabled = true;
