@@ -115,6 +115,12 @@ For running the API outside Compose, set `OLLAMA_BASE_URL` (default `http://loca
 
 ## Admin approvals
 
+Branch managers can inspect, approve, and reject dietitians in their assigned branch.
+Other branches and system administration remain restricted. Decisions record the
+reviewing manager in the approval history. Before using this with an existing
+PostgreSQL database, run `python back-end/migrations/apply_024_branch_manager_approvals.py`.
+The deployment workflow applies this migration automatically.
+
 Dietitian registrations use the `PENDING` / `APPROVED` / `REJECTED` workflow. Dietitians add a branch and submit PDF, JPEG, or PNG verification documents up to 10 MB from the **Verification documents** screen. Administrators can preview submitted documents before approving or rejecting a registration; rejection requires a reason, and decisions are recorded in `approval_log`. Branch managers can inspect dietitians and documents belonging to their assigned branch but cannot approve registrations. Documents remain private and are served through authenticated endpoints.
 
 When the database has no administrator, the **Admin setup** tab appears on the local sign-in page. Create the first admin from this computer; the setup endpoint is loopback-only and becomes unavailable after that account is created. Admin and dietitian document sessions are held in process memory, so sign in again after an API restart.

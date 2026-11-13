@@ -291,9 +291,70 @@ def test_branch_manager_can_inspect_only_own_branch_dietitians():
     assert api.get(
         "/api/v1/admin/dietitian-documents/other-card", headers=headers
     ).status_code == 404
-    assert api.get("/api/v1/admin/approvals/pending", headers=headers).status_code == 401
+    pending = api.get("/api/v1/admin/approvals/pending", headers=headers)
+    assert pending.status_code == 200
+    assert [item["dietitian_id"] for item in pending.json()] == ["diet-1"]
     assert api.get("/api/v1/admin/branches", headers=headers).status_code == 401
     assert api.get("/api/v1/branch-manager/overview", headers=headers).json()["dietitians"] == 1
+
+    for decision in ("APPROVED", "REJECTED"):
+        blocked = api.post("/api/v1/admin/approvals", headers=headers, json={
+            "dietitian_id": "diet-2", "status": decision, "notes": "Reviewed",
+        })
+        assert blocked.status_code == 404
+    assert state.users_db["diet-2"]["status"] == "PENDING"
+    assert not state.approval_log_db
+    # Existing approval safeguards apply to managers too.
+    assert api.post("/api/v1/admin/approvals", headers=headers, json={
+        "dietitian_id": "diet-1", "status": "REJECTED",
+    }).status_code == 422
+    assert api.post("/api/v1/admin/approvals", headers=headers, json={
+        "dietitian_id": "diet-1", "status": "APPROVED",
+    }).status_code == 409
+    state.branches_db["branch-1"]["address"] = "123 Main Street"
+    for decision in ("APPROVED", "REJECTED"):
+        result = api.post("/api/v1/admin/approvals", headers=headers, json={
+            "dietitian_id": "diet-1", "status": decision, "notes": "Reviewed evidence",
+        })
+        assert result.status_code == 200, result.text
+        assert state.users_db["diet-1"]["status"] == decision
+        assert state.approval_log_db[-1]["staff_id"]
+        assert state.approval_log_db[-1]["admin_id"] is None
+
+
+@pytest.mark.parametrize("same_branch", [True, False])
+def test_postgres_manager_review_checks_branch_before_writing(monkeypatch, same_branch):
+    from routers import auth_admin
+    from schemas import AdminApproval
+    from fastapi import HTTPException
+
+    statements = []
+
+    class Cursor:
+        def execute(self, query, params):
+            statements.append((query, params))
+
+        def fetchone(self):
+            return {"dietitian_id": "diet-1"} if same_branch else None
+
+    @contextmanager
+    def cursor():
+        yield Cursor()
+
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+    monkeypatch.setattr(auth_admin, "branch_id_for_manager", lambda _: "branch-1")
+    monkeypatch.setattr(auth_admin.database, "cursor", cursor)
+    data = AdminApproval(dietitian_id="diet-1", status="REJECTED", notes="Evidence missing")
+    if same_branch:
+        auth_admin.review_dietitian(data, ("branch_manager", "manager-1"))
+        assert statements[-1][1] == (None, "manager-1", "diet-1", "REJECTED", "Evidence missing")
+    else:
+        with pytest.raises(HTTPException) as error:
+            auth_admin.review_dietitian(data, ("branch_manager", "manager-1"))
+        assert error.value.status_code == 404
+        assert len(statements) == 1
+    assert "AND branch_id = %s FOR UPDATE" in statements[0][0]
+    assert statements[0][1] == ("diet-1", "branch-1")
 
 
 def test_postgres_branch_manager_dietitian_query_is_branch_scoped(monkeypatch):

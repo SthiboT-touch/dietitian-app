@@ -4060,8 +4060,8 @@ async function renderAdminDietitianInspection(dietitianId) {
     <section class="content-panel"><h2>Submitted documents</h2>
     ${item.documents.length ? item.documents.map((document) => `<div class="admin-document-row"><div><strong>${escapeHtml(document.file_name)}</strong><p>${escapeHtml(document.content_type)} · ${new Date(document.uploaded_at).toLocaleDateString()}</p></div><button class="button quiet-button" data-document-id="${escapeHtml(document.document_id)}" data-file-name="${escapeHtml(document.file_name)}" type="button">View document</button></div>`).join("") : '<p class="empty-state">No verification documents submitted yet.</p>'}
     </section><section class="content-panel"><h2>Review history</h2>
-    ${renderAdminTable(["Date", "Administrator", "Decision", "Notes"], item.reviews.map((review) => [review.action_date, review.admin_id, review.action, review.comments]), "No review decisions recorded yet.")}</section>
-    <div class="review-actions"><button class="button quiet-button" data-go="admin-dietitians" type="button">${isBranchManager ? "Branch dietitians" : "All dietitians"}</button>${isBranchManager ? "" : '<button class="button button-primary" data-inspection-review type="button">Open registration review</button>'}</div>`;
+    ${renderAdminTable(["Date", "Reviewer", "Decision", "Notes"], item.reviews.map((review) => [review.action_date, review.staff_id || review.admin_id, review.action, review.comments]), "No review decisions recorded yet.")}</section>
+    <div class="review-actions"><button class="button quiet-button" data-go="admin-dietitians" type="button">${isBranchManager ? "Branch dietitians" : "All dietitians"}</button><button class="button button-primary" data-inspection-review type="button">Open registration review</button></div>`;
     bindGoButtons();
     workspaceContent.querySelectorAll("[data-document-id]").forEach((button) => button.addEventListener("click", viewDietitianDocument));
     workspaceContent.querySelector("[data-inspection-review]")?.addEventListener("click", async () => {
@@ -4317,7 +4317,7 @@ async function renderAdminApprovals(dietitianId = null) {
 
 async function viewDietitianDocument(event) {
     const button = event.currentTarget;
-    const token = sessionStorage.getItem(adminTokenKey);
+    const token = sessionStorage.getItem(adminTokenKey) || sessionStorage.getItem(staffTokenKey);
     button.disabled = true;
     try {
         const response = await fetch(

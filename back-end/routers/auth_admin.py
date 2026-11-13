@@ -1075,7 +1075,8 @@ def download_dietitian_document(
 
 
 @router.get("/api/v1/admin/approvals/pending", tags=["1. Auth & Admin"])
-def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
+def get_pending_dietitian_approvals(identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -1087,7 +1088,9 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
                 "JOIN branch b ON b.branch_id = d.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
                 "WHERE d.status = 'PENDING' "
-                "ORDER BY LOWER(d.last_name), LOWER(d.first_name)"
+                + ("AND d.branch_id = %s " if branch_id else "")
+                + "ORDER BY LOWER(d.last_name), LOWER(d.first_name)",
+                (branch_id,) if branch_id else None,
             )
             dietitians = cursor.fetchall()
             pending = []
@@ -1138,11 +1141,15 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
         }
         for user in users_db.values()
         if user.get("type") == "dietitian" and user.get("status") == "PENDING"
+        and (not branch_id or str(user.get("branch_id")) == branch_id)
     ]
 
 
 @router.post("/api/v1/admin/approvals", tags=["1. Auth & Admin"])
-def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)):
+def review_dietitian(data: AdminApproval, identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
+    admin_id = identity[1] if identity[0] == "admin" else None
+    staff_id = identity[1] if identity[0] == "branch_manager" else None
     notes = data.notes.strip() if data.notes else ""
     if data.status == "REJECTED" and not notes:
         raise HTTPException(
@@ -1150,6 +1157,14 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
         )
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+            if branch_id:
+                cursor.execute(
+                    "SELECT dietitian_id FROM dietitian WHERE dietitian_id = %s "
+                    "AND branch_id = %s FOR UPDATE",
+                    (data.dietitian_id, branch_id),
+                )
+                if not cursor.fetchone():
+                    raise HTTPException(status_code=404, detail="Dietitian not found")
             if data.status == "APPROVED":
                 cursor.execute(
                     "SELECT b.name, b.address FROM dietitian d "
@@ -1181,12 +1196,14 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
             if not cursor.fetchone():
                 raise HTTPException(status_code=404, detail="Dietitian not found")
             cursor.execute(
-                "INSERT INTO approval_log (admin_id, entity_type, entity_id, action, comments) "
-                "VALUES (%s, 'DIETITIAN', %s, %s, %s)",
-                (admin_id, data.dietitian_id, data.status, notes or None),
+                "INSERT INTO approval_log (admin_id, staff_id, entity_type, entity_id, action, comments) "
+                "VALUES (%s, %s, 'DIETITIAN', %s, %s, %s)",
+                (admin_id, staff_id, data.dietitian_id, data.status, notes or None),
             )
         return {"message": f"Dietitian status updated to {data.status}"}
     if data.dietitian_id not in users_db or users_db[data.dietitian_id].get("type") != "dietitian":
+        raise HTTPException(status_code=404, detail="Dietitian not found")
+    if branch_id and str(users_db[data.dietitian_id].get("branch_id")) != branch_id:
         raise HTTPException(status_code=404, detail="Dietitian not found")
     if data.status == "APPROVED":
         branch = branches_db.get(users_db[data.dietitian_id].get("branch_id"))
@@ -1210,6 +1227,7 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
     approval_log_db.append(
         {
             "admin_id": admin_id,
+            "staff_id": staff_id,
             "entity_type": "DIETITIAN",
             "entity_id": data.dietitian_id,
             "action": data.status,
@@ -1417,7 +1435,7 @@ def inspect_admin_dietitian(
             )
             documents = [dict(row) for row in cursor.fetchall()]
             cursor.execute(
-                "SELECT admin_id, action, comments, action_date FROM approval_log "
+                "SELECT admin_id, staff_id, action, comments, action_date FROM approval_log "
                 "WHERE entity_type = 'DIETITIAN' AND entity_id = %s ORDER BY action_date DESC",
                 (dietitian_id,),
             )
@@ -1504,10 +1522,11 @@ def list_admin_audit_logs(admin_id: str = Depends(require_admin)):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT al.approval_log_id AS log_id, al.admin_id, "
-                "TRIM(a.first_name || ' ' || a.last_name) AS admin_name, al.entity_type, "
+                "SELECT al.approval_log_id AS log_id, al.admin_id, al.staff_id, "
+                "COALESCE(TRIM(a.first_name || ' ' || a.last_name), s.full_name) AS admin_name, al.entity_type, "
                 "al.entity_id, al.action, al.comments, al.action_date "
-                "FROM approval_log al JOIN admin a ON a.admin_id = al.admin_id "
+                "FROM approval_log al LEFT JOIN admin a ON a.admin_id = al.admin_id "
+                "LEFT JOIN staff_account s ON s.staff_id = al.staff_id "
                 "ORDER BY al.action_date DESC LIMIT 500"
             )
             return [
