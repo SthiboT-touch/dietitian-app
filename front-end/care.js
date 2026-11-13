@@ -22,8 +22,8 @@ async function mountMedicalHistoryForm(target, clientId) {
     const history = events.filter(event => event.kind === "HISTORY").at(-1);
     const panel = document.createElement("section");
     panel.className = "content-panel care-workflow";
-    panel.innerHTML = `${clinician ? `<h2>Medical history and care</h2>` : ""}<div data-care-message role="status" aria-live="polite"></div>
-    ${clinician ? `<p class="appointment-note">${history ? `Last history update: ${escapeHtml(new Date(history.created_at).toLocaleString())}` : "No detailed medical history submitted yet."}</p>` : ""}
+        panel.innerHTML = `<h2>Medical history and care</h2><div data-care-message role="status" aria-live="polite"></div>
+            <p class="appointment-note">${history ? `Last history update: ${escapeHtml(new Date(history.created_at).toLocaleString())}` : "No detailed medical history submitted yet."}</p>
       <form data-history class="form-grid">${Object.entries(medicalHistoryFields).map(([key, label]) => `<div class="form-field"><label for="care-${key}">${label}</label><textarea class="text-input" id="care-${key}" name="${key}" maxlength="4000">${escapeHtml(history?.payload[key] || "")}</textarea></div>`).join("")}<div class="form-actions"><button class="button button-primary">Save medical history</button></div></form>`;
     if (!target.isConnected || target.firstElementChild !== anchor) return;
     target.append(panel);
@@ -77,9 +77,9 @@ async function mountCarePanel(target, clientId, clinician) {
     const history = events.filter(e => e.kind === "HISTORY").at(-1);
     const panel = document.createElement("section");
     panel.className = "content-panel care-workflow";
-    panel.innerHTML = `<h2>Medical history and care</h2><div data-care-message role="status" aria-live="polite"></div>
+    panel.innerHTML = `${clinician ? `<h2>Medical history and care</h2>` : ""}<div data-care-message role="status" aria-live="polite"></div>
       ${clinician ? `<section><h3>Consultation</h3><p>Complete the consultation before setting goals, assigning plans or sharing recommendations.</p>${appointments.filter(a => ["CONFIRMED", "SCHEDULED"].includes(a.status)).map(a => `<p>${escapeHtml(new Date(a.appointment_date).toLocaleString())} <button type="button" class="button quiet-button" data-complete-consultation="${escapeHtml(a.appointment_id)}" ${new Date(a.appointment_date).getTime() > Date.now() ? "disabled" : ""}>Mark consultation completed</button></p>`).join("")}<div class="form-field"><label>Care relates to completed appointment<select class="text-input" data-care-appointment required><option value="">Choose a completed consultation</option>${consultations.map(a => `<option value="${escapeHtml(a.appointment_id)}">${escapeHtml(new Date(a.appointment_date).toLocaleString())} · ${escapeHtml(a.appointment_id)}</option>`).join("")}</select></label></div>${consultations.length ? "" : '<p class="notice">No completed consultation yet. Care creation is unavailable until the appointment is completed.</p>'}</section>` : ""}
-      <p class="appointment-note">${history ? `Last history update: ${escapeHtml(new Date(history.created_at).toLocaleString())}` : "No detailed medical history submitted yet."}</p>
+    ${clinician ? `<p class="appointment-note">${history ? `Last history update: ${escapeHtml(new Date(history.created_at).toLocaleString())}` : "No detailed medical history submitted yet."}</p>` : ""}
     ${clinician ? `<dl class="care-history">${Object.entries(medicalHistoryFields).map(([key, label]) => `<div><dt>${label}</dt><dd>${escapeHtml(history?.payload[key] || "Not provided")}</dd></div>`).join("")}</dl>` : ""}
       <h3>Progress review</h3><p>Each decision applies to the measurements reviewed. Updated measurements need a new review.</p>
       <div class="care-progress">${progress.length ? progress.map(entry => {
