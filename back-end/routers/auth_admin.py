@@ -54,6 +54,7 @@ from schemas import (
     AdminCreate,
     AdminSetup,
     AdminApproval,
+    DietitianStatusUpdate,
     BranchCreate,
     DietitianBranchCreate,
 )
@@ -619,6 +620,8 @@ def login(data: LoginRequest):
     ):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user or not verify_password(data.password, user.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if user.get("type") == "dietitian" and user.get("status") == "SUSPENDED":
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if (
         email_verification_enabled()
@@ -1447,6 +1450,88 @@ def inspect_admin_dietitian(
         reviews = [dict(entry) for entry in reversed(approval_log_db)
                    if entry.get("entity_type") == "DIETITIAN" and entry.get("entity_id") == dietitian_id]
     return {**record, "documents": documents, "reviews": reviews}
+
+
+@router.patch("/api/v1/admin/dietitians/{dietitian_id}/status", tags=["1. Auth & Admin"])
+def update_admin_dietitian_status(
+    dietitian_id: str,
+    data: DietitianStatusUpdate,
+    identity=Depends(require_admin_or_branch_manager),
+):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
+    admin_id = identity[1] if identity[0] == "admin" else None
+    staff_id = identity[1] if identity[0] == "branch_manager" else None
+    notes = data.notes.strip() if data.notes else ""
+    if data.status == "SUSPENDED" and not notes:
+        raise HTTPException(status_code=422, detail="A reason is required to suspend a dietitian")
+
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT branch_id, status FROM dietitian "
+                "WHERE dietitian_id = %s FOR UPDATE",
+                (dietitian_id,),
+            )
+            dietitian = cursor.fetchone()
+            if not dietitian or (
+                branch_id and str(dietitian["branch_id"]) != branch_id
+            ):
+                raise HTTPException(status_code=404, detail="Dietitian not found")
+            current_status = dietitian["status"]
+            if (current_status, data.status) not in {
+                ("APPROVED", "SUSPENDED"),
+                ("SUSPENDED", "APPROVED"),
+            }:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Only approved dietitians can be suspended, and only suspended dietitians can be restored",
+                )
+            cursor.execute(
+                "UPDATE dietitian SET status = %s WHERE dietitian_id = %s",
+                (data.status, dietitian_id),
+            )
+            cursor.execute(
+                "INSERT INTO approval_log "
+                "(admin_id, staff_id, entity_type, entity_id, action, comments) "
+                "VALUES (%s, %s, 'DIETITIAN', %s, %s, %s)",
+                (admin_id, staff_id, dietitian_id, data.status, notes or None),
+            )
+    else:
+        dietitian = users_db.get(dietitian_id)
+        if (
+            not dietitian
+            or dietitian.get("type") != "dietitian"
+            or (branch_id and str(dietitian.get("branch_id")) != branch_id)
+        ):
+            raise HTTPException(status_code=404, detail="Dietitian not found")
+        current_status = dietitian.get("status", "APPROVED")
+        if (current_status, data.status) not in {
+            ("APPROVED", "SUSPENDED"),
+            ("SUSPENDED", "APPROVED"),
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail="Only approved dietitians can be suspended, and only suspended dietitians can be restored",
+            )
+        dietitian["status"] = data.status
+        approval_log_db.append(
+            {
+                "admin_id": admin_id,
+                "staff_id": staff_id,
+                "entity_type": "DIETITIAN",
+                "entity_id": dietitian_id,
+                "action": data.status,
+                "comments": notes or None,
+                "action_date": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+    if data.status == "SUSPENDED":
+        for token, account_id in list(dietitian_sessions_db.items()):
+            if str(account_id) == dietitian_id:
+                dietitian_sessions_db.pop(token, None)
+
+    return {"message": f"Dietitian status updated to {data.status}"}
 
 
 @router.get("/api/v1/admin/businesses", tags=["1. Auth & Admin"])

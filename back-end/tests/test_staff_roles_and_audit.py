@@ -318,8 +318,62 @@ def test_branch_manager_can_inspect_only_own_branch_dietitians():
         })
         assert result.status_code == 200, result.text
         assert state.users_db["diet-1"]["status"] == decision
-        assert state.approval_log_db[-1]["staff_id"]
-        assert state.approval_log_db[-1]["admin_id"] is None
+    assert state.approval_log_db[-1]["staff_id"]
+    assert state.approval_log_db[-1]["admin_id"] is None
+
+
+def test_branch_manager_can_suspend_and_restore_only_own_approved_dietitians():
+    assert create_staff(new_staff(role="branch_manager", email="manager@example.test")).status_code == 201
+    token = login_staff("manager@example.test").json()["access_token"]
+    state.branches_db["branch-2"] = {"branch_id": "branch-2", "name": "Other Branch"}
+    state.users_db.update(
+        {
+            "diet-1": {
+                "id": "diet-1", "type": "dietitian", "full_name": "Branch Dietitian",
+                "email": "branch@example.test", "password_hash": hash_password("dietitian-password"),
+                "status": "APPROVED", "branch_id": "branch-1", "email_verified": True,
+            },
+            "diet-2": {
+                "id": "diet-2", "type": "dietitian", "full_name": "Other Dietitian",
+                "email": "other@example.test", "password_hash": hash_password("dietitian-password"),
+                "status": "APPROVED", "branch_id": "branch-2", "email_verified": True,
+            },
+        }
+    )
+    state.dietitian_sessions_db["active-dietitian-session"] = "diet-1"
+    headers = bearer(token)
+
+    url = "/api/v1/admin/dietitians/diet-1/status"
+    assert api.patch(url, headers=headers, json={"status": "SUSPENDED"}).status_code == 422
+    assert api.patch(
+        "/api/v1/admin/dietitians/diet-2/status",
+        headers=headers,
+        json={"status": "SUSPENDED", "notes": "Outside branch"},
+    ).status_code == 404
+
+    suspended = api.patch(
+        url, headers=headers,
+        json={"status": "SUSPENDED", "notes": "No longer practising at this branch"},
+    )
+    assert suspended.status_code == 200, suspended.text
+    assert state.users_db["diet-1"]["status"] == "SUSPENDED"
+    assert "active-dietitian-session" not in state.dietitian_sessions_db
+    assert api.post(
+        "/api/v1/auth/login",
+        json={"email": "branch@example.test", "password": "dietitian-password"},
+    ).status_code == 401
+
+    restored = api.patch(url, headers=headers, json={"status": "APPROVED"})
+    assert restored.status_code == 200, restored.text
+    assert state.users_db["diet-1"]["status"] == "APPROVED"
+    assert api.post(
+        "/api/v1/auth/login",
+        json={"email": "branch@example.test", "password": "dietitian-password"},
+    ).status_code == 200
+    assert api.patch(url, headers=headers, json={"status": "SUSPENDED", "notes": "Second attempt"}).status_code == 200
+    assert state.approval_log_db[-2]["staff_id"]
+    assert state.approval_log_db[-2]["action"] == "APPROVED"
+    assert state.approval_log_db[-1]["action"] == "SUSPENDED"
 
 
 @pytest.mark.parametrize("same_branch", [True, False])

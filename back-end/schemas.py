@@ -141,6 +141,11 @@ class AdminApproval(BaseModel):
     notes: Optional[str] = None
 
 
+class DietitianStatusUpdate(BaseModel):
+    status: Literal["APPROVED", "SUSPENDED"]
+    notes: Optional[str] = Field(default=None, max_length=1000)
+
+
 class BranchCreate(BaseModel):
     name: str
     address: str

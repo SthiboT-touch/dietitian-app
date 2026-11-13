@@ -339,6 +339,9 @@ function showWorkspace(user, initialView = "overview") {
     document.querySelectorAll("[data-manager-dietitian-only]").forEach((item) => {
         item.hidden = !isAdmin && user.type !== "branch_manager";
     });
+    document.querySelectorAll("[data-manager-approval-only]").forEach((item) => {
+        item.hidden = !isAdmin && user.type !== "branch_manager";
+    });
     // Keep the Dietitian sidebar limited to the six requested menu items.
 if (isDietitian) {
     const nav = document.querySelector(".side-nav");
@@ -3913,9 +3916,10 @@ async function renderStaffDashboard() {
           <section class="admin-stat"><span>Branch managers</span><strong>${Number(overview.branch_managers)}</strong></section>
         </div>
         <section class="content-panel"><h2 class="compact-heading">Branch operations</h2>
-          <p>Manage dietitian records and patient onboarding at your assigned branch. Dietitian registration approvals and system administration remain restricted.</p>
+          <p>Manage dietitian records and registration approvals for your assigned branch. Organization-wide administration and other branches remain restricted.</p>
           <div class="quick-grid">
             <button class="quick-link" data-go="admin-dietitians" type="button"><strong>Manage branch dietitians</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="admin-approvals" type="button"><strong>Review branch dietitian approvals</strong><span aria-hidden="true">&#8599;</span></button>
             <button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong><span aria-hidden="true">&#8599;</span></button>
           </div>
         </section>`;
@@ -4093,7 +4097,8 @@ function adminDietitianInspectionCards(dietitians) {
         <p>${escapeHtml(item.email)} · License ${escapeHtml(item.license_number)}</p>
         <p>${escapeHtml(item.business_name || item.practice_name || "Practice not provided")} · ${escapeHtml(item.branch_name || "Branch not provided")} · ${escapeHtml(item.branch_address || "Location not provided")}</p>
         <p>${escapeHtml(item.status)}${item.documents ? ` · ${item.documents.length} document(s) submitted` : ""}</p></div>
-        <button class="button button-primary button-small" data-inspect-dietitian="${escapeHtml(item.dietitian_id)}" type="button">Inspect dietitian</button>
+        <div class="review-actions"><button class="button button-primary button-small" data-inspect-dietitian="${escapeHtml(item.dietitian_id)}" type="button">Inspect dietitian</button>
+        ${["APPROVED", "SUSPENDED"].includes(item.status) ? `<button class="button button-small ${item.status === "APPROVED" ? "button-reject" : "button-approve"}" data-dietitian-status="${item.status === "APPROVED" ? "SUSPENDED" : "APPROVED"}" data-dietitian-id="${escapeHtml(item.dietitian_id)}" data-dietitian-name="${escapeHtml(item.full_name)}" type="button">${item.status === "APPROVED" ? "Suspend" : "Restore"}</button>` : ""}</div>
         </div></article>`).join("")}</div>`;
 }
 
@@ -4104,6 +4109,41 @@ function bindAdminDietitianInspection() {
             button.disabled = true;
             try {
                 await renderAdminDietitianInspection(button.dataset.inspectDietitian);
+            } catch (error) {
+                button.disabled = false;
+                showWorkspaceMessage(error.message, true);
+            }
+        });
+    });
+    workspaceContent.querySelectorAll("[data-dietitian-status]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const suspending = button.dataset.dietitianStatus === "SUSPENDED";
+            if (
+                !window.confirm(
+                    suspending
+                        ? `Suspend ${button.dataset.dietitianName}? They will lose access, but their records will be retained.`
+                        : `Restore ${button.dataset.dietitianName} to approved status?`,
+                )
+            ) return;
+            const notes = suspending
+                ? window.prompt("Enter a reason for suspending this dietitian:")?.trim()
+                : "";
+            if (suspending && !notes) return;
+            button.disabled = true;
+            try {
+                await request(
+                    `/api/v1/admin/dietitians/${encodeURIComponent(button.dataset.dietitianId)}/status`,
+                    {
+                        method: "PATCH",
+                        body: JSON.stringify({ status: button.dataset.dietitianStatus, notes }),
+                    },
+                );
+                await renderAdminDietitians();
+                showWorkspaceMessage(
+                    suspending
+                        ? "Dietitian suspended. Their records have been retained."
+                        : "Dietitian restored to approved status.",
+                );
             } catch (error) {
                 button.disabled = false;
                 showWorkspaceMessage(error.message, true);
@@ -4342,8 +4382,9 @@ async function renderAdminSettings() {
 async function renderAdminApprovals(dietitianId = null) {
     const queue = await request("/api/v1/admin/approvals/pending");
     const pending = dietitianId ? queue.filter((item) => item.dietitian_id === dietitianId) : queue;
+    const isBranchManager = currentUser.type === "branch_manager";
     workspaceContent.innerHTML = `
-    ${pageHeading("ADMINISTRATION", "Dietitian approvals.", "Review submitted documents before adding dietitians to the directory.")}
+    ${pageHeading(isBranchManager ? "BRANCH MANAGEMENT" : "ADMINISTRATION", isBranchManager ? "Branch dietitian approvals." : "Dietitian approvals.", isBranchManager ? "Review submitted documents for dietitians assigned to your branch." : "Review submitted documents before adding dietitians to the directory.")}
     <div data-message class="workspace-message" hidden></div>
     <div class="admin-approval-list">${
         pending.length
