@@ -15,15 +15,23 @@ jobs:
 
       - name: Deploy to Server via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           command_timeout: 30m
+          envs: RESEND_API_KEY,RESEND_FROM_EMAIL
           script: |
             set -e
             cd ~/dietitian-app_2
+            if [ -z "${RESEND_API_KEY:-}" ] || [ -z "${RESEND_FROM_EMAIL:-}" ]; then
+              echo "Configure RESEND_API_KEY and RESEND_FROM_EMAIL as GitHub Actions repository secrets before deploying." >&2
+              exit 1
+            fi
             git fetch origin main
             git reset --hard FETCH_HEAD
             docker compose down
@@ -41,6 +49,19 @@ jobs:
             mkdir -p backups
             docker compose exec -T db pg_dump -U black -d dietitian_db -Fc > "backups/pre-deploy-$(date +%Y%m%d-%H%M%S).dump"
             docker compose build api
+            ollama_model=$(docker compose run --rm --no-deps api python -c 'import os; print(os.environ["OLLAMA_MODEL"])')
+            docker compose up -d ollama
+            for attempt in $(seq 1 30); do
+              if docker compose exec -T ollama ollama list >/dev/null 2>&1; then
+                break
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                echo "Ollama did not become ready" >&2
+                exit 1
+              fi
+              sleep 2
+            done
+            docker compose exec -T ollama ollama pull "$ollama_model"
             docker compose run --rm --no-deps api python migrations/apply_002_client_health_schema.py
             docker compose run --rm --no-deps api python migrations/apply_003_dietitian_document_branch.py
             docker compose run --rm --no-deps api python migrations/apply_004_lactation_tracking.py
@@ -51,11 +72,16 @@ jobs:
             docker compose run --rm --no-deps api python migrations/apply_009_centralized_client_management.py
             docker compose run --rm --no-deps api python migrations/apply_010_popia_consent_details.py
             docker compose run --rm --no-deps api python migrations/apply_011_stytch_email_verification.py
-            for migration in 007_meal_plan_review 008_staff_roles_and_access_audit 009_client_registration_phone 010_client_registration_consent 011_registration_welcome_outbox 012_registration_uploads 013_client_qr_checkin 014_assisted_registration; do
+            for migration in 007_meal_plan_review 008_staff_roles_and_access_audit 009_client_registration_phone 010_client_registration_consent 011_registration_welcome_outbox 012_registration_uploads 013_client_qr_checkin 014_assisted_registration 022_appointment_visit_type 023_checkin_actor_roles; do
               docker compose exec -T db psql -U black -d dietitian_db -v ON_ERROR_STOP=1 < "back-end/migrations/${migration}.sql"
             done
             docker compose run --rm --no-deps api python migrations/apply_015_support_tickets.py
             docker compose run --rm --no-deps api python migrations/apply_016_guest_support.py
+            docker compose run --rm --no-deps api python migrations/apply_017_client_maternal_care_access.py
+            docker compose run --rm --no-deps api python migrations/apply_017_virtual_appointments.py
+            docker compose run --rm --no-deps api python migrations/apply_020_care_workflow.py
+            docker compose run --rm --no-deps api python migrations/apply_021_account_profile_photos.py
+            docker compose run --rm --no-deps api python migrations/apply_024_branch_manager_approvals.py
             docker compose up -d --build
             for attempt in $(seq 1 30); do
               if docker compose exec -T api python -c 'import urllib.request,json; h=json.load(urllib.request.urlopen("http://localhost:8000/health")); assert h["database"] == "online"'; then
@@ -67,3 +93,26 @@ jobs:
               fi
               sleep 3
             done
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --max-time 5 http://127.0.0.1:3000/health >/dev/null; then
+                break
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                echo "Frontend/API health check on port 3000 did not pass" >&2
+                docker compose ps
+                docker compose logs --tail=100 frontend api
+                exit 1
+              fi
+              sleep 3
+            done
+      - name: Verify public application endpoint
+        run: |
+          for attempt in $(seq 1 10); do
+            if curl --fail --silent --max-time 10 "https://health4lyf.co.za/health" >/dev/null; then
+              echo "Public health check passed"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Public health check failed; verify server ingress/firewall and deployment logs" >&2
+          exit 1

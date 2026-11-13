@@ -1,10 +1,18 @@
-const authScreen = document.querySelector("#authScreen");
+﻿const authScreen = document.querySelector("#authScreen");
 const workspace = document.querySelector("#workspace");
 const loginForm = document.querySelector("#loginForm");
 const signupForm = document.querySelector("#signupForm");
 const adminSetupForm = document.querySelector("#adminSetupForm");
 const authMessage = document.querySelector("#authMessage");
 const workspaceContent = document.querySelector("#workspaceContent");
+const themePreferenceKey = "nutrition-practice-theme";
+try {
+    document.documentElement.dataset.theme =
+        localStorage.getItem(themePreferenceKey) === "dark" ? "dark" : "light";
+} catch (error) {
+    console.error("Could not load the saved appearance preference.", error);
+    document.documentElement.dataset.theme = "light";
+}
 const sessionKey = "nutrition-practice-session";
 const adminTokenKey = "nutrition-practice-admin-token";
 const dietitianTokenKey = "nutrition-practice-dietitian-token";
@@ -19,6 +27,19 @@ const staffRoleNames = {
 };
 
 let currentUser = null;
+let profileAvatarObjectUrl = null;
+let qrCameraStream = null;
+let qrScanFrame = null;
+let qrScanBusy = false;
+
+function sessionToken() {
+    return (
+        sessionStorage.getItem(adminTokenKey) ||
+        sessionStorage.getItem(dietitianTokenKey) ||
+        sessionStorage.getItem(clientTokenKey) ||
+        sessionStorage.getItem(staffTokenKey)
+    );
+}
 
 async function request(url, options = {}) {
     const headers = new Headers(options.headers || {});
@@ -26,11 +47,7 @@ async function request(url, options = {}) {
         headers.set("Content-Type", "application/json");
     }
 
-    const token =
-        sessionStorage.getItem(adminTokenKey) ||
-        sessionStorage.getItem(dietitianTokenKey) ||
-        sessionStorage.getItem(clientTokenKey) ||
-        sessionStorage.getItem(staffTokenKey);
+    const token = sessionToken();
     if (token && !headers.has("Authorization")) {
         headers.set("Authorization", `Bearer ${token}`);
     }
@@ -60,6 +77,108 @@ async function request(url, options = {}) {
     return payload;
 }
 
+async function fetchProfilePhoto() {
+    const token = sessionToken();
+    const response = await fetch("/api/v1/profile/photo", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        cache: "no-store",
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) {
+        throw new Error(`Could not load profile photo (${response.status}).`);
+    }
+    return response.blob();
+}
+
+async function refreshAccountAvatar() {
+    const image = document.querySelector("#profileAvatarImage");
+    const initials = document.querySelector("#profileInitials");
+    if (!image || !initials) return;
+    try {
+        const photo = await fetchProfilePhoto();
+        if (profileAvatarObjectUrl) URL.revokeObjectURL(profileAvatarObjectUrl);
+        profileAvatarObjectUrl = photo ? URL.createObjectURL(photo) : null;
+        image.hidden = !profileAvatarObjectUrl;
+        image.src = profileAvatarObjectUrl || "";
+        initials.hidden = Boolean(profileAvatarObjectUrl);
+    } catch (error) {
+        image.hidden = true;
+        initials.hidden = false;
+        const message = document.querySelector("[data-profile-photo-message]");
+        if (message) {
+            message.textContent = error.message;
+            message.dataset.kind = "error";
+        }
+    }
+}
+
+function profilePhotoAvatarMarkup(role, accountId, name) {
+    const initials = name
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((part) => part[0] || "")
+        .join("")
+        .toUpperCase();
+    return `<div class="dietitian-avatar profile-photo-avatar" aria-hidden="true">
+      <span>${escapeHtml(initials)}</span>
+      <img data-profile-photo-role="${escapeHtml(role)}" data-profile-photo-account="${escapeHtml(accountId)}" alt="" hidden>
+    </div>`;
+}
+
+async function loadVisibleProfilePhotos(root = workspaceContent) {
+    const images = root.querySelectorAll(
+        "img[data-profile-photo-role]:not([data-profile-photo-loaded])",
+    );
+    await Promise.all(
+        [...images].map(async (image) => {
+            image.dataset.profilePhotoLoaded = "true";
+            const role = image.dataset.profilePhotoRole;
+            const accountId = image.dataset.profilePhotoAccount;
+            const query = new URLSearchParams({
+                account_type: role,
+                account_id: accountId,
+            });
+            try {
+                const headers = {};
+                const token = sessionToken();
+                if (token) headers.Authorization = `Bearer ${token}`;
+                const response = await fetch(
+                    `/api/v1/profile/photos?${query.toString()}`,
+                    { headers, cache: "no-store" },
+                );
+                if (response.status === 404) return;
+                if (!response.ok) {
+                    throw new Error(`Could not load profile photo (${response.status}).`);
+                }
+                const photoUrl = URL.createObjectURL(await response.blob());
+                image.src = photoUrl;
+                image.hidden = false;
+                image.previousElementSibling.hidden = true;
+                image.dataset.objectUrl = photoUrl;
+            } catch (error) {
+                console.error("Could not load an account profile photo.", error);
+            }
+        }),
+    );
+}
+
+const profilePhotoObserver = new MutationObserver((changes) => {
+    for (const change of changes) {
+        change.removedNodes.forEach((node) => {
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+            const removedImages = [
+                ...(node.matches?.("img[data-profile-photo-role]") ? [node] : []),
+                ...node.querySelectorAll("img[data-profile-photo-role]"),
+            ];
+            for (const image of removedImages) {
+                if (image.dataset.objectUrl) URL.revokeObjectURL(image.dataset.objectUrl);
+            }
+        });
+    }
+    void loadVisibleProfilePhotos();
+});
+profilePhotoObserver.observe(workspaceContent, { childList: true, subtree: true });
+
 // The health indicator reflects the real API/database result, not a hardcoded
 // "connected" badge. It doesn't display connection strings or patient details.
 function setConnectionState(state, label) {
@@ -75,7 +194,7 @@ function markConnectionUnavailable() {
 }
 
 async function refreshConnectionStatus() {
-    setConnectionState("checking", "Checking connection…");
+    setConnectionState("checking", "Checking connectionâ€¦");
     try {
         const response = await fetch("/health", { cache: "no-store" });
         if (!response.ok) throw new Error("Health check failed");
@@ -100,7 +219,7 @@ document.addEventListener("visibilitychange", () => {
 
 // Medical documents are protected API resources, not public file links.
 // A regular <a href> navigation does not send the bearer token.
-async function openPrivateMedicalDocument(url) {
+async function openPrivateMedicalDocument(url, fileName) {
     const token =
         sessionStorage.getItem(adminTokenKey) ||
         sessionStorage.getItem(dietitianTokenKey) ||
@@ -122,7 +241,9 @@ async function openPrivateMedicalDocument(url) {
     const blobUrl = URL.createObjectURL(file);
     const temporaryLink = document.createElement("a");
     temporaryLink.href = blobUrl;
-    temporaryLink.download = "medical-document";
+    temporaryLink.download =
+        String(fileName || "medical-document").replace(/[\\/:*?"<>|]/g, "_") ||
+        "medical-document";
     document.body.appendChild(temporaryLink);
     temporaryLink.click();
     temporaryLink.remove();
@@ -133,15 +254,16 @@ workspaceContent.addEventListener("click", async (event) => {
     const link = event.target.closest("[data-private-medical-document]");
     if (!link || !workspaceContent.contains(link)) return;
     event.preventDefault();
-    const originalLabel = link.textContent;
     link.setAttribute("aria-busy", "true");
     try {
-        await openPrivateMedicalDocument(link.dataset.privateMedicalDocument);
+        await openPrivateMedicalDocument(
+            link.dataset.privateMedicalDocument,
+            link.dataset.fileName,
+        );
     } catch (error) {
         window.alert(error.message);
     } finally {
         link.removeAttribute("aria-busy");
-        link.textContent = originalLabel;
     }
 });
 
@@ -157,13 +279,23 @@ function showWorkspace(user, initialView = "overview") {
     sessionStorage.setItem(sessionKey, JSON.stringify(user));
     authScreen.hidden = true;
     workspace.hidden = false;
-    const firstName = user.full_name.split(" ")[0];
+    closeAccountMenu();
+    const accountName = user.full_name || user.name || "Your account";
+    const firstName = accountName.split(" ")[0];
     document.querySelector("#profileName").textContent = firstName;
-    document.querySelector("#profileInitials").textContent = user.full_name
+    if (profileAvatarObjectUrl) URL.revokeObjectURL(profileAvatarObjectUrl);
+    profileAvatarObjectUrl = null;
+    document.querySelector("#profileAvatarImage").hidden = true;
+    document.querySelector("#profileInitials").hidden = false;
+    document.querySelector("#profileInitials").textContent = accountName
         .split(/\s+/)
         .slice(0, 2)
         .map((part) => part[0].toUpperCase())
         .join("");
+    void refreshAccountAvatar();
+    document.querySelector("#accountMenuFullName").textContent = accountName;
+    document.querySelector("#accountMenuRole").textContent =
+        staffRoleNames[user.type] || ({ client: "Patient", dietitian: "Dietitian", admin: "Administrator" }[user.type] || "Account");
     document.querySelector("#headerDate").textContent = new Intl.DateTimeFormat(undefined, {
         weekday: "long",
         month: "long",
@@ -176,11 +308,15 @@ function showWorkspace(user, initialView = "overview") {
     const isAdmin = user.type === "admin";
     const isDietitian = user.type === "dietitian";
     const isStaff = Object.hasOwn(staffRoleNames, user.type);
+    document.querySelectorAll(".side-nav .nav-item, .side-nav .nav-section-label").forEach(item => item.hidden = false);
     document.querySelectorAll("[data-staff-only]").forEach((item) => {
         item.hidden = !isStaff;
     });
     document.querySelectorAll("[data-reception-only]").forEach((item) => {
         item.hidden = !["reception", "branch_manager"].includes(user.type);
+    });
+    document.querySelectorAll("[data-checkin-scanner]").forEach((item) => {
+        item.hidden = !isAdmin;
     });
     document.querySelectorAll("[data-compliance-only]").forEach((item) => {
         item.hidden = user.type !== "compliance_officer";
@@ -191,9 +327,8 @@ function showWorkspace(user, initialView = "overview") {
     document.querySelectorAll("[data-client-only]").forEach((item) => {
         item.hidden = !isClient;
     });
-    const isMaleClient = isClient && String(user.gender || "").toLowerCase() === "male";
     document.querySelectorAll("[data-maternal-only]").forEach((item) => {
-        item.hidden = !isClient || isMaleClient;
+        item.hidden = true;
     });
     document.querySelectorAll("[data-dietitian-only]").forEach((item) => {
         item.hidden = !isDietitian;
@@ -201,10 +336,69 @@ function showWorkspace(user, initialView = "overview") {
     document.querySelectorAll("[data-admin-only]").forEach((item) => {
         item.hidden = !isAdmin;
     });
+    document.querySelectorAll("[data-manager-dietitian-only]").forEach((item) => {
+        item.hidden = !isAdmin && user.type !== "branch_manager";
+    });
+    // Keep the Dietitian sidebar limited to the six requested menu items.
+if (isDietitian) {
+    const nav = document.querySelector(".side-nav");
+
+    const dietitianMenu = [
+        "overview",
+        "appointment-requests",
+        "reviews",
+        "clients",
+        "support",
+        "dietitian-settings",
+    ];
+
+    const menuItems = new Map(
+        [...nav.querySelectorAll(".nav-item")].map((item) => [
+            item.dataset.view,
+            item,
+        ]),
+    );
+
+    // Hide all existing navigation items for the Dietitian only.
+    nav.querySelectorAll(".nav-item").forEach((item) => {
+        item.hidden = true;
+    });
+
+    // Show and arrange the six requested items.
+    dietitianMenu.forEach((view) => {
+        const item = menuItems.get(view);
+
+        if (item) {
+            item.hidden = false;
+            nav.appendChild(item);
+        }
+    });
+}
+    if (isClient) {
+        const nav = document.querySelector(".side-nav");
+        const menu = [
+            ["overview", "Dashboard", "&#9633;"],
+            ["client-appointments", "Appointments", "&#9635;"],
+            ["client-progress", "Progress", "&#9636;"],
+            ["client-goals", "Goals", "&#9673;"],
+            ["ai-workspace", "Nutrition Coach", "&#10022;"],
+            ["client-settings", "Settings", "&#9881;"],
+        ];
+        nav.querySelectorAll(".nav-item, .nav-section-label").forEach(item => item.hidden = true);
+        menu.forEach(([view, label, icon]) => {
+            const item = nav.querySelector(`[data-view="${view}"]`);
+            item.innerHTML = `<span class="nav-glyph">${icon}</span>${label}`;
+            item.hidden = false;
+            nav.appendChild(item);
+        });
+    }
     document.querySelector('[data-view="overview"]').innerHTML =
         '<span class="nav-glyph">&#9633;</span>Dashboard';
     document.querySelector('[data-view="clients"]').innerHTML =
         '<span class="nav-glyph">&#9787;</span>My Patients';
+    document.querySelector('[data-view="reception-checkin"]').innerHTML =
+        '<span class="nav-glyph">&#9636;</span>Patient QR Check-In';
+    if (isClient) refreshClientMaternalAccess();
     document.querySelector("#signOutButton").lastChild.textContent = isAdmin
         ? "Logout"
         : "Sign out";
@@ -220,7 +414,41 @@ function showWorkspace(user, initialView = "overview") {
     }
 }
 
+async function refreshClientMaternalAccess() {
+    if (currentUser?.type !== "client") return false;
+    try {
+        const records = await request(`/api/v1/clients?client_id=${encodeURIComponent(currentUser.id)}`);
+        currentUser.maternal_care_enabled = records[0]?.maternal_care_enabled === true;
+        sessionStorage.setItem(sessionKey, JSON.stringify(currentUser));
+        document.querySelectorAll("[data-maternal-only]").forEach((item) => {
+            item.hidden = !currentUser.maternal_care_enabled;
+        });
+        return currentUser.maternal_care_enabled;
+    } catch (_) {
+        document.querySelectorAll("[data-maternal-only]").forEach((item) => { item.hidden = true; });
+        return false;
+    }
+}
+
+// One account menu, shared by every role. Profile permissions remain enforced by the API.
+function closeAccountMenu() {
+    const panel = document.querySelector("#accountMenuPanel");
+    const trigger = document.querySelector("#accountMenuButton");
+    panel.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+}
+
+function openAccountProfile() {
+    closeAccountMenu();
+    if (!currentUser) return;
+    const role = currentUser.type;
+    navTo(Object.hasOwn(staffRoleNames, role) ? "staff-profile" :
+        role === "admin" ? "admin-profile" : "my-profile");
+}
+
 function signOut() {
+    stopQRScanner();
+    closeAccountMenu();
     sessionStorage.removeItem(sessionKey);
     sessionStorage.removeItem(adminTokenKey);
     sessionStorage.removeItem(dietitianTokenKey);
@@ -258,8 +486,82 @@ const patientSignupActions = document.querySelector("#patientSignupActions");
 const patientSignupBack = document.querySelector("#patientSignupBack");
 const patientSignupNext = document.querySelector("#patientSignupNext");
 const signupSubmit = document.querySelector("#signupSubmit");
+const signupEmailVerification = document.querySelector("#signupEmailVerification");
+const signupEmailVerificationMessage = document.querySelector("#signupEmailVerificationMessage");
+const signupEmailVerificationCode = document.querySelector("#signupEmailVerificationCode");
+const signupVerifyEmail = document.querySelector("#signupVerifyEmail");
+const signupResendEmail = document.querySelector("#signupResendEmail");
 let patientSignupStep = 1;
+let signupVerificationState = "unchecked";
+let signupVerificationEmail = "";
+let signupVerificationMethodId = "";
 const signupStepNames = ["Your details", "Patient details", "Account security"];
+
+signupForm.elements.email.addEventListener("input", () => {
+    const email = signupForm.elements.email.value.trim().toLowerCase();
+    if (email !== signupVerificationEmail) {
+        signupVerificationState = "unchecked";
+        signupVerificationEmail = "";
+        signupVerificationMethodId = "";
+        signupEmailVerification.hidden = true;
+        signupEmailVerificationCode.value = "";
+        signupEmailVerificationCode.required = false;
+        signupEmailVerificationCode.disabled = false;
+        signupVerifyEmail.disabled = false;
+        signupResendEmail.hidden = true;
+    }
+});
+
+signupVerifyEmail.addEventListener("click", async () => {
+    if (!signupVerificationMethodId || !signupEmailVerificationCode.value.trim()) {
+        signupEmailVerificationCode.reportValidity();
+        return;
+    }
+    signupVerifyEmail.disabled = true;
+    try {
+        const result = await request("/api/v1/auth/email/verify-code", {
+            method: "POST",
+            body: JSON.stringify({
+                email: signupVerificationEmail,
+                method_id: signupVerificationMethodId,
+                code: signupEmailVerificationCode.value.trim(),
+            }),
+        });
+        if (!result.verified) throw new Error(result.message || "Email verification failed.");
+        signupVerificationState = "verified";
+        signupEmailVerificationCode.disabled = true;
+        signupResendEmail.hidden = true;
+        signupEmailVerificationMessage.textContent = "Email verified. Creating your account…";
+        signupForm.requestSubmit(signupSubmit);
+    } catch (error) {
+        signupEmailVerificationMessage.textContent = error.message;
+        signupVerifyEmail.disabled = false;
+    }
+});
+
+signupResendEmail.addEventListener("click", async () => {
+    signupResendEmail.disabled = true;
+    try {
+        const result = await request("/api/v1/auth/email/send-code", {
+            method: "POST",
+            body: JSON.stringify({ email: signupVerificationEmail }),
+        });
+        if (!result.enabled || !result.method_id) {
+            throw new Error(result.message || "Email verification is unavailable.");
+        }
+        signupVerificationMethodId = result.method_id;
+        signupVerificationState = "sent";
+        signupEmailVerificationCode.value = "";
+        signupEmailVerificationCode.disabled = false;
+        signupEmailVerificationCode.focus();
+        signupEmailVerificationMessage.textContent =
+            "A new code was sent. Enter it here and verify before continuing.";
+    } catch (error) {
+        signupEmailVerificationMessage.textContent = error.message;
+    } finally {
+        signupResendEmail.disabled = false;
+    }
+});
 
 function setPatientSignupStep(nextStep, { focus = false } = {}) {
     patientSignupStep = Math.max(1, Math.min(signupSteps.length, nextStep));
@@ -274,7 +576,7 @@ function setPatientSignupStep(nextStep, { focus = false } = {}) {
     signupSubmit.hidden = isClient && patientSignupStep !== signupSteps.length;
     if (isClient) {
         document.querySelector("#patientSignupStepLabel").textContent =
-            `Step ${patientSignupStep} of ${signupSteps.length} · ${signupStepNames[patientSignupStep - 1]}`;
+            `Step ${patientSignupStep} of ${signupSteps.length} Â· ${signupStepNames[patientSignupStep - 1]}`;
         document.querySelector("#patientSignupProgressBar").style.width =
             `${(patientSignupStep / signupSteps.length) * 100}%`;
         patientSignupProgress
@@ -421,6 +723,8 @@ function updateSignupRole() {
     document.querySelector("#dietitianFields").hidden = isClient;
     document.querySelector("#clientFields").hidden = !isClient;
     signupForm.elements.license_number.required = !isClient;
+    signupForm.querySelector('label[for="signupFirstName"]').textContent = "First name";
+    signupForm.querySelector('label[for="signupLastName"]').textContent = "Last name";
     signupForm.elements.id_number.required = isClient;
     signupForm.elements.phone.required = isClient;
     Object.values(registrationFields).forEach((field) => {
@@ -511,6 +815,12 @@ async function fetchPatientContext(clientId) {
     };
 }
 
+function medicalDocumentDownloadLinkMarkup(clientId, document) {
+    const fileName = escapeHtml(document.file_name);
+    const url = `/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}`;
+    return `<a class="document-download-link" href="${url}" aria-label="Download ${fileName}" data-file-name="${fileName}" data-private-medical-document="${url}"><span>${fileName}</span><svg class="download-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 2.5v9m0 0 3.5-3.5M10 11.5 6.5 8M3.5 13.5v3h13v-3" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/></svg></a>`;
+}
+
 function patientContextMarkup(client, profile, lactation = {}, documents = []) {
     const allergies = profile.allergies || [];
     const conditions = profile.conditions || [];
@@ -529,7 +839,7 @@ function patientContextMarkup(client, profile, lactation = {}, documents = []) {
         Object.entries(entry)
             .filter(([key, value]) => key !== "log_date" && value !== null && value !== undefined)
             .map(([key, value]) => `${escapeHtml(key.replaceAll("_", " "))}: ${escapeHtml(value)}`)
-            .join(" · "),
+            .join(" Â· "),
     );
     const lactationGroups = [
         ["Status", lactation.status],
@@ -556,32 +866,35 @@ function patientContextMarkup(client, profile, lactation = {}, documents = []) {
                                       .map(
                                           ([key, value]) => `${key.replaceAll("_", " ")}: ${value}`,
                                       )
-                                      .join(" · "),
+                                      .join(" Â· "),
                               ),
                           )
                           .join("<br>")}</div></div>`,
               )
               .join("")
         : '<p class="empty-state">No lactation records recorded.</p>';
+    const maternalMarkup = profile.maternal_care_enabled
+        ? `<div class="form-field full-width"><label>Pregnancy details</label><div class="text-input">${profile.pregnancy ? `Trimester: ${escapeHtml(profile.pregnancy.trimester || "Not provided")} · Due date: ${escapeHtml(profile.pregnancy.due_date || "Not provided")}` : "No pregnancy information recorded"}</div></div><div class="form-field full-width"><label>Lactation details</label><div class="form-grid">${lactationMarkup}</div></div>`
+        : "";
     const documentsMarkup = documents.length
         ? documents
               .map(
                   (document) =>
-                      `<li class="result-item"><a href="/api/v1/clients/${encodeURIComponent(client.id)}/medical-documents/${encodeURIComponent(document.document_id)}" data-private-medical-document="/api/v1/clients/${encodeURIComponent(client.id)}/medical-documents/${encodeURIComponent(document.document_id)}">${escapeHtml(document.file_name)}</a> · ${escapeHtml(document.condition_name || "Medical condition")} · Dr ${escapeHtml(document.doctor_name || "not provided")}<br>${escapeHtml(document.doctor_information || "")}</li>`,
+                      `<li class="result-item"><span>${medicalDocumentDownloadLinkMarkup(client.id, document)} Â· ${escapeHtml(document.condition_name || "Medical condition")} Â· Dr ${escapeHtml(document.doctor_name || "not provided")}<br>${escapeHtml(document.doctor_information || "")}</span></li>`,
               )
               .join("")
         : '<li class="result-item">No supporting medical documents uploaded.</li>';
     return `
     <section class="content-panel patient-context-preview">
-      <h3>${escapeHtml(client.name)}</h3>
-      <div class="form-field full-width"><label>Client details</label><div class="text-input">${clientDetails.length ? clientDetails.map(([label, value]) => `<strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}`).join(" · ") : "No demographic details recorded"}</div></div>
-      <p class="stat-caption">${escapeHtml(client.id)} · ${escapeHtml(client.status || "Patient")}</p>
+      <h3>${escapeHtml(client.name)}</h3><button class="button quiet-button" type="button" data-care-record="${escapeHtml(client.id)}">Open care record and review progress</button>
+      <div class="form-field full-width"><label>Client details</label><div class="text-input">${clientDetails.length ? clientDetails.map(([label, value]) => `<strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}`).join(" Â· ") : "No demographic details recorded"}</div></div>
+      <p class="stat-caption">${escapeHtml(client.id)} Â· ${escapeHtml(client.status || "Patient")}</p>
       <div class="form-grid">
         <div class="form-field"><label>Allergies</label><div class="text-input">${allergies.length ? allergies.map((item) => `${escapeHtml(item.allergen)} (${escapeHtml(item.severity)})`).join(", ") : "No allergy information recorded"}</div></div>
         <div class="form-field"><label>Medical conditions</label><div class="text-input">${conditions.length ? conditions.map((item) => escapeHtml(item.condition_name)).join(", ") : "No conditions recorded"}</div></div>
-        <div class="form-field"><label>Recorded metrics</label><div class="text-input">${metrics.length ? metrics.map((item) => `${escapeHtml(item.metric_type)}: ${escapeHtml(item.value)}`).join(" · ") : "No metrics recorded"}</div></div>
+        <div class="form-field"><label>Recorded metrics</label><div class="text-input">${metrics.length ? metrics.map((item) => `${escapeHtml(item.metric_type)}: ${escapeHtml(item.value)}`).join(" Â· ") : "No metrics recorded"}</div></div>
         <div class="form-field"><label>Progress history</label><div class="text-input">${progress.length ? progressRows.join("<br>") : "No progress recorded"}</div></div>
-        <div class="form-field full-width"><label>Lactation details</label><div class="form-grid">${lactationMarkup}</div></div>
+        ${maternalMarkup}
         <div class="form-field full-width"><label>Medical documents and doctor information</label><ul class="result-list">${documentsMarkup}</ul></div>
       </div>
     </section>`;
@@ -619,16 +932,34 @@ function bindPatientContextButtons() {
 }
 
 async function renderDietitianDashboard() {
+    const registration = await request("/api/v1/dietitians/me/approval");
     const doctorName =
         currentUser && currentUser.full_name ? currentUser.full_name.split(" ")[0] : "John";
     const query = `?dietitian_id=${encodeURIComponent(currentUser.id)}`;
-    const [clients, appointments, recommendations, plans, approval] = await Promise.all([
+    const results = await Promise.allSettled([
         request(`/api/v1/clients${query}`),
         request(`/api/v1/appointments${query}`),
         request("/api/v1/ai/recommendations/pending"),
         request(`/api/v1/meal-plans${query}`),
-        request("/api/v1/dietitians/me/approval"),
+        Promise.resolve(registration),
     ]);
+    const dashboardErrors = [];
+    const resultValue = (result, label, fallback) => {
+        if (result.status === "fulfilled") return result.value;
+        const detail =
+            result.reason instanceof Error ? result.reason.message : String(result.reason);
+        dashboardErrors.push(`${label}: ${detail}`);
+        return fallback;
+    };
+    const clients = resultValue(results[0], "Patients", []);
+    const appointments = resultValue(results[1], "Appointments", []);
+    const recommendations = resultValue(results[2], "Pending recommendations", []);
+    const plans = resultValue(results[3], "Meal plans", []);
+    const approval = resultValue(results[4], "Registration status", null);
+    const clientsLoaded = results[0].status === "fulfilled";
+    const appointmentsLoaded = results[1].status === "fulfilled";
+    const recommendationsLoaded = results[2].status === "fulfilled";
+    const plansLoaded = results[3].status === "fulfilled";
     workspaceContent.innerHTML = `
     <div class="page-heading">
       <div>
@@ -638,7 +969,13 @@ async function renderDietitianDashboard() {
       </div>
       <button class="button button-primary" data-go="meal-plans" type="button">Draft meal plan <span aria-hidden="true">&#8594;</span></button>
     </div>
-    ${dietitianApprovalMarkup(approval)}
+    <div class="qr-checkin-dashboard-action"><button class="button button-primary" data-go="reception-checkin" type="button">Scan patient QR code</button></div>
+    ${approval ? dietitianApprovalMarkup(approval) : ""}
+    ${
+        dashboardErrors.length
+            ? `<div class="workspace-message error" role="alert"><strong>Some dashboard information could not be loaded:</strong><ul>${dashboardErrors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul></div>`
+            : ""
+    }
     <section class="feature-panel dietitian-home-feature">
       <div class="feature-panel-copy">
         <span class="eyebrow">PERSON-CENTRED NUTRITION</span>
@@ -652,44 +989,40 @@ async function renderDietitianDashboard() {
       <section class="stat-panel">
         <div>
           <span class="stat-label">Patients</span>
-          <strong class="stat-number">${clients.length}</strong>
+          <strong class="stat-number">${clientsLoaded ? clients.length : "—"}</strong>
         </div>
       </section>
       <section class="stat-panel">
         <div>
           <span class="stat-label">Appointments</span>
-          <strong class="stat-number">${appointments.length}</strong>
+          <strong class="stat-number">${appointmentsLoaded ? appointments.length : "—"}</strong>
         </div>
       </section>
       <section class="stat-panel">
         <div>
           <span class="stat-label">Pending Recommendations</span>
-          <strong class="stat-number">${recommendations.length}</strong>
+          <strong class="stat-number">${recommendationsLoaded ? recommendations.length : "—"}</strong>
         </div>
       </section>
       <section class="stat-panel">
         <div>
           <span class="stat-label">Meal Plans</span>
-          <strong class="stat-number">${plans.length}</strong>
+          <strong class="stat-number">${plansLoaded ? plans.length : "—"}</strong>
         </div>
       </section>
     </div>
-    <div class="section-heading"><h2>My Patients</h2><span>${clients.length} PATIENTS</span></div>
+    <div class="section-heading"><h2>My Patients</h2><span>${clientsLoaded ? `${clients.length} PATIENTS` : "UNAVAILABLE"}</span></div>
     <div class="dietitian-directory">
       ${
-          clients.length
+          !clientsLoaded
+              ? '<p class="workspace-message error">Patient list unavailable.</p>'
+              : clients.length
               ? clients
                     .map(
                         (client) => `
         <article class="dietitian-row">
-          <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(
-              client.name
-                  .split(/\s+/)
-                  .slice(0, 2)
-                  .map((part) => part[0])
-                  .join(""),
-          )}</div>
-          <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} · ${escapeHtml(client.status)}</p></div>
+          ${profilePhotoAvatarMarkup("client", client.id, client.name)}
+          <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} Â· ${escapeHtml(client.status)}</p></div>
           <div class="review-actions">
             <button class="button button-small button-approve" data-open-client="${escapeHtml(client.id)}" type="button">View</button>
           </div>
@@ -735,9 +1068,81 @@ async function renderAIWorkspace(activePanel = "coach", clientId = "") {
     });
     if (panel === "plan") {
         await renderAIStudio(clientId);
+    } else if (currentUser.type === "dietitian") {
+        await renderPatientAgent(clientId);
     } else {
         await renderAIChat();
     }
+}
+
+async function renderPatientAgent(initialClientId = "") {
+    const panel = document.querySelector("#aiWorkspacePanel");
+    const patients = await request(`/api/v1/clients?dietitian_id=${encodeURIComponent(currentUser.id)}`);
+    panel.innerHTML = `<section class="content-panel">
+      <h2>Patient nutrition assistant</h2>
+      <p>Choose a patient, add your clinical guidance, then activate the assistant using their recorded information.</p>
+      <form id="patientAgentActivation" class="form-grid">
+        <div class="form-field full-width"><label for="agentPatient">1. Choose the patient</label>
+        <select class="text-input" id="agentPatient" required><option value="">Select a patient</option>${patients.map((patient) => `<option value="${escapeHtml(patient.id)}" ${patient.id === initialClientId ? "selected" : ""}>${escapeHtml(patient.name || patient.full_name || patient.id)}</option>`).join("")}</select></div>
+        <div class="form-field full-width"><label for="agentGuidance">Your guidance and restrictions</label><textarea class="text-input" id="agentGuidance" maxlength="3000" placeholder="Add clinical priorities, dietary restrictions, preferences or questions to explore."></textarea></div>
+        <div class="form-actions"><button class="button button-primary" type="submit" ${patients.length ? "" : "disabled"}>2. Activate patient assistant</button></div>
+      </form>
+      ${patients.length ? "" : '<p class="empty-state">No patients are assigned to you yet.</p>'}
+      <p class="document-hint">Draft suggestions require your review. Activation and conversation last until the API restarts. Changing the patient or guidance requires reactivation.</p>
+    </section><div id="patientAgentWorkspace" hidden></div>`;
+    const activation = panel.querySelector("#patientAgentActivation");
+    const patientSelect = panel.querySelector("#agentPatient");
+    const guidance = panel.querySelector("#agentGuidance");
+    const workspace = panel.querySelector("#patientAgentWorkspace");
+    let activePatient = "";
+    let activationVersion = 0;
+    const deactivate = () => { activationVersion += 1; activePatient = ""; workspace.hidden = true; workspace.innerHTML = ""; };
+    patientSelect.addEventListener("change", deactivate);
+    guidance.addEventListener("input", deactivate);
+    activation.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        deactivate();
+        const version = activationVersion;
+        const patientId = patientSelect.value;
+        const button = activation.querySelector("button");
+        button.disabled = true;
+        patientSelect.disabled = true;
+        guidance.disabled = true;
+        try {
+            const result = await request(`/api/v1/ai/patients/${encodeURIComponent(patientId)}/activate`, {
+                method: "POST", body: JSON.stringify({ guidance: guidance.value.trim() }),
+            });
+            activePatient = patientId;
+            const context = result.context;
+            const facts = ["patient_profile", "clinician_guidance", "conditions", "allergies", "metrics", "progress", "goals", "care_history"];
+            workspace.innerHTML = `<section class="content-panel"><h2>Active patient: ${escapeHtml(patientSelect.selectedOptions[0].textContent)}</h2>
+              <p>Records are refreshed on every question. No changes are made to the patient’s care plan.</p>
+              <details><summary>Information available to the assistant</summary>${facts.concat("clinician_profile").map((key) => `<h3>${escapeHtml(key.replaceAll("_", " "))}</h3><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(JSON.stringify(context[key] || [], null, 2))}</pre>`).join("")}</details>
+              <p class="document-hint">The assistant uses these patient records and your guidance; it does not search the reference library. Suggestions are drafts for clinical review.</p>
+              <div class="chat-thread" id="patientAgentThread" aria-live="polite"></div>
+              <form id="patientAgentQuestion" class="form-grid"><div class="form-field full-width"><label for="patientAgentInput">Ask about this patient</label><textarea class="text-input" id="patientAgentInput" required maxlength="4000" placeholder="Based on the recorded conditions and my guidance, suggest nutrition priorities and identify missing information."></textarea></div><div class="form-actions"><button class="button button-primary" type="submit">Ask patient assistant</button></div></form>
+            </section>`;
+            workspace.hidden = false;
+            workspace.querySelector("form").addEventListener("submit", async (questionEvent) => {
+                questionEvent.preventDefault();
+                const input = workspace.querySelector("#patientAgentInput");
+                const message = input.value.trim();
+                if (!message || activePatient !== patientId) return;
+                const send = questionEvent.currentTarget.querySelector("button");
+                send.disabled = true;
+                try {
+                    const response = await request(`/api/v1/ai/patients/${encodeURIComponent(patientId)}/chat`, {
+                        method: "POST", body: JSON.stringify({ message }),
+                    });
+                    if (activePatient !== patientId || activationVersion !== version) return;
+                    workspace.querySelector("#patientAgentThread").innerHTML = response.messages.map((turn) => `<div class="chat-bubble ${turn.role === "assistant" ? "assistant" : "user"}"><strong>${turn.role === "assistant" ? "Patient assistant · draft for review" : "You"}</strong><p style="white-space:pre-wrap">${escapeHtml(turn.content)}</p></div>`).join("");
+                    input.value = "";
+                } catch (error) { showWorkspaceMessage(error.message, true); }
+                finally { send.disabled = false; }
+            });
+        } catch (error) { showWorkspaceMessage(error.message, true); }
+        finally { button.disabled = false; patientSelect.disabled = false; guidance.disabled = false; }
+    });
 }
 
 async function renderAIChat() {
@@ -750,8 +1155,8 @@ async function renderAIChat() {
     );
     const messages = conversation.messages || [];
     panel.innerHTML = `
-    <section class="assistant-topics" aria-label="Nutrition assistant topics">
-      <div class="assistant-topics-heading"><span class="eyebrow eyebrow-green">NUTRITION ASSISTANT</span><span>Choose a starting point or ask anything</span></div>
+    <section class="assistant-topics" data-fixed-theme="light" aria-label="Nutrition assistant topics">
+      <div class="assistant-topics-heading"><span class="eyebrow eyebrow-green">AUTOMATED NUTRITION ASSISTANT</span><span>Choose a starting point or ask anything</span></div>
       <div class="assistant-topic-list">
         <button class="assistant-topic is-primary" data-topic="ask" type="button">Ask a question</button>
         <button class="assistant-topic" data-topic="recipe" type="button">Recipe Ideas</button>
@@ -767,7 +1172,7 @@ async function renderAIChat() {
         <button class="assistant-topic" data-ai-recommendations type="button">${role === "client" ? "My Recommendations" : "Review Recommendations"}</button>
       </div>
     </section>
-    <section class="content-panel chat-panel">
+    <section class="content-panel chat-panel" data-fixed-theme="light">
       <div class="chat-thread">
         ${messages
             .map(
@@ -861,8 +1266,137 @@ async function renderClientManagementProfile(clientId) {
     const { client, profile, lactation, documents } = await fetchPatientContext(clientId);
     workspaceContent.innerHTML = `
     ${pageHeading("PATIENT PROFILE", client.name, "Current information recorded for this patient.")}
+    <div data-message class="workspace-message" hidden></div>
+    <section class="content-panel health-edit-panel">
+      <p class="subsection-label">LACTATION PAGE</p>
+      <p>${profile.maternal_care_enabled ? "Enabled for this client." : "Disabled. The client cannot see these pages until you enable them."}</p>
+      <div class="form-actions">
+        <button class="button button-primary" id="toggleMaternalCare" type="button">${profile.maternal_care_enabled ? "Disable pages" : "Enable pages"}</button>
+        ${profile.maternal_care_enabled ? `<button class="button" id="openLactationPage" type="button">Lactation tracker</button>` : ""}
+      </div>
+    </section>
     ${patientContextMarkup(client, profile, lactation, documents)}
+    ${currentUser.type === "dietitian" ? '<section class="content-panel"><button class="button button-primary" id="editPatientMetrics" type="button">View patient progress &amp; meals</button></section>' : ""}
+    <section class="content-panel health-edit-panel">
+      <p class="subsection-label">ADD MEDICAL CONDITION</p>
+      <button class="button button-primary" id="showDietitianConditionForm" type="button">Add Medical Condition</button>
+      <form id="dietitianMedicalConditionForm" class="form-grid" hidden>
+        <div class="form-field">
+          <label for="dietitianConditionName">Condition</label>
+          <input class="text-input" id="dietitianConditionName" name="condition_name" required>
+        </div>
+        <div class="form-field">
+          <label for="dietitianConditionCode">ICD code (optional)</label>
+          <input class="text-input" id="dietitianConditionCode" name="icd_code">
+        </div>
+        <div class="form-field full-width form-actions">
+          <button class="button button-primary" type="submit">Save condition</button>
+          <button class="button" id="cancelDietitianConditionForm" type="button">Cancel</button>
+        </div>
+      
+      </form>
+    </section>
+
+    <section class="content-panel health-edit-panel">
+      <p class="subsection-label">MEDICAL DOCUMENTS AND DOCTOR INFORMATION</p>
+
+      <p class="progress-edit-copy">
+        Upload lab results or another document supporting your medical condition.
+        Your dietitian can review these records.
+      </p>
+
+      <form id="dietitianMedicalDocumentForm" class="form-grid" enctype="multipart/form-data">
+        <div class="form-field">
+          <label for="dietitianDocumentCondition">Condition supported</label>
+          <input class="text-input" id="dietitianDocumentCondition"
+            name="condition_name" required>
+        </div>
+
+        <div class="form-field">
+          <label for="dietitianDocumentDoctor">Doctor name</label>
+          <input class="text-input" id="dietitianDocumentDoctor"
+            name="doctor_name" required>
+        </div>
+
+        <div class="form-field full-width">
+          <label for="dietitianDocumentDoctorInfo">Doctor information</label>
+          <textarea class="text-input" id="dietitianDocumentDoctorInfo"
+            name="doctor_information"
+            placeholder="Practice, phone number, email, or other relevant details"
+            required></textarea>
+        </div>
+
+        <div class="form-field full-width">
+          <label for="dietitianDocumentFile">
+            Supporting document (PDF, JPEG, or PNG)
+          </label>
+          <input class="text-input file-input" id="dietitianDocumentFile"
+            name="file" type="file"
+            accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
+            required>
+        </div>
+
+        <div class="form-field full-width form-actions">
+          <button class="button button-primary" type="submit">
+            Upload medical document
+          </button>
+        </div>
+      </form>
+    </section>
   `;
+
+
+    const showButton = workspaceContent.querySelector("#showDietitianConditionForm");
+    workspaceContent.querySelector("#toggleMaternalCare").addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await request(`/api/v1/clients/${encodeURIComponent(clientId)}/maternal-care`, {
+                method: "PATCH",
+                body: JSON.stringify({ enabled: !profile.maternal_care_enabled }),
+            });
+            await renderClientManagementProfile(clientId);
+            showWorkspaceMessage(profile.maternal_care_enabled ? "Lactation page disabled." : "Lactation page enabled.");
+        } catch (error) {
+            showWorkspaceMessage(error.message, true);
+            button.disabled = false;
+        }
+    });
+    workspaceContent.querySelector("#openLactationPage")?.addEventListener("click", () => renderLactationTracking(clientId));
+    workspaceContent.querySelector("#editPatientMetrics")?.addEventListener("click", () => renderClientProgress(clientId));
+    const conditionForm = workspaceContent.querySelector("#dietitianMedicalConditionForm");
+    const cancelButton = workspaceContent.querySelector("#cancelDietitianConditionForm");
+
+    showButton.addEventListener("click", () => {
+        conditionForm.hidden = false;
+        showButton.hidden = true;
+        workspaceContent.querySelector("#dietitianConditionName").focus();
+    });
+
+    cancelButton.addEventListener("click", () => {
+        conditionForm.reset();
+        conditionForm.hidden = true;
+        showButton.hidden = false;
+    });
+
+    conditionForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const submitButton = conditionForm.querySelector('button[type="submit"]');
+        const values = Object.fromEntries(new FormData(conditionForm));
+        submitButton.disabled = true;
+
+        try {
+            await request(`/api/v1/clients/${encodeURIComponent(clientId)}/medical-conditions`, {
+                method: "POST",
+                body: JSON.stringify(values),
+            });
+            await renderClientManagementProfile(clientId);
+            showWorkspaceMessage("Medical condition added.");
+        } catch (error) {
+            showWorkspaceMessage(error.message, true);
+            submitButton.disabled = false;
+        }
+    });
 }
 
 async function renderClientManagementList() {
@@ -881,14 +1415,8 @@ async function renderClientManagementList() {
                     .map(
                         (client) => `
         <article class="dietitian-row" data-search="${escapeHtml([client.id, client.name, client.status].join(" "))}">
-          <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(
-              client.name
-                  .split(/\s+/)
-                  .slice(0, 2)
-                  .map((part) => part[0])
-                  .join(""),
-          )}</div>
-          <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} · ${escapeHtml(client.status)}</p></div>
+          ${profilePhotoAvatarMarkup("client", client.id, client.name)}
+          <div class="dietitian-details"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.id)} Â· ${escapeHtml(client.status)}</p></div>
           <div class="review-actions">
             <button class="button button-small button-approve" data-open-client="${escapeHtml(client.id)}" type="button">View</button>
             <button class="button button-small" data-draft-plan="${escapeHtml(client.id)}" type="button">Draft plan</button>
@@ -938,19 +1466,58 @@ function renderDietitianRows(dietitians) {
         .map(
             (dietitian) => `
     <article class="dietitian-row">
-      <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(
-          dietitian.full_name
-              .split(/\s+/)
-              .slice(0, 2)
-              .map((part) => part[0])
-              .join("")
-              .toUpperCase(),
-      )}</div>
-      <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
+      ${profilePhotoAvatarMarkup("dietitian", dietitian.id, dietitian.full_name)}
+      <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` Â· ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` Â· ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
       <span class="dietitian-status status-${escapeHtml(dietitian.status.toLowerCase())}">${escapeHtml(dietitian.status.replaceAll("_", " "))}</span>
     </article>`,
         )
         .join("")}</div>`;
+}
+
+function renderClientSettings() {
+    workspaceContent.innerHTML = `${pageHeading("SETTINGS", "Your account.", "Manage your profile and get help with your account.")}
+    ${appearanceSettingsMarkup()}
+    <section class="content-panel"><div class="quick-grid">
+      <button class="quick-link" data-go="my-profile" type="button"><strong>My Profile</strong><span>View and update your personal information.</span></button>
+      <button class="quick-link" data-go="support" type="button"><strong>Support &amp; Tickets</strong><span>Get help with your account.</span></button>
+    </div></section>`;
+    bindAppearanceSettings();
+    bindGoButtons();
+}
+
+function appearanceSettingsMarkup() {
+    const isDark = document.documentElement.dataset.theme === "dark";
+    return `
+    <section class="content-panel appearance-settings">
+      <div class="section-heading"><h2>Appearance</h2><span>PERSONAL PREFERENCE</span></div>
+      <label class="appearance-toggle" for="darkModeToggle">
+        <span class="appearance-toggle-copy"><strong>Dark mode</strong><small>Use a dark gray palette with light text and lighter gray buttons.</small></span>
+        <input id="darkModeToggle" type="checkbox" role="switch" aria-label="Dark mode" ${isDark ? "checked" : ""}>
+        <span class="appearance-switch" aria-hidden="true"></span>
+      </label>
+      <p class="appearance-message" id="appearanceMessage" role="status" aria-live="polite" hidden></p>
+    </section>`;
+}
+
+function bindAppearanceSettings() {
+    const toggle = workspaceContent.querySelector("#darkModeToggle");
+    const message = workspaceContent.querySelector("#appearanceMessage");
+    if (!toggle || !message) return;
+    toggle.addEventListener("change", () => {
+        const previousTheme = document.documentElement.dataset.theme;
+        const nextTheme = toggle.checked ? "dark" : "light";
+        document.documentElement.dataset.theme = nextTheme;
+        try {
+            localStorage.setItem(themePreferenceKey, nextTheme);
+            message.hidden = true;
+            message.textContent = "";
+        } catch (error) {
+            document.documentElement.dataset.theme = previousTheme;
+            toggle.checked = previousTheme === "dark";
+            message.textContent = `Could not save your appearance preference: ${error.message}`;
+            message.hidden = false;
+        }
+    });
 }
 
 async function renderClientDashboard(firstName) {
@@ -965,12 +1532,15 @@ async function renderClientDashboard(firstName) {
     </section>
     <div class="section-heading"><h2>My workspace</h2><span>QUICK ACCESS</span></div>
     <div class="quick-grid client-quick-grid">
-      <button class="quick-link" data-go="my-profile" type="button"><strong>My Profile</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="health-conditions" type="button"><strong>Health Information</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-goals" type="button"><strong>My Goals</strong><span aria-hidden="true">&#8599;</span></button>
       <button class="quick-link" data-go="client-meal-plan" type="button"><strong>My Meal Plan</strong><span aria-hidden="true">&#8599;</span></button>
+      <button class="quick-link" data-go="health-allergies" type="button"><strong>Allergies</strong><span aria-hidden="true">&#8599;</span></button>
+      <button class="quick-link" data-go="client-checkin" type="button"><strong>QR Check-In</strong><span aria-hidden="true">&#8599;</span></button>
+      <button class="quick-link" data-go="client-recommendations" type="button"><strong>Recommendations</strong><span aria-hidden="true">&#8599;</span></button>
+      ${String(currentUser.gender || "").toLowerCase() !== "male" ? '<button class="quick-link" data-go="health-lactation" type="button"><strong>Lactation</strong></button>' : ""}
       <button class="quick-link" data-go="client-appointments" type="button"><strong>Appointments</strong><span aria-hidden="true">&#8599;</span></button>
-        <button class="quick-link" data-go="ai-workspace" type="button"><strong>AI Coach</strong><span aria-hidden="true">&#8599;</span></button>
+        <button class="quick-link" data-go="ai-workspace" type="button"><strong>Nutrition Coach</strong><span aria-hidden="true">&#8599;</span></button>
     </div>
     <div class="section-heading"><h2>Find a Dietitian</h2><span>${dietitians.length} AVAILABLE</span></div>
     ${
@@ -979,15 +1549,8 @@ async function renderClientDashboard(firstName) {
                   .map(
                       (dietitian) => `
       <article class="dietitian-row">
-        <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(
-            dietitian.full_name
-                .split(/\s+/)
-                .slice(0, 2)
-                .map((part) => part[0])
-                .join("")
-                .toUpperCase(),
-        )}</div>
-        <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
+        ${profilePhotoAvatarMarkup("dietitian", dietitian.id, dietitian.full_name)}
+        <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.specialisation || "Nutrition care")}${dietitian.practice_name ? ` Â· ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` Â· ${escapeHtml(dietitian.branch_name)}` : ""}</p>${dietitian.branch_address ? `<p class="document-hint">Location: ${escapeHtml(dietitian.branch_address)}</p>` : ""}</div>
         <button class="button button-small button-approve" data-book-dietitian="${escapeHtml(dietitian.id)}" type="button">Book appointment</button>
       </article>`,
                   )
@@ -1001,6 +1564,22 @@ async function renderClientDashboard(firstName) {
             navTo("client-appointments");
         });
     });
+}
+
+function renderAdminProfile() {
+    if (!currentUser || currentUser.type !== "admin") return;
+    const fields = [
+        ["Full name", currentUser.full_name],
+        ["Email", currentUser.email],
+        ["Role", "Administrator"],
+    ];
+    workspaceContent.innerHTML = `
+        ${pageHeading("MY PROFILE", "Administrator profile.", "Your signed-in account details.")}
+        <section class="content-panel"><dl class="profile-details">
+            ${fields.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "Not provided")}</dd></div>`).join("")}
+        </dl></section>
+        ${profilePhotoSectionMarkup()}`;
+    bindProfilePhotoControls();
 }
 
 async function renderMyProfile() {
@@ -1017,9 +1596,8 @@ async function renderMyProfile() {
             profileUser = { ...user, ...clientRecord, id: user.id, full_name: user.full_name };
             currentUser = profileUser;
             sessionStorage.setItem(sessionKey, JSON.stringify(profileUser));
-            const isMaleClient = String(profileUser.gender || "").toLowerCase() === "male";
             document.querySelectorAll("[data-maternal-only]").forEach((item) => {
-                item.hidden = isMaleClient;
+                item.hidden = profileUser.maternal_care_enabled !== true;
             });
         }
     }
@@ -1033,7 +1611,6 @@ async function renderMyProfile() {
               ["ID number", profileUser.id_number],
               ["Gender", profileUser.gender],
               ["Date of birth", profileUser.date_of_birth],
-              ["Dietitian ID", profileUser.dietitian_id],
               ...(String(profileUser.gender || "").toLowerCase() === "male"
                   ? [["Testosterone", "Still under production"]]
                   : []),
@@ -1056,14 +1633,131 @@ async function renderMyProfile() {
       `,
           )
           .join("")}</dl>
-    </section>`;
+
+          
+       </section>
+    ${profilePhotoSectionMarkup()}
+    ${user.type === "dietitian" ? `
+    <div class="section-heading">
+      <h2>Practice information</h2>
+      <span>ACCOUNT MANAGEMENT</span>
+    </div>
+
+    <div class="quick-grid">
+      <button class="quick-link" data-go="dietitian-branches" type="button">
+        <strong>My branches</strong>
+        <span>View and manage your practice locations.</span>
+        <span aria-hidden="true">&#8599;</span>
+      </button>
+
+      <button class="quick-link" data-go="verification-documents" type="button">
+        <strong>Verification documents</strong>
+        <span>Upload and review your professional documents.</span>
+        <span aria-hidden="true">&#8599;</span>
+      </button>
+    </div>
+    ` : ""}`;
     if (approval) bindApprovalResubmission();
+    bindProfilePhotoControls();
+    if (user.type === "dietitian") bindGoButtons();
+}
+
+function profilePhotoSectionMarkup() {
+    return `<section class="content-panel">
+      <h2 class="compact-heading">Profile picture</h2>
+      <p>Upload a JPEG or PNG image up to 1 MB. You can replace or remove it at any time.</p>
+      <img data-profile-photo-preview class="profile-photo-preview" alt="Your profile picture" hidden>
+      <p data-profile-photo-empty>No profile picture uploaded.</p>
+      <form data-profile-photo-form class="profile-photo-actions">
+        <div class="form-field"><label for="profilePhotoFile">Choose a picture</label><input class="text-input" id="profilePhotoFile" name="file" type="file" accept="image/jpeg,image/png" required></div>
+        <button class="button button-primary" type="submit">Upload picture</button>
+        <button class="button" data-profile-photo-remove type="button" hidden>Remove picture</button>
+      </form>
+      <p data-profile-photo-message role="status" aria-live="polite"></p>
+    </section>`;
+}
+
+function bindProfilePhotoControls() {
+    const form = workspaceContent.querySelector("[data-profile-photo-form]");
+    if (!form) return;
+    const preview = workspaceContent.querySelector("[data-profile-photo-preview]");
+    const emptyMessage = workspaceContent.querySelector("[data-profile-photo-empty]");
+    const removeButton = workspaceContent.querySelector("[data-profile-photo-remove]");
+    const status = workspaceContent.querySelector("[data-profile-photo-message]");
+    const setPhotoMessage = (message, isError = false) => {
+        status.textContent = message;
+        status.dataset.kind = isError ? "error" : "success";
+    };
+    const refreshPreview = async () => {
+        try {
+            const photo = await fetchProfilePhoto();
+            if (!photo) {
+                if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+                delete preview.dataset.objectUrl;
+                preview.hidden = true;
+                preview.removeAttribute("src");
+                emptyMessage.hidden = false;
+                removeButton.hidden = true;
+                return true;
+            }
+            if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+            preview.dataset.objectUrl = URL.createObjectURL(photo);
+            preview.src = preview.dataset.objectUrl;
+            preview.hidden = false;
+            emptyMessage.hidden = true;
+            removeButton.hidden = false;
+            return true;
+        } catch (error) {
+            setPhotoMessage(error.message, true);
+            return false;
+        }
+    };
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const file = form.elements.file.files[0];
+        if (!file) return;
+        if (!["image/jpeg", "image/png"].includes(file.type) || file.size > 1024 * 1024) {
+            setPhotoMessage("Choose a JPEG or PNG image up to 1 MB.", true);
+            return;
+        }
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        const data = new FormData();
+        data.append("file", file);
+        try {
+            await request("/api/v1/profile/photo", { method: "PUT", body: data });
+            const previewLoaded = await refreshPreview();
+            await refreshAccountAvatar();
+            if (previewLoaded) setPhotoMessage("Profile picture updated.");
+            form.reset();
+        } catch (error) {
+            setPhotoMessage(error.message, true);
+        } finally {
+            button.disabled = false;
+        }
+    });
+    removeButton.addEventListener("click", async () => {
+        removeButton.disabled = true;
+        try {
+            await request("/api/v1/profile/photo", { method: "DELETE" });
+            const previewLoaded = await refreshPreview();
+            await refreshAccountAvatar();
+            if (previewLoaded) setPhotoMessage("Profile picture removed.");
+        } catch (error) {
+            setPhotoMessage(error.message, true);
+        } finally {
+            removeButton.disabled = false;
+        }
+    });
+    void refreshPreview();
 }
 
 function dietitianApprovalMarkup(approval) {
+    if (!approval) {
+        return '<section class="notice approval-feedback" role="status"><strong>Registration status unavailable.</strong></section>';
+    }
     if (approval.status === "APPROVED") return "";
-    const statusText =
-        approval.status === "REJECTED" ? "Registration rejected" : "Registration pending";
+    const statusText = approval.status === "REJECTED" ? "Registration rejected" : "Registration pending";
     const reason = approval.rejection_reason
         ? `<p><strong>Admin feedback:</strong> ${escapeHtml(approval.rejection_reason)}</p>`
         : "";
@@ -1095,11 +1789,14 @@ function bindApprovalResubmission() {
 }
 
 async function renderClientHealth(clientId, section) {
+    if (!["conditions", "allergies", "lactation"].includes(section)) {
+        await loadView("overview");
+        return;
+    }
     const profile = await request(`/api/v1/clients/${encodeURIComponent(clientId)}/profile`);
     const sectionTitles = {
         conditions: "Medical Conditions",
         allergies: "Allergies",
-        pregnancy: "Pregnancy",
         lactation: "Lactation",
     };
     const title = sectionTitles[section] || "Health Information";
@@ -1111,16 +1808,10 @@ async function renderClientHealth(clientId, section) {
             "condition_name",
             "No medical conditions recorded.",
         );
-        form = `<form id="clientHealthForm" class="form-grid"><div class="form-field"><label for="conditionName">Condition</label><input class="text-input" id="conditionName" name="condition_name" required></div><div class="form-field"><label for="conditionCode">ICD code (optional)</label><input class="text-input" id="conditionCode" name="icd_code"></div><div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add condition</button></div></form>`;
+        details += '<p class="notice">Your assigned dietitian records your medical conditions. You can view them here and upload supporting documents below.</p>';
     } else if (section === "allergies") {
         details = renderTags(profile.allergies, "allergen", "No allergies recorded.");
         form = `<form id="clientHealthForm" class="form-grid"><div class="form-field"><label for="allergenName">Allergen</label><input class="text-input" id="allergenName" name="allergen" required></div><div class="form-field"><label for="allergySeverity">Severity</label><select id="allergySeverity" name="severity"><option value="mild">Mild</option><option value="moderate">Moderate</option><option value="severe">Severe</option><option value="anaphylactic">Anaphylactic</option></select></div><div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add allergy</button></div></form>`;
-    } else if (section === "pregnancy") {
-        const pregnancy = profile.pregnancy;
-        details = pregnancy
-            ? `<dl class="profile-details"><div><dt>Trimester</dt><dd>${escapeHtml(pregnancy.trimester || "Not provided")}</dd></div><div><dt>Due date</dt><dd>${escapeHtml(pregnancy.due_date || "Not provided")}</dd></div></dl>`
-            : '<p class="empty-state">No pregnancy information recorded.</p>';
-        form = `<form id="clientHealthForm" class="form-grid"><div class="form-field"><label for="trimester">Trimester</label><select id="trimester" name="trimester"><option value="1">First</option><option value="2">Second</option><option value="3">Third</option></select></div><div class="form-field"><label for="dueDate">Due date</label><input class="text-input" id="dueDate" name="due_date" type="date" required></div><div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Save pregnancy details</button></div></form>`;
     } else {
         const lactation = profile.lactation;
         details = lactation
@@ -1129,10 +1820,11 @@ async function renderClientHealth(clientId, section) {
         form = `<form id="clientHealthForm" class="form-grid"><div class="form-field"><label for="lactationStatus">Status</label><select id="lactationStatus" name="is_active"><option value="true">Active</option><option value="false">Inactive</option></select></div><div class="form-field"><label for="lactationNotes">Notes</label><input class="text-input" id="lactationNotes" name="notes"></div><div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Save lactation details</button></div></form>`;
     }
     workspaceContent.innerHTML = `
-    ${pageHeading("HEALTH INFORMATION", title, "Keep your care team informed about current health details.")}
+    ${pageHeading("HEALTH INFORMATION", title, "Keep your care team informed about current health details.", currentUser.type === "dietitian" ? `<button class="button" id="backToClientProfile" type="button">Back to patient profile</button>` : "")}
     <div data-message class="workspace-message" hidden></div>
     <section class="content-panel"><p class="subsection-label">RECORDED DETAILS</p>${details}</section>
-    <section class="content-panel health-edit-panel"><p class="subsection-label">UPDATE ${escapeHtml(title.toUpperCase())}</p>${form}</section>`;
+    ${form ? `<section class="content-panel health-edit-panel"><p class="subsection-label">UPDATE ${escapeHtml(title.toUpperCase())}</p>${form}</section>` : ""}`;
+    workspaceContent.querySelector("#backToClientProfile")?.addEventListener("click", () => renderClientManagementProfile(clientId));
     if (section === "conditions") {
         const documents = await request(
             `/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents`,
@@ -1151,7 +1843,7 @@ async function renderClientHealth(clientId, section) {
           <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Upload medical document</button></div>
         </form>
         <div class="section-heading"><h2>Previous documents</h2><span>${documents.length} SAVED</span></div>
-        <div class="document-list">${documents.length ? documents.map((document) => `<article class="document-row"><div class="document-details"><h3><a href="/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}" data-private-medical-document="/api/v1/clients/${encodeURIComponent(clientId)}/medical-documents/${encodeURIComponent(document.document_id)}">${escapeHtml(document.file_name)}</a></h3><p>${escapeHtml(document.condition_name || "Medical condition")} · ${escapeHtml(document.doctor_name || "Doctor not provided")}</p><p>${escapeHtml(document.doctor_information || "")}</p></div></article>`).join("") : '<p class="empty-state">No supporting medical documents uploaded yet.</p>'}</div>
+        <div class="document-list">${documents.length ? documents.map((document) => `<article class="document-row"><div class="document-details"><h3>${medicalDocumentDownloadLinkMarkup(clientId, document)}</h3><p>${escapeHtml(document.condition_name || "Medical condition")} Â· ${escapeHtml(document.doctor_name || "Doctor not provided")}</p><p>${escapeHtml(document.doctor_information || "")}</p></div></article>`).join("") : '<p class="empty-state">No supporting medical documents uploaded yet.</p>'}</div>
       </section>`,
         );
         document.querySelector("#medicalDocumentForm").addEventListener("submit", async (event) => {
@@ -1172,12 +1864,12 @@ async function renderClientHealth(clientId, section) {
             }
         });
     }
-    document.querySelector("#clientHealthForm").addEventListener("submit", async (event) => {
+    if (section === "conditions") await mountCarePanel(workspaceContent, clientId, false);
+    document.querySelector("#clientHealthForm")?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const values = Object.fromEntries(new FormData(event.currentTarget));
         let endpoint = section;
         if (section === "conditions") endpoint = "medical-conditions";
-        if (section === "pregnancy") values.trimester = Number(values.trimester);
         if (section === "lactation") values.is_active = values.is_active === "true";
         try {
             await request(`/api/v1/clients/${encodeURIComponent(clientId)}/${endpoint}`, {
@@ -1311,8 +2003,9 @@ async function renderLactationTracking(clientId) {
         return;
     }
     workspaceContent.innerHTML = `
-    ${pageHeading("HEALTH INFORMATION", "Lactation", "Track feeding, milk supply, weaning, maternal comfort, and infant sensitivities in one place.")}
+    ${pageHeading("HEALTH INFORMATION", "Lactation", "Track feeding, milk supply, weaning, maternal comfort, and infant sensitivities in one place.", currentUser.type === "dietitian" ? `<button class="button" id="backToClientProfile" type="button">Back to patient profile</button>` : "")}
     <div data-message class="workspace-message" hidden></div>`;
+    workspaceContent.querySelector("#backToClientProfile")?.addEventListener("click", () => renderClientManagementProfile(clientId));
     const plan = overview.weaning[0];
     const weaningQuery = new URLSearchParams({
         current_sessions: plan ? plan.feeds_per_day_current : 6,
@@ -1515,15 +2208,17 @@ function formatSleepHours(value) {
 }
 
 async function renderClientProgress(clientId) {
-    const [progressResult, metricsResult] = await Promise.allSettled([
+    const canEditMetrics = currentUser.type === "dietitian";
+    const [progressResult, metricsResult, mealsResult] = await Promise.allSettled([
         request(`/api/v1/clients/${encodeURIComponent(clientId)}/progress`),
         request(`/api/v1/clients/${encodeURIComponent(clientId)}/metrics`),
+        request(`/api/v1/clients/${encodeURIComponent(clientId)}/meals`),
     ]);
-    const meals = await request(`/api/v1/clients/${encodeURIComponent(clientId)}/meals`).catch(
-        () => [],
-    );
     const progress = progressResult.status === "fulfilled" ? progressResult.value : [];
     const metrics = metricsResult.status === "fulfilled" ? metricsResult.value : [];
+    const meals = mealsResult.status === "fulfilled" ? mealsResult.value : [];
+    const mealLoadError =
+        mealsResult.status === "rejected" ? mealsResult.reason.message : "";
     const latest = progress.at(-1) || {};
     const weightHistory = progress
         .filter((entry) => Number(entry.weight_kg) > 0)
@@ -1585,20 +2280,73 @@ async function renderClientProgress(clientId) {
         ],
     ];
     workspaceContent.innerHTML = `
-    ${pageHeading("MY PROGRESS", "Progress metrics.", "Track the measurements and daily habits recorded for your care.")}
+    ${pageHeading(canEditMetrics ? "PATIENT PROGRESS" : "MY PROGRESS", "Progress metrics.", "Health metrics are recorded and managed by your doctor/dietitian.")}
     <div data-message class="workspace-message" hidden></div>
     <div class="client-progress-layout">
-      <section class="content-panel weight-trend"><div class="progress-section-heading"><h2>Weight</h2><strong>${escapeHtml(metricCards[0][1])}</strong></div>
-        ${weightHistory.length ? renderWeightChart(weightHistory) : '<p class="empty-state">No weight history has been recorded yet.</p>'}
+      <section class="content-panel weight-trend"><div class="progress-section-heading"><h2>Metrics graph</h2><strong>${escapeHtml(metricCards[0][1])}</strong></div>
+        ${weightHistory.length ? renderWeightChart(weightHistory) : '<p class="empty-state">No history yet recorded</p>'}
       </section>
-      <section class="content-panel"><h2 class="compact-heading">Health Metrics</h2><dl class="progress-metrics">${metricCards.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></section>
+      <section class="content-panel"><h2 class="compact-heading">Health Metrics</h2><p class="document-hint">${canEditMetrics ? "Record and update these values for your patient below." : "These values are recorded by your assigned doctor/dietitian. Contact them to add or update a measurement."}</p><dl class="progress-metrics">${metricCards.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></section>
     </div>`;
-    workspaceContent.insertAdjacentHTML(
+    if (canEditMetrics) {
+        const now = new Date();
+        const selectedDate = new Date(
+            now.getTime() - now.getTimezoneOffset() * 60_000,
+        )
+            .toISOString()
+            .slice(0, 10);
+        workspaceContent.insertAdjacentHTML(
+            "beforeend",
+            `
+    <section class="content-panel progress-edit-panel">
+      <div class="section-heading">
+        <h2 class="compact-heading">What the client ate</h2>
+        <div class="form-field"><label for="patientMealLogDate">Day</label><input class="text-input" id="patientMealLogDate" type="date" value="${selectedDate}"></div>
+      </div>
+      <div id="patientMealDiary" aria-live="polite">${
+          mealLoadError
+              ? `<p class="workspace-message error" role="alert">Could not load the client's meal history: ${escapeHtml(mealLoadError)}</p>`
+              : ""
+      }</div>
+    </section>`,
+        );
+        if (!mealLoadError) {
+            const dateInput = workspaceContent.querySelector("#patientMealLogDate");
+            const diary = workspaceContent.querySelector("#patientMealDiary");
+            const renderDiary = () => {
+                const dailyMeals = meals
+                    .filter((meal) => String(meal.log_date).slice(0, 10) === dateInput.value)
+                    .sort((a, b) =>
+                        String(a.meal_time || "99:99").localeCompare(
+                            String(b.meal_time || "99:99"),
+                        ),
+                    );
+                const recordedCalories = dailyMeals.reduce(
+                    (total, meal) => total + (meal.calories == null ? 0 : Number(meal.calories)),
+                    0,
+                );
+                diary.innerHTML = `
+      <p class="document-hint">${dailyMeals.length} meal${dailyMeals.length === 1 ? "" : "s"} recorded${dailyMeals.some((meal) => meal.calories != null) ? ` · ${recordedCalories.toLocaleString()} recorded kcal` : ""}</p>
+      <div class="result-list">${
+          dailyMeals.length
+              ? dailyMeals
+                    .map(
+                        (meal) => `<article class="result-item"><span><strong>${escapeHtml(meal.meal_time || "Time not recorded")} · ${escapeHtml(meal.meal_type)}</strong><br>${escapeHtml(meal.description)}${meal.calories != null ? ` · ${escapeHtml(meal.calories)} kcal` : ""}${meal.notes ? `<br>${escapeHtml(meal.notes)}` : ""}</span></article>`,
+                    )
+                    .join("")
+              : '<p class="empty-state">No meals were recorded for this day.</p>'
+      }</div>`;
+            };
+            dateInput.addEventListener("change", renderDiary);
+            renderDiary();
+        }
+    }
+    if (canEditMetrics) workspaceContent.insertAdjacentHTML(
         "beforeend",
         `
     <section class="content-panel progress-edit-panel">
-      <h2 class="compact-heading">Update My Progress</h2>
-      <p class="progress-edit-copy">Enter any measurements you tracked today. Blank fields keep their previous values.</p>
+      <h2 class="compact-heading">Update patient health metrics</h2>
+      <p class="progress-edit-copy">Record this patient's measurements. Blank fields keep their previous values for today.</p>
       <form id="progressUpdateForm" class="form-grid">
         <div class="form-field"><label for="progressWeight">Weight (kg)</label><input class="text-input" id="progressWeight" name="weight_kg" type="number" min="0" step="0.1" value="${escapeHtml(latest.weight_kg ?? "")}"></div>
         <div class="form-field"><label for="progressBodyFat">Body Fat (%)</label><input class="text-input" id="progressBodyFat" name="body_fat_pct" type="number" min="0" max="100" step="0.1" value="${escapeHtml(latest.body_fat_pct ?? "")}"></div>
@@ -1611,7 +2359,7 @@ async function renderClientProgress(clientId) {
       </form>
     </section>`,
     );
-    workspaceContent.insertAdjacentHTML(
+    if (!canEditMetrics) workspaceContent.insertAdjacentHTML(
         "beforeend",
         `
     <section class="content-panel progress-edit-panel">
@@ -1627,11 +2375,19 @@ async function renderClientProgress(clientId) {
         <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Save meal</button></div>
       </form>
       <div class="section-heading"><h2>Meal history</h2><span>${meals.length} SAVED</span></div>
-      <div class="result-list">${meals.length ? meals.map((meal) => `<article class="result-item"><span><strong>${escapeHtml(String(meal.log_date).slice(0, 10))}${meal.meal_time ? ` · ${escapeHtml(meal.meal_time)}` : ""} · ${escapeHtml(meal.meal_type)}</strong><br>${escapeHtml(meal.description)}${meal.calories != null ? ` · ${escapeHtml(meal.calories)} kcal` : ""}${meal.notes ? `<br>${escapeHtml(meal.notes)}` : ""}</span></article>`).join("") : '<p class="empty-state">No meals recorded yet.</p>'}</div>
+      <div class="result-list">${meals.length ? meals.map((meal) => `<article class="result-item"><span><strong>${escapeHtml(String(meal.log_date).slice(0, 10))}${meal.meal_time ? ` Â· ${escapeHtml(meal.meal_time)}` : ""} Â· ${escapeHtml(meal.meal_type)}</strong><br>${escapeHtml(meal.description)}${meal.calories != null ? ` Â· ${escapeHtml(meal.calories)} kcal` : ""}${meal.notes ? `<br>${escapeHtml(meal.notes)}` : ""}</span></article>`).join("") : '<p class="empty-state">No meals recorded yet.</p>'}</div>
     </section>`,
     );
-    document.querySelector("#mealLogDate").value = new Date().toISOString().slice(0, 10);
-    document.querySelector("#progressUpdateForm").addEventListener("submit", async (event) => {
+    const mealLogDate = document.querySelector("#mealLogDate");
+    if (mealLogDate) {
+        const now = new Date();
+        mealLogDate.value = new Date(
+            now.getTime() - now.getTimezoneOffset() * 60_000,
+        )
+            .toISOString()
+            .slice(0, 10);
+    }
+    document.querySelector("#progressUpdateForm")?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const values = {};
         for (const [key, rawValue] of new FormData(event.currentTarget)) {
@@ -1652,7 +2408,7 @@ async function renderClientProgress(clientId) {
             showWorkspaceMessage(error.message, true);
         }
     });
-    document.querySelector("#mealLogForm").addEventListener("submit", async (event) => {
+    document.querySelector("#mealLogForm")?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const values = Object.fromEntries(new FormData(event.currentTarget));
         if (values.calories === "") delete values.calories;
@@ -1668,18 +2424,14 @@ async function renderClientProgress(clientId) {
             showWorkspaceMessage(error.message, true);
         }
     });
+    await mountCarePanel(workspaceContent, clientId, canEditMetrics);
 }
 
 async function renderClientGoals(clientId) {
     const goals = await request(`/api/v1/goals?client_id=${encodeURIComponent(clientId)}`);
     workspaceContent.innerHTML = `
-    ${pageHeading("MY GOALS", "Goals that move with you.", "Choose goals that reflect what matters to you, from daily habits and energy to hydration, digestion, health needs, or weight if relevant.")}
+    ${pageHeading("MY GOALS", "Goals that move with you.", "Your dietitian sets your goals and targets. View them here and record your measurements in My Progress.")}
     <div data-message class="workspace-message" hidden></div>
-    <section class="content-panel"><form id="clientGoalForm" class="form-grid">
-      <div class="form-field"><label for="goalMetric">Goal metric</label><select id="goalMetric" name="target_metric"><option>Balanced meals per day</option><option>Fruit and vegetable servings</option><option>Fiber servings</option><option>Water (ml)</option><option>Meals per day</option><option>Home-cooked meals per week</option><option>Protein servings</option><option>Sleep (hours)</option><option>Steps</option><option>Symptom-free days</option><option>Weight (optional)</option><option>Body fat (optional)</option><option>Waist (optional)</option><option>Calories (dietitian-guided)</option></select></div>
-      <div class="form-field"><label for="goalTarget">Target value</label><input class="text-input" id="goalTarget" name="target_value" type="number" step="any" required></div>
-      <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add goal</button></div>
-    </form></section>
     <div class="section-heading"><h2>My goals</h2><span>${goals.length} SAVED</span></div>
     <div class="goal-list">${
         goals.length
@@ -1689,21 +2441,8 @@ async function renderClientGoals(clientId) {
       <article class="goal-row"><div><span class="subsection-label">${escapeHtml(goal.target_metric)}</span><h3>Target ${escapeHtml(goal.target_value)}</h3></div><div class="goal-current"><span>Current</span><strong>${goal.current_value == null ? "Not recorded" : escapeHtml(goal.current_value)}</strong></div></article>`,
                   )
                   .join("")
-            : '<p class="empty-state">No goals saved yet. Choose a goal that is meaningful to you. Goals can focus on habits, nourishment, hydration, symptoms, activity, or measurements when relevant.</p>'
+            : '<p class="empty-state">Your dietitian has not assigned any goals yet. Discuss your goals at your next consultation.</p>'
     }</div>`;
-    document.querySelector("#clientGoalForm").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const values = Object.fromEntries(new FormData(event.currentTarget));
-        values.client_id = clientId;
-        values.target_value = Number(values.target_value);
-        try {
-            await request("/api/v1/goals", { method: "POST", body: JSON.stringify(values) });
-            await renderClientGoals(clientId);
-            showWorkspaceMessage("Goal saved.");
-        } catch (error) {
-            showWorkspaceMessage(error.message, true);
-        }
-    });
 }
 
 async function renderClientMealPlan(clientId, selectedTab = "today") {
@@ -1716,11 +2455,11 @@ async function renderClientMealPlan(clientId, selectedTab = "today") {
         if (!days.length) return '<p class="empty-state">No schedule has been shared.</p>';
         return days
             .map((day, index) => {
-                const meals = Array.isArray(day.meals) ? day.meals : [];
+                const meals = Array.isArray(day.meals) ? day.meals : day.candidate_recipe ? [day.candidate_recipe] : [];
                 const entries = meals.map((meal) =>
                     typeof meal === "string"
                         ? meal
-                        : [meal.name, meal.recipe_name, meal.meal_type].filter(Boolean).join(" — "),
+                        : [meal.title || meal.name || meal.recipe_name, meal.meal_type].filter(Boolean).join(" · "),
                 );
                 return `<article class="meal-plan-row"><h3>Day ${escapeHtml(day.day || index + 1)}</h3><ul class="meal-summary">${entries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></article>`;
             })
@@ -1731,7 +2470,7 @@ async function renderClientMealPlan(clientId, selectedTab = "today") {
               .map((item) => {
                   const plan = item.plan || {};
                   return `<section class="content-panel"><h2>${escapeHtml(plan.diet_type || "Dietitian-approved meal plan")}</h2>
-      <p class="appointment-note">Status: ${escapeHtml(item.status)} · ${escapeHtml(plan.days || "")} days</p>
+      <p class="appointment-note">Status: ${escapeHtml(item.status)} Â· ${escapeHtml(plan.days || "")} days</p>
       ${selectedTab === "details" ? `<p>Plan reviewed by your dietitian.</p>${renderSchedule(plan, "week")}` : renderSchedule(plan, selectedTab)}
     </section>`;
               })
@@ -1758,10 +2497,17 @@ async function renderClientAppointments(
         request(`/api/v1/appointments?client_id=${encodeURIComponent(clientId)}`),
         request("/api/v1/dietitians"),
     ]);
+    const branches = [...new Map(dietitians.filter(d => d.branch_id).map(d => [d.branch_id, d])).values()];
     const now = Date.now();
-    const isUpcoming = (appointment) =>
-        new Date(appointment.appointment_date).getTime() >= now &&
-        ["PENDING", "CONFIRMED", "SCHEDULED"].includes(appointment.status || "SCHEDULED");
+    const isUpcoming = (appointment) => {
+        const when = new Date(appointment.appointment_date);
+        const status = appointment.status || "SCHEDULED";
+        const ongoingVirtual = isVirtualAppointment(appointment)
+            && ["CONFIRMED", "SCHEDULED"].includes(status)
+            && when.toDateString() === new Date(now).toDateString();
+        return ["PENDING", "CONFIRMED", "SCHEDULED"].includes(status)
+            && (when.getTime() >= now || ongoingVirtual);
+    };
     const upcoming = appointments.filter(isUpcoming);
     const past = appointments.filter((appointment) => !isUpcoming(appointment));
     const activeTab = ["book", "upcoming", "past"].includes(selectedTab) ? selectedTab : "upcoming";
@@ -1772,19 +2518,43 @@ async function renderClientAppointments(
               .map(
                   (appointment) => `
     <article class="appointment-row">
-      <div><span class="appointment-status status-${escapeHtml((appointment.status || "scheduled").toLowerCase())}">${escapeHtml(appointment.status || "SCHEDULED")}</span><h3>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</h3></div>
-      <span>${escapeHtml(dietitians.find((dietitian) => dietitian.id === appointment.dietitian_id)?.full_name || `Dietitian ${appointment.dietitian_id}`)}</span>
-      ${activeTab === "upcoming" ? `<button class="button button-small button-reject" data-cancel-appointment="${escapeHtml(appointment.appointment_id)}" type="button">Cancel appointment</button>` : ""}
+  <div>
+    <span class="appointment-status status-${escapeHtml((appointment.status || "scheduled").toLowerCase())}">
+      ${escapeHtml(appointment.status || "SCHEDULED")}
+    </span>
+    <h3>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</h3>
+    <p>${escapeHtml(appointment.consultation_type === "FOLLOW_UP" ? "Follow-up consultation" : "Initial consultation")} &middot; ${escapeHtml(dietitians.find(d => d.branch_id === appointment.branch_id)?.branch_name || "")}</p>
+    <p>Appointment type: <strong>${
+        isVirtualAppointment(appointment) ? "Virtual" : "In-person"
+    }</strong></p>
+    ${appointmentMeetingMarkup(appointment)}
+    ${appointment.checkin_qr_svg ? `<div class="appointment-checkin-qr"><img alt="Appointment check-in QR code" src="data:image/svg+xml,${encodeURIComponent(appointment.checkin_qr_svg)}"><span>Show this QR to an administrator or your dietitian on your appointment day</span></div>` : ""}
+  </div>
+
+  <span>${escapeHtml(dietitians.find((dietitian) => dietitian.id === appointment.dietitian_id)?.full_name || `Dietitian ${appointment.dietitian_id}`)}</span>
+
+  ${activeTab === "upcoming" ? `<button class="button button-small button-reject" data-cancel-appointment="${escapeHtml(appointment.appointment_id)}" type="button">Cancel appointment</button>` : ""}
     </article>`,
               )
               .join("")
         : `<p class="empty-state">${activeTab === "upcoming" ? "No upcoming appointments." : "No past appointments."}</p>`;
     const minDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
         .toISOString()
-        .slice(0, 16);
+        .slice(0, 10);
+    const appointmentSlots = Array.from({ length: 10 }, (_, index) => {
+        const startMinutes = 8 * 60 + index * 55;
+        const endMinutes = startMinutes + 50;
+        const formatSlotTime = (minutes) =>
+            `${String(Math.floor(minutes / 60)).padStart(2, "0")}h${String(minutes % 60).padStart(2, "0")}`;
+        return {
+            value: `${String(Math.floor(startMinutes / 60)).padStart(2, "0")}:${String(startMinutes % 60).padStart(2, "0")}`,
+            label: `${formatSlotTime(startMinutes)}-${formatSlotTime(endMinutes)}`,
+        };
+    });
     workspaceContent.innerHTML = `
     ${pageHeading("MY APPOINTMENTS", "Time with your care team.", "Request a visit and track its status here.")}
     <div data-message class="workspace-message" hidden></div>
+    <div class="form-actions"><button class="button quiet-button" type="button" data-refresh-appointments>Refresh appointments</button></div>
     <div class="meal-view-tabs appointment-tabs" role="tablist" aria-label="Appointments">
       <button class="meal-view-tab${activeTab === "book" ? " is-active" : ""}" role="tab" aria-selected="${activeTab === "book"}" data-appointment-tab="book" type="button">Book Appointment</button>
       <button class="meal-view-tab${activeTab === "upcoming" ? " is-active" : ""}" role="tab" aria-selected="${activeTab === "upcoming"}" data-appointment-tab="upcoming" type="button">Upcoming</button>
@@ -1796,17 +2566,33 @@ async function renderClientAppointments(
                   dietitians.length
                       ? `
       <form id="appointmentForm" class="form-grid appointment-booking-form">
-        <div class="form-field"><label for="appointmentDietitian">Dietitian</label><select class="text-input" id="appointmentDietitian" name="dietitian_id" required><option value="">Choose a Dietitian</option>${dietitians.map((dietitian) => `<option value="${escapeHtml(dietitian.id)}" ${dietitian.id === preferredDietitianId ? "selected" : ""}>${escapeHtml(dietitian.full_name)}${dietitian.practice_name ? ` · ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` · ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` · ${escapeHtml(dietitian.branch_address)}` : ""}</option>`).join("")}</select></div>
-        <div class="form-field"><label for="appointmentDate">Preferred date and time</label><input class="text-input" id="appointmentDate" name="appointment_date" type="datetime-local" min="${minDate}" required></div>
+        <div class="form-field"><label for="appointmentBranch">Branch</label><select class="text-input" id="appointmentBranch" name="branch_id" required><option value="">Choose a branch</option>${branches.map(d => `<option value="${escapeHtml(d.branch_id)}">${escapeHtml(d.branch_name || d.practice_name || d.branch_id)} &middot; ${escapeHtml(d.branch_address || "")}</option>`).join("")}</select></div>
+        <div class="form-field"><label for="consultationType">Consultation type</label><select class="text-input" id="consultationType" name="consultation_type" required><option value="INITIAL">Initial consultation</option><option value="FOLLOW_UP">Follow-up consultation</option></select></div>
+        <div class="form-field"><label for="appointmentDietitian">Dietitian</label><select class="text-input" id="appointmentDietitian" name="dietitian_id" required><option value="">Choose a Dietitian</option>${dietitians.map((dietitian) => `<option value="${escapeHtml(dietitian.id)}" ${dietitian.id === preferredDietitianId ? "selected" : ""}>${escapeHtml(dietitian.full_name)}${dietitian.practice_name ? ` Â· ${escapeHtml(dietitian.practice_name)}` : ""}${dietitian.branch_name ? ` Â· ${escapeHtml(dietitian.branch_name)}` : ""}${dietitian.branch_address ? ` Â· ${escapeHtml(dietitian.branch_address)}` : ""}</option>`).join("")}</select></div>
+    <div class="form-field">
+  <label for="appointmentType">Appointment type</label>
+  <select class="text-input" id="appointmentType" name="appointment_type" required>
+    <option value="IN_PERSON">In-person</option>
+    <option value="VIRTUAL">Virtual</option>
+  </select>
+</div>
+    <div class="form-field"><label for="appointmentDate">Preferred date</label><input class="text-input" id="appointmentDate" name="appointment_day" type="date" min="${minDate}" required></div>
+    <div class="form-field"><label for="appointmentTime">Available time</label><select class="text-input" id="appointmentTime" name="appointment_time" required><option value="">Choose a time</option>${appointmentSlots.map((slot) => `<option value="${slot.value}">${slot.label}</option>`).join("")}</select></div>
         <div class="form-field form-actions"><button class="button button-primary" type="submit">Send request <span class="button-arrow" aria-hidden="true">&#8594;</span></button></div>
       </form>
-      <p class="appointment-note">Your request stays pending until the selected Dietitian approves or rejects it.</p>`
+      <p class="appointment-note">Your request stays pending until the selected Dietitian approves or rejects it.</p>
+      <p class="appointment-note" data-virtual-booking-note hidden>For virtual visits, your dietitian confirms the appointment and prepares a meeting link. Join from this page when ready.</p>`
                       : '<p class="empty-state">No approved Dietitians are available for booking right now.</p>'
               }</section>`
             : `
       <div class="section-heading"><h2>${activeTab === "upcoming" ? "Upcoming Appointments" : "Past Appointments"}</h2><span>${rows.length} APPOINTMENTS</span></div>
       <div class="appointment-list">${appointmentRows}</div>`
     }`;
+    workspaceContent.querySelector('[data-refresh-appointments]').addEventListener('click', async event => {
+        event.currentTarget.disabled = true;
+        try { await renderClientAppointments(clientId, activeTab); }
+        catch (error) { showWorkspaceMessage(error.message, true); event.target.disabled = false; }
+    });
     workspaceContent.querySelectorAll("[data-appointment-tab]").forEach((button) => {
         button.addEventListener("click", () =>
             renderClientAppointments(
@@ -1817,18 +2603,47 @@ async function renderClientAppointments(
         );
     });
     const form = document.querySelector("#appointmentForm");
+    if (form) {
+        const branch = form.querySelector("#appointmentBranch");
+        const dietitian = form.querySelector("#appointmentDietitian");
+        branch.value = dietitians.find(d => d.id === preferredDietitianId)?.branch_id || "";
+        const filterDietitians = () => {
+            for (const option of dietitian.options) {
+                const match = !option.value || dietitians.find(d => d.id === option.value)?.branch_id === branch.value;
+                option.hidden = !match;
+                option.disabled = !match;
+            }
+            if (dietitian.selectedOptions[0]?.disabled) dietitian.value = "";
+        };
+        branch.addEventListener("change", filterDietitians);
+        filterDietitians();
+        const format = form.querySelector('#appointmentType');
+        const note = workspaceContent.querySelector('[data-virtual-booking-note]');
+        const updateMeetingNote = () => { note.hidden = format.value !== 'VIRTUAL'; };
+        format.addEventListener('change', updateMeetingNote);
+        updateMeetingNote();
+    }
+
     if (form)
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
             const values = Object.fromEntries(new FormData(form));
+            values.appointment_date = `${values.appointment_day}T${values.appointment_time}:00`;
+            values.visit_type = values.consultation_type === "FOLLOW_UP" ? "follow_up" : "initial_visit";
+            delete values.appointment_day;
+            delete values.appointment_time;
             values.client_id = clientId;
             try {
-                await request("/api/v1/appointments", {
+                const result = await request("/api/v1/appointments", {
                     method: "POST",
                     body: JSON.stringify(values),
                 });
                 await renderClientAppointments(clientId, "upcoming");
-                showWorkspaceMessage("Appointment request sent. It is pending dietitian review.");
+                showWorkspaceMessage(
+                    result.email_notification?.status === "sent"
+                        ? "Appointment request sent. It is pending dietitian review."
+                        : "Appointment request sent, but we could not email the dietitian. Please contact the practice.",
+                );
             } catch (error) {
                 showWorkspaceMessage(error.message, true);
             }
@@ -1854,59 +2669,377 @@ async function renderClientAppointments(
     });
 }
 
-async function renderAppointmentRequests() {
-    const appointments = await request(
-        `/api/v1/appointments?dietitian_id=${encodeURIComponent(currentUser.id)}`,
+async function renderAppointmentRequests(initialDate = null) {
+    const appointments = await request("/api/v1/appointments/calendar");
+
+    const selectedDate = new Date(initialDate || Date.now());
+    selectedDate.setHours(0, 0, 0, 0);
+
+    let calendarMonth = new Date(
+        selectedDate.getFullYear(),
+        selectedDate.getMonth(),
+        1,
     );
-    const pending = appointments.filter((appointment) => appointment.status === "PENDING");
-    workspaceContent.innerHTML = `
-    ${pageHeading("APPOINTMENT REQUESTS", "Requests awaiting your review.", "Approve a request to confirm the appointment, or reject it.")}
-    <div data-message class="workspace-message" hidden></div>
-    <div class="appointment-list">${
-        pending.length
-            ? pending
-                  .map(
-                      (appointment) => `
-      <article class="appointment-request-row" data-appointment-id="${escapeHtml(appointment.appointment_id)}" data-patient-card>
-        <div class="appointment-request-details"><span class="appointment-status status-pending">PENDING</span><h2>${escapeHtml(appointment.client_id)}</h2><p>${escapeHtml(new Date(appointment.appointment_date).toLocaleString())}</p></div>
-        <div class="review-actions"><button class="button button-small" data-patient-context="${escapeHtml(appointment.client_id)}" aria-expanded="false" type="button">View patient info</button><button class="button button-small button-reject" data-appointment-decision="REJECTED" type="button">Reject</button><button class="button button-small button-approve" data-appointment-decision="APPROVED" type="button">Approve</button></div>
-        <div data-patient-preview hidden></div>
-      </article>`,
-                  )
-                  .join("")
-            : '<p class="empty-state">No appointment requests need review.</p>'
-    }</div>`;
-    bindPatientContextButtons();
-    workspaceContent.querySelectorAll("[data-appointment-decision]").forEach((button) => {
-        button.addEventListener("click", async () => {
-            const card = button.closest("[data-appointment-id]");
-            card.querySelectorAll("button").forEach((item) => {
-                item.disabled = true;
-            });
-            const action = button.dataset.appointmentDecision;
-            try {
-                await request(
-                    `/api/v1/appointments/${encodeURIComponent(card.dataset.appointmentId)}`,
-                    {
-                        method: "PATCH",
-                        body: JSON.stringify({ action }),
-                    },
-                );
-                await renderAppointmentRequests();
-                showWorkspaceMessage(
-                    action === "APPROVED"
-                        ? "Appointment confirmed."
-                        : "Appointment request rejected.",
-                );
-            } catch (error) {
-                card.querySelectorAll("button").forEach((item) => {
-                    item.disabled = false;
-                });
-                showWorkspaceMessage(error.message, true);
-            }
+
+    const dateKey = (date) =>
+        `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+    const appointmentDate = (appointment) =>
+        new Date(appointment.appointment_date);
+
+    const sameDay = (first, second) =>
+        dateKey(first) === dateKey(second);
+
+    const selectedAppointments = () =>
+        appointments.filter((appointment) =>
+            sameDay(appointmentDate(appointment), selectedDate),
+        );
+
+    const formatTime = (value) =>
+        new Date(value).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
         });
+
+    const formatDate = (value) =>
+        new Date(value).toLocaleDateString([], {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+        });
+
+    function renderCalendar() {
+        const monthName = calendarMonth.toLocaleDateString([], {
+            month: "long",
+            year: "numeric",
+        });
+
+        const firstDay = new Date(
+            calendarMonth.getFullYear(),
+            calendarMonth.getMonth(),
+            1,
+        );
+
+        const startOffset = (firstDay.getDay() + 6) % 7;
+
+        const daysInMonth = new Date(
+            calendarMonth.getFullYear(),
+            calendarMonth.getMonth() + 1,
+            0,
+        ).getDate();
+
+        const calendarCells = [];
+
+        for (let i = 0; i < startOffset; i++) {
+            calendarCells.push('<div class="calendar-day calendar-day-empty"></div>');
+        }
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            const date = new Date(
+                calendarMonth.getFullYear(),
+                calendarMonth.getMonth(),
+                day,
+            );
+
+            const key = dateKey(date);
+
+            const dayAppointments = appointments.filter((appointment) =>
+                sameDay(appointmentDate(appointment), date),
+            );
+
+            const isSelected = sameDay(date, selectedDate);
+            const isToday = sameDay(date, new Date());
+
+            calendarCells.push(`
+                <button
+                    type="button"
+                    class="calendar-day ${isSelected ? "is-selected" : ""} ${isToday ? "is-today" : ""}"
+                    data-calendar-date="${key}"
+                    aria-pressed="${isSelected}"
+                >
+                    <span class="calendar-day-number">${day}</span>
+                    ${
+                        dayAppointments.length
+                            ? `<span class="calendar-day-count">${dayAppointments.length} appointment${dayAppointments.length === 1 ? "" : "s"}</span>`
+                            : ""
+                    }
+                </button>
+            `);
+        }
+
+        const dayAppointments = selectedAppointments();
+
+        const pending = dayAppointments.filter(
+            (appointment) => appointment.status === "PENDING",
+        );
+
+        const scheduled = dayAppointments.filter(
+            (appointment) =>
+                ["CONFIRMED", "SCHEDULED"].includes(appointment.status) &&
+                !appointment.checked_in_at,
+        );
+
+        const waiting = dayAppointments.filter(
+            (appointment) =>
+                ["CONFIRMED", "SCHEDULED"].includes(appointment.status) &&
+                appointment.checked_in_at,
+        );
+
+        const patientName = (appointment) =>
+            escapeHtml(
+                appointment.client_name || appointment.client_id,
+            );
+
+      const appointmentCard = (appointment, showActions = false) => `
+    <article
+        class="appointment-request-row"
+        data-appointment-id="${escapeHtml(appointment.appointment_id)}"
+        data-appointment-type="${isVirtualAppointment(appointment) ? "VIRTUAL" : "IN_PERSON"}"
+        data-patient-card
+    >
+        <div class="appointment-request-details">
+            <span class="appointment-status ${
+                appointment.status === "PENDING"
+                    ? "status-pending"
+                    : "status-confirmed"
+            }">${escapeHtml(appointment.status)}</span>
+
+            <h2>${patientName(appointment)}</h2>
+            <p>${escapeHtml(formatTime(appointment.appointment_date))}</p>
+
+            <p>
+                Appointment type:
+                <strong>${
+                    isVirtualAppointment(appointment)
+                        ? "Virtual"
+                        : "In-person"
+                }</strong>
+            </p>
+
+            ${appointmentMeetingMarkup(appointment, true)}
+            ${showActions ? meetingChoiceMarkup(appointment) : ""}
+        </div>
+
+        <div class="review-actions">
+            <button
+                class="button button-small"
+                data-patient-context="${escapeHtml(appointment.client_id)}"
+                aria-expanded="false"
+                type="button"
+            >View patient info</button>
+
+            ${
+                showActions
+                    ? `
+                        <button class="button button-small button-reject"
+                            data-appointment-decision="REJECTED"
+                            type="button">Reject</button>
+
+                        <button class="button button-small button-approve"
+                            data-appointment-decision="APPROVED"
+                            type="button">Approve</button>
+                    `
+                    : ""
+            }
+        </div>
+
+        <div data-patient-preview hidden></div>
+    </article>
+`;
+
+        workspaceContent.innerHTML = `
+            ${pageHeading(
+                "APPOINTMENTS AND QUEUES",
+                "Your daily appointment calendar.",
+                "Select a date to review new requests, scheduled appointments and patients who have checked in.",
+            )}
+
+            <div data-message class="workspace-message" hidden></div>
+
+            <section class="content-panel appointment-calendar-panel">
+                <div class="calendar-header">
+                    <button type="button" class="button button-small"
+                        data-calendar-nav="previous">Previous</button>
+                    <h2>${escapeHtml(monthName)}</h2>
+                    <button type="button" class="button button-small"
+                        data-calendar-nav="next">Next</button>
+                </div>
+
+                <div class="calendar-weekdays">
+                    ${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                        .map((day) => `<span>${day}</span>`)
+                        .join("")}
+                </div>
+
+                <div class="appointment-calendar-grid">
+                    ${calendarCells.join("")}
+                </div>
+
+                <button type="button" class="button button-small"
+                    data-calendar-today>Today</button>
+            </section>
+
+            <section class="appointment-day-agenda">
+                <div class="section-heading">
+                    <h2>${escapeHtml(formatDate(selectedDate))}</h2>
+                    <span>${dayAppointments.length} APPOINTMENTS</span>
+                </div>
+
+                <section class="content-panel appointment-queue-section">
+                    <h3>New appointment requests</h3>
+                    <p class="appointment-note">Requests waiting for your approval.</p>
+                    <div class="appointment-list">
+                        ${
+                            pending.length
+                                ? pending.map((appointment) =>
+                                    appointmentCard(appointment, true),
+                                ).join("")
+                                : '<p class="empty-state">No new requests for this day.</p>'
+                        }
+                    </div>
+                </section>
+
+                <section class="content-panel appointment-queue-section">
+                    <h3>Scheduled appointments</h3>
+                    <p class="appointment-note">Confirmed appointments for this day.</p>
+                    <div class="appointment-list">
+                        ${
+                            scheduled.length
+                                ? scheduled.map((appointment) =>
+                                    appointmentCard(appointment),
+                                ).join("")
+                                : '<p class="empty-state">No scheduled appointments for this day.</p>'
+                        }
+                    </div>
+                </section>
+
+                <section class="content-panel appointment-queue-section">
+                    <h3>Waiting for the dietitian</h3>
+                    <p class="appointment-note">Patients who have checked in at your branch.</p>
+                    <div class="appointment-list">
+                        ${
+                            waiting.length
+                                ? waiting.map((appointment) => `
+                                    <article class="appointment-request-row" data-patient-card>
+                                        <div class="appointment-request-details">
+                                            <span class="appointment-status status-confirmed">CHECKED IN</span>
+                                            <h2>${patientName(appointment)}</h2>
+                                            <p>Appointment: ${escapeHtml(formatTime(appointment.appointment_date))}</p>
+                                            <p>Checked in: ${escapeHtml(formatTime(appointment.checked_in_at))}</p>
+                                        </div>
+                                        <div class="review-actions">
+                                            <button
+                                                class="button button-small"
+                                                data-patient-context="${escapeHtml(appointment.client_id)}"
+                                                aria-expanded="false"
+                                                type="button"
+                                            >View patient info</button>
+                                        </div>
+                                        <div data-patient-preview hidden></div>
+                                    </article>
+                                `).join("")
+                                : '<p class="empty-state">No checked-in patients waiting for this day.</p>'
+                        }
+                    </div>
+                </section>
+            </section>
+        `;
+
+        workspaceContent.querySelectorAll("[data-calendar-date]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const [year, month, day] = button.dataset.calendarDate
+                    .split("-")
+                    .map(Number);
+
+                selectedDate.setFullYear(year, month - 1, day);
+                calendarMonth = new Date(year, month - 1, 1);
+                renderCalendar();
+            });
+        });
+
+        workspaceContent.querySelectorAll("[data-calendar-nav]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const direction =
+                    button.dataset.calendarNav === "next" ? 1 : -1;
+
+                calendarMonth = new Date(
+                    calendarMonth.getFullYear(),
+                    calendarMonth.getMonth() + direction,
+                    1,
+                );
+
+                renderCalendar();
+            });
+        });
+
+        workspaceContent.querySelector("[data-calendar-today]")
+            ?.addEventListener("click", () => {
+                selectedDate.setTime(new Date().setHours(0, 0, 0, 0));
+                calendarMonth = new Date(
+                    selectedDate.getFullYear(),
+                    selectedDate.getMonth(),
+                    1,
+                );
+                renderCalendar();
+            });
+
+        bindPatientContextButtons();
+        bindMeetingControls(workspaceContent, () => renderAppointmentRequests(selectedDate.toISOString()));
+
+       workspaceContent.querySelectorAll("[data-appointment-decision]").forEach((button) => {
+    button.addEventListener("click", async () => {
+        const card = button.closest("[data-appointment-id]");
+        const action = button.dataset.appointmentDecision;
+        let meetingLink = "";
+        if (action === "APPROVED" && card.querySelector('[data-meeting-mode]')?.value === 'manual') {
+            const input = card.querySelector('[data-manual-meeting-link]');
+            const url = safeMeetingUrl(input.value.trim());
+            if (!url) {
+                showWorkspaceMessage('Enter a valid HTTPS meeting link, or choose the automatic Jitsi option.', true);
+                input.focus();
+                return;
+            }
+            meetingLink = url.href;
+        }
+
+        card.querySelectorAll("button").forEach((item) => {
+            item.disabled = true;
+        });
+
+        try {
+            await request(
+                `/api/v1/appointments/${encodeURIComponent(card.dataset.appointmentId)}`,
+                {
+                    method: "PATCH",
+                    body: JSON.stringify({
+                        action,
+                        ...(meetingLink ? { meeting_link: meetingLink } : {}),
+                    }),
+                },
+            );
+
+            await renderAppointmentRequests(selectedDate.toISOString());
+
+            showWorkspaceMessage(
+                action === "APPROVED"
+                    ? "Appointment confirmed."
+                    : "Appointment request rejected.",
+            );
+        } catch (error) {
+            card.querySelectorAll("button").forEach((item) => {
+                item.disabled = false;
+            });
+
+            showWorkspaceMessage(error.message, true);
+        }
     });
+});
+    }
+
+    renderCalendar();
 }
+
 
 async function renderClientRecommendations(clientId) {
     const recommendations = await request(
@@ -1924,6 +3057,7 @@ async function renderClientRecommendations(clientId) {
                   .join("")
             : '<p class="empty-state">No recommendations have been shared yet. Your dietitian will review drafts before they appear here.</p>'
     }</div>`;
+    await mountCarePanel(workspaceContent, clientId, false);
 }
 
 async function renderDietitians() {
@@ -1935,19 +3069,19 @@ async function renderDietitians() {
 }
 
 async function loadView(view, initialAIPanel = "coach") {
+    stopQRScanner();
     workspaceContent.dataset.view = view;
     workspaceContent.classList.remove("view-enter");
     void workspaceContent.offsetWidth;
     workspaceContent.classList.add("view-enter");
     const firstName = currentUser.full_name.split(" ")[0];
     const clientId = currentUser.type === "client" ? currentUser.id : "";
-    if (
-        currentUser.type === "client" &&
-        String(currentUser.gender || "").toLowerCase() === "male" &&
-        ["health-pregnancy", "health-lactation"].includes(view)
-    ) {
-        await renderClientDashboard(firstName);
-        return;
+    if (currentUser.type === "client" && view === "health-lactation") {
+        if (!(await refreshClientMaternalAccess())) {
+            await renderClientDashboard(firstName);
+            showWorkspaceMessage("These pages are available after your dietitian enables them for your profile.");
+            return;
+        }
     }
     workspaceContent.innerHTML =
         '<div data-message class="workspace-message" hidden></div><p class="loading-copy">Loading your workspace...</p>';
@@ -1977,7 +3111,7 @@ async function loadView(view, initialAIPanel = "coach") {
           <section class="feature-panel">
             <span class="eyebrow">PLAN STUDIO</span>
             <h2>Build a starting point for better habits.</h2>
-            <p>Draft a nutrition plan around a patient’s goals and health context. Every draft stays with you for review.</p>
+            <p>Draft a nutrition plan around a patientâ€™s goals and health context. Every draft stays with you for review.</p>
             <button class="button button-lime" data-go="ai-workspace" data-ai-panel="plan" type="button">Start a plan <span aria-hidden="true">&#8594;</span></button>
           </section>
           <section class="stat-panel">
@@ -2001,9 +3135,11 @@ async function loadView(view, initialAIPanel = "coach") {
         } else if (view === "reception-onboarding") {
             await renderReceptionOnboarding();
         } else if (view === "reception-checkin") {
-            await renderReceptionCheckin();
+            await renderPatientCheckin();
         } else if (view === "my-profile") {
             await renderMyProfile();
+        } else if (view === "admin-profile") {
+            renderAdminProfile();
         } else if (view === "health-lactation") {
             await renderLactationTracking(clientId);
         } else if (view.startsWith("health-")) {
@@ -2051,8 +3187,12 @@ async function loadView(view, initialAIPanel = "coach") {
             await renderAdminReports();
         } else if (view === "admin-audit-logs") {
             await renderAdminAuditLogs();
+        } else if (view === "client-settings" && currentUser.type === "client") {
+            renderClientSettings();
         } else if (view === "admin-settings") {
             await renderAdminSettings();
+            } else if (view === "dietitian-settings") {
+            await renderDietitianSettings();
         } else if (view === "client-recommendations") {
             await renderClientRecommendations(clientId);
         } else if (view === "verification-documents") {
@@ -2119,13 +3259,14 @@ async function renderAIStudio(clientId = "") {
     <section class="content-panel">
       <form id="aiForm" class="form-grid">
         <div class="form-field"><label for="aiClientId">Search patient ID or name</label><input class="text-input" id="aiClientId" name="client_id" list="aiClientOptions" placeholder="Start typing a patient ID" value="${escapeHtml(clientId)}" required><datalist id="aiClientOptions">${clients.map((client) => `<option value="${escapeHtml(client.id)}" label="${escapeHtml(client.name)}"></option>`).join("")}</datalist></div>
-        <div class="form-field"><label for="dietaryGoal">Patient priority / nutrition need</label><input class="text-input" id="dietaryGoal" name="dietary_goal" list="aiGoalOptions" placeholder="Choose or describe the patient’s nutrition needs" required><datalist id="aiGoalOptions">${goalSuggestions.map((goal) => `<option value="${escapeHtml(goal)}"></option>`).join("")}</datalist></div>
-        <div class="form-field full-width"><span class="notice">Consider the patient’s stated priority, life stage, cultural foods, preferences, access and budget, allergies, and recorded medical conditions. Drafts are suggestions only and must be clinically reviewed before sharing.</span></div>
+        <div class="form-field"><label for="dietaryGoal">Patient priority / nutrition need</label><input class="text-input" id="dietaryGoal" name="dietary_goal" list="aiGoalOptions" placeholder="Choose or describe the patientâ€™s nutrition needs" required><datalist id="aiGoalOptions">${goalSuggestions.map((goal) => `<option value="${escapeHtml(goal)}"></option>`).join("")}</datalist></div>
+        <div class="form-field full-width"><span class="notice">Consider the patientâ€™s stated priority, life stage, cultural foods, preferences, access and budget, allergies, and recorded medical conditions. Drafts are suggestions only and must be clinically reviewed before sharing.</span></div>
         <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Generate draft <span aria-hidden="true">&#8594;</span></button></div>
       </form>
       <div id="planResult" aria-live="polite"></div>
     </section>`;
     document.querySelector("#aiForm").addEventListener("submit", generatePlan);
+    await bindConsultationChoice(document.querySelector("#aiForm"));
 }
 
 async function renderDietitianDocuments() {
@@ -2166,7 +3307,7 @@ async function renderDietitianDocuments() {
             ? documents
                   .map(
                       (document) => `
-      <article class="document-row"><span class="document-icon" aria-hidden="true">&#9636;</span><div class="document-details"><h3>${escapeHtml(document.file_name)}</h3><p>${escapeHtml(document.content_type)} · ${new Date(document.uploaded_at).toLocaleDateString()}</p><p>${escapeHtml(document.branch_name)} · ${escapeHtml(document.branch_address)}</p></div><span class="plan-status">SUBMITTED</span></article>`,
+      <article class="document-row"><span class="document-icon" aria-hidden="true">&#9636;</span><div class="document-details"><h3>${escapeHtml(document.file_name)}</h3><p>${escapeHtml(document.content_type)} Â· ${new Date(document.uploaded_at).toLocaleDateString()}</p><p>${escapeHtml(document.branch_name)} Â· ${escapeHtml(document.branch_address)}</p></div><span class="plan-status">SUBMITTED</span></article>`,
                   )
                   .join("")
             : '<p class="empty-state">No documents submitted. Add a license or identity document to continue approval.</p>'
@@ -2297,14 +3438,14 @@ function retrievedSourcesMarkup(references) {
         return `<p class="notice">No local nutrition references were retrieved for this draft. Verify the guidance independently before approving.</p>`;
     return `<details class="review-sources"><summary>Review retrieved references (${sources.length})</summary>
     <p class="stat-caption">These excerpts are supporting context, not verified clinical conclusions. Check the original documents.</p>
-    <ol>${sources.map((ref) => `<li><strong>${escapeHtml(ref.source || "Unknown source")}</strong>${ref.paragraph != null ? ` · Paragraph ${escapeHtml(ref.paragraph)}` : ""}<blockquote>${escapeHtml(ref.excerpt || "")}</blockquote></li>`).join("")}</ol>
+    <ol>${sources.map((ref) => `<li><strong>${escapeHtml(ref.source || "Unknown source")}</strong>${ref.paragraph != null ? ` Â· Paragraph ${escapeHtml(ref.paragraph)}` : ""}<blockquote>${escapeHtml(ref.excerpt || "")}</blockquote></li>`).join("")}</ol>
   </details>`;
 }
 
 async function renderReviews() {
     const recommendations = await request("/api/v1/ai/recommendations/pending");
     workspaceContent.innerHTML = `
-    ${pageHeading("HUMAN REVIEW", "Review queue.", "Every AI suggestion waits here until a dietitian decides what happens next.")}
+    ${pageHeading("DIETITIAN REVIEW", "Review queue.", "Every generated suggestion waits here until a dietitian decides what happens next.")}
     <div data-message class="workspace-message" hidden></div>
     <div class="review-list">${
         recommendations.length
@@ -2380,6 +3521,7 @@ async function loadClientProfile(clientId) {
       </div>
       <p class="subsection-label">RECORDED DETAILS</p>
       <div class="form-grid"><div><strong class="stat-label">Allergies</strong>${renderTags(profile.allergies, "allergen", "No allergies recorded")}</div><div><strong class="stat-label">Medical conditions</strong>${renderTags(profile.conditions, "condition_name", "No conditions recorded")}</div></div>`;
+        await mountCarePanel(target, clientId, true);
         document
             .querySelector("#allergyForm")
             .addEventListener("submit", (event) => submitClientEntry(event, clientId, "allergies"));
@@ -2486,7 +3628,7 @@ async function renderRecipes() {
                       (recipe) => `
       <article class="recipe-row">
         <div class="recipe-row-top"><h3>${escapeHtml(recipe.title)}</h3><span>${escapeHtml(recipe.recipe_id)}</span></div>
-        <p class="recipe-ingredients">${recipe.ingredients.map(escapeHtml).join(" · ") || "No ingredients recorded"}</p>
+        <p class="recipe-ingredients">${recipe.ingredients.map(escapeHtml).join(" Â· ") || "No ingredients recorded"}</p>
         <p class="recipe-instructions">${escapeHtml(recipe.instructions)}</p>
       </article>`,
                   )
@@ -2552,6 +3694,11 @@ async function renderMealPlans() {
         .join("");
     workspaceContent.innerHTML = `
     ${pageHeading("MEAL PLANNING", "Review meal plans.", "Prepare screened drafts and approve them before client delivery.")}
+<div class="section-heading">
+    <button class="button button-lime" data-go="ai-workspace" type="button">
+        Nutrition Coach
+    </button>
+</div>
     ${problemsHtml}
     <div data-message class="workspace-message" hidden></div>
     <section class="content-panel"><div class="section-heading"><h2>New draft</h2><span>DIETITIAN ONLY</span></div>
@@ -2584,7 +3731,7 @@ async function renderMealPlans() {
                             )
                             .join("");
                         return `<article class="meal-plan-row"><div class="meal-plan-heading"><h3>${escapeHtml(draft.diet_type || "Meal plan")}</h3><span class="plan-status">${escapeHtml(d.status)}</span></div>
-          <p>Patient: ${escapeHtml(d.client_id)} · ${escapeHtml(draft.days || "")} days</p>
+          <p>Patient: ${escapeHtml(d.client_id)} Â· ${escapeHtml(draft.days || "")} days</p>
           <ul class="meal-summary">${schedule}</ul>
           <p><strong>Screening cautions:</strong> ${escapeHtml((draft.cautions || []).join("; ") || "None recorded; independent clinical review still required.")}</p>
           ${
@@ -2594,7 +3741,7 @@ async function renderMealPlans() {
             <div class="form-field"><label>Review note (required)</label><textarea class="text-input" name="review_note" required maxlength="2000"></textarea></div>
             <div class="form-field"><label>Revised schedule JSON (only when modifying; include each day)</label><textarea class="text-input" name="revised_schedule" placeholder='[{"day":1,"candidate_recipe":{"title":"..."}}]'></textarea></div>
             <button class="button button-primary" type="submit">Submit review</button></form>`
-                  : `<p>Review note: ${escapeHtml(d.review_note || "—")}</p>`
+                  : `<p>Review note: ${escapeHtml(d.review_note || "â€”")}</p>`
           }
         </article>`;
                     })
@@ -2603,12 +3750,15 @@ async function renderMealPlans() {
       }
     </section>
     <section class="content-panel"><h2>Existing legacy plans</h2><p>${legacyPlans.length} plans from the previous meal-planning system. These are separate from the new approval queue.</p></section>`;
+    bindGoButtons();
     const form = document.querySelector("#mealDraftForm");
     if (form) {
         const selectedClient = sessionStorage.getItem("meal-plan-client");
         if (selectedClient && clients.some((c) => String(c.id) === String(selectedClient)))
             form.elements.client_id.value = selectedClient;
         sessionStorage.removeItem("meal-plan-client");
+        await bindConsultationChoice(form, sessionStorage.getItem("meal-plan-appointment") || "");
+        sessionStorage.removeItem("meal-plan-appointment");
         form.addEventListener("submit", createMealPlan);
     }
     document
@@ -2634,6 +3784,7 @@ async function createMealPlan(event) {
                   .filter(Boolean);
     const payload = {
         client_id: values.client_id,
+        appointment_id: values.appointment_id,
         diet_type: values.diet_type,
         days: Number(values.days),
         life_stage: values.life_stage,
@@ -2710,24 +3861,31 @@ async function refreshAdminApprovalCount() {
 
 function renderAdminTable(headers, rows, emptyMessage) {
     if (!rows.length) return `<p class="empty-state">${emptyMessage}</p>`;
-    return `<div class="admin-table-wrap"><table class="admin-data-table"><thead><tr>${headers.map((header) => `<th scope="col">${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((value) => `<td>${escapeHtml(value ?? "—")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    return `<div class="admin-table-wrap"><table class="admin-data-table"><thead><tr>${headers.map((header) => `<th scope="col">${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((value) => `<td>${escapeHtml(value ?? "â€”")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 
 async function renderAdminDashboard() {
-    const summary = await request("/api/v1/admin/dashboard");
+    const [summary, pending] = await Promise.all([
+        request("/api/v1/admin/dashboard"), request("/api/v1/admin/approvals/pending"),
+    ]);
     const cards = [
         ["Dietitians", summary.dietitians],
         ["Patients", summary.clients],
         ["Branches", summary.branches],
         ["Businesses", summary.businesses],
-        ["Pending approvals", summary.pending_approvals],
+        ["Awaiting inspection", pending.length],
         ["Appointments", summary.appointments],
         ["Meal plans", summary.meal_plans],
         ["Approval actions", summary.audit_events],
     ];
     workspaceContent.innerHTML = `
     ${pageHeading("ADMIN DASHBOARD", "Practice overview.", "Monitor registrations, care activity, and organization records.")}
+    <div data-message class="workspace-message" hidden></div>
     <div class="admin-stat-grid">${cards.map(([label, value]) => `<section class="admin-stat"><span>${escapeHtml(label)}</span><strong>${Number(value).toLocaleString()}</strong></section>`).join("")}</div>
+    <section class="content-panel"><div class="section-heading"><h2>Dietitians awaiting inspection</h2><span>${pending.length} TO REVIEW</span></div>
+    <p>Review dietitian registration documents and record approval decisions.</p>
+    ${adminDietitianInspectionCards(pending)}
+    <button class="button quiet-button" data-go="admin-approvals" type="button">View full review queue</button></section>
     <div class="section-heading"><h2>Administration</h2><span>QUICK ACCESS</span></div>
     <div class="quick-grid admin-quick-grid">
       <button class="quick-link" data-go="admin-approvals" type="button"><strong>Review dietitian approvals</strong><span aria-hidden="true">&#8599;</span></button>
@@ -2736,19 +3894,42 @@ async function renderAdminDashboard() {
       <button class="quick-link" data-go="admin-reports" type="button"><strong>View reports</strong><span aria-hidden="true">&#8599;</span></button>
     </div>`;
     bindGoButtons();
+    bindAdminDietitianInspection();
+    document.querySelector("#adminApprovalCount").textContent = String(pending.length);
 }
 
 async function renderStaffDashboard() {
     const profile = await request("/api/v1/staff/me");
     const role = staffRoleNames[profile.role] || profile.role;
+    if (profile.role === "branch_manager") {
+        const overview = await request("/api/v1/branch-manager/overview");
+        workspaceContent.innerHTML = `
+        ${pageHeading("BRANCH MANAGEMENT", `Welcome, ${escapeHtml(profile.full_name)}.`, `Managing ${escapeHtml(overview.branch_name)}.`)}
+        <div class="admin-stat-grid">
+          <section class="admin-stat"><span>Assigned branch</span><strong class="staff-role-card">${escapeHtml(overview.branch_name)}</strong></section>
+          <section class="admin-stat"><span>Branch dietitians</span><strong>${Number(overview.dietitians)}</strong></section>
+          <section class="admin-stat"><span>Active branch staff</span><strong>${Number(overview.active_staff)}</strong></section>
+          <section class="admin-stat"><span>Reception staff</span><strong>${Number(overview.reception_staff)}</strong></section>
+          <section class="admin-stat"><span>Branch managers</span><strong>${Number(overview.branch_managers)}</strong></section>
+        </div>
+        <section class="content-panel"><h2 class="compact-heading">Branch operations</h2>
+          <p>Manage dietitian records and patient onboarding at your assigned branch. Dietitian registration approvals and system administration remain restricted.</p>
+          <div class="quick-grid">
+            <button class="quick-link" data-go="admin-dietitians" type="button"><strong>Manage branch dietitians</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong><span aria-hidden="true">&#8599;</span></button>
+          </div>
+        </section>`;
+        bindGoButtons();
+        return;
+    }
     workspaceContent.innerHTML = `
     ${pageHeading("TEAM WORKSPACE", `Welcome, ${escapeHtml(profile.full_name)}.`, "Your access is controlled by your assigned practice role.")}
     <div class="admin-stat-grid"><section class="admin-stat"><span>Assigned role</span><strong class="staff-role-card">${escapeHtml(role)}</strong></section>
     <section class="admin-stat"><span>Account</span><strong class="staff-role-card">${profile.is_active ? "Active" : "Inactive"}</strong></section></div>
     <section class="content-panel"><h2 class="compact-heading">Secure staff access</h2>
-    <p>Staff roles have been introduced, with least-privilege permissions. Branch operations and additional tools will become available after they pass authorization testing.</p>
-    <div class="quick-grid"><button class="quick-link" type="button" data-go="staff-profile"><strong>View my staff profile</strong><span aria-hidden="true">&#8599;</span></button>
-    ${["reception", "branch_manager"].includes(profile.role) ? '<button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong></button><button class="quick-link" data-go="reception-checkin" type="button"><strong>Check in a patient</strong></button>' : ""}
+    <p>Your practice role controls available tasks. Clinical records and administrative settings remain restricted.</p>
+    <div class="quick-grid">
+    ${profile.role === "reception" ? '<button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong></button>' : ""}
     ${profile.role === "compliance_officer" ? '<button class="quick-link" type="button" data-go="staff-access-events"><strong>View access audit</strong><span aria-hidden="true">&#8599;</span></button>' : ""}</div></section>`;
     bindGoButtons();
 }
@@ -2763,7 +3944,9 @@ async function renderStaffProfile() {
       <div><dt>Role</dt><dd>${escapeHtml(staffRoleNames[profile.role] || profile.role)}</dd></div>
       <div><dt>Branch ID</dt><dd>${escapeHtml(profile.branch_id || "Organization-wide")}</dd></div>
       <div><dt>Status</dt><dd>${profile.is_active ? "Active" : "Inactive"}</dd></div>
-    </dl></section>`;
+    </dl></section>
+    ${profilePhotoSectionMarkup()}`;
+    bindProfilePhotoControls();
 }
 
 async function renderAccessEvents() {
@@ -2774,7 +3957,7 @@ async function renderAccessEvents() {
     ${renderAdminTable(
         ["Timestamp", "Actor role", "Account ID", "Action", "Resource", "HTTP status"],
         events.map((event) => [
-            event.occurred_at ? new Date(event.occurred_at).toLocaleString() : "—",
+            event.occurred_at ? new Date(event.occurred_at).toLocaleString() : "â€”",
             event.actor_role,
             event.actor_id || "Anonymous",
             event.http_method,
@@ -2893,21 +4076,68 @@ async function renderAdminStaff() {
 
 async function renderAdminDietitians() {
     const dietitians = await request("/api/v1/admin/dietitians");
+    const isBranchManager = currentUser.type === "branch_manager";
     workspaceContent.innerHTML = `
-    ${pageHeading("ADMINISTRATION", "Dietitians.", "Review registered practitioners and their organization assignments.")}
-    ${renderAdminTable(
-        ["Name", "Email", "License", "Business", "Branch", "Location", "Status"],
-        dietitians.map((item) => [
-            item.full_name,
-            item.email,
-            item.license_number,
-            item.business_name,
-            item.branch_name,
-            item.branch_address,
-            item.status,
-        ]),
-        "No dietitians are registered yet.",
-    )}`;
+    ${pageHeading(isBranchManager ? "BRANCH MANAGEMENT" : "ADMINISTRATION", isBranchManager ? "Your branch dietitians." : "Dietitians.", isBranchManager ? "Review dietitian registration details and submitted documents for your assigned branch." : "Review registered practitioners and their organization assignments.")}
+    <div data-message class="workspace-message" hidden></div>
+    ${adminDietitianInspectionCards(dietitians)}`;
+    bindAdminDietitianInspection();
+}
+
+
+function adminDietitianInspectionCards(dietitians) {
+    if (!dietitians.length) return '<p class="empty-state">No dietitians to inspect.</p>';
+    return `<div class="admin-approval-list">${dietitians.map((item) => `
+        <article class="admin-approval-row"><div class="admin-approval-main">
+        <div class="dietitian-details"><h3>${escapeHtml(item.full_name)}</h3>
+        <p>${escapeHtml(item.email)} · License ${escapeHtml(item.license_number)}</p>
+        <p>${escapeHtml(item.business_name || item.practice_name || "Practice not provided")} · ${escapeHtml(item.branch_name || "Branch not provided")} · ${escapeHtml(item.branch_address || "Location not provided")}</p>
+        <p>${escapeHtml(item.status)}${item.documents ? ` · ${item.documents.length} document(s) submitted` : ""}</p></div>
+        <button class="button button-primary button-small" data-inspect-dietitian="${escapeHtml(item.dietitian_id)}" type="button">Inspect dietitian</button>
+        </div></article>`).join("")}</div>`;
+}
+
+
+function bindAdminDietitianInspection() {
+    workspaceContent.querySelectorAll("[data-inspect-dietitian]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            button.disabled = true;
+            try {
+                await renderAdminDietitianInspection(button.dataset.inspectDietitian);
+            } catch (error) {
+                button.disabled = false;
+                showWorkspaceMessage(error.message, true);
+            }
+        });
+    });
+}
+
+
+async function renderAdminDietitianInspection(dietitianId) {
+    const item = await request(`/api/v1/admin/dietitians/${encodeURIComponent(dietitianId)}`);
+    const isBranchManager = currentUser.type === "branch_manager";
+    workspaceContent.innerHTML = `
+    ${pageHeading(isBranchManager ? "BRANCH DIETITIAN" : "ADMIN INSPECTION", escapeHtml(item.full_name), "Inspect registration details, submitted documents and review history.")}
+    <div data-message class="workspace-message" hidden></div>
+    <section class="content-panel"><dl class="profile-details">
+      ${[["Email", item.email], ["License number", item.license_number], ["Account status", item.status],
+         ["Practice", item.business_name],
+         ["Branch", item.branch_name], ["Location", item.branch_address]].map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "Not provided")}</dd></div>`).join("")}
+    </dl></section>
+    <section class="content-panel"><h2>Submitted documents</h2>
+    ${item.documents.length ? item.documents.map((document) => `<div class="admin-document-row"><div><strong>${escapeHtml(document.file_name)}</strong><p>${escapeHtml(document.content_type)} · ${new Date(document.uploaded_at).toLocaleDateString()}</p></div><button class="button quiet-button" data-document-id="${escapeHtml(document.document_id)}" data-file-name="${escapeHtml(document.file_name)}" type="button">View document</button></div>`).join("") : '<p class="empty-state">No verification documents submitted yet.</p>'}
+    </section><section class="content-panel"><h2>Review history</h2>
+    ${renderAdminTable(["Date", "Reviewer", "Decision", "Notes"], item.reviews.map((review) => [review.action_date, review.staff_id || review.admin_id, review.action, review.comments]), "No review decisions recorded yet.")}</section>
+    <div class="review-actions"><button class="button quiet-button" data-go="admin-dietitians" type="button">${isBranchManager ? "Branch dietitians" : "All dietitians"}</button><button class="button button-primary" data-inspection-review type="button">Open registration review</button></div>`;
+    bindGoButtons();
+    workspaceContent.querySelectorAll("[data-document-id]").forEach((button) => button.addEventListener("click", viewDietitianDocument));
+    workspaceContent.querySelector("[data-inspection-review]")?.addEventListener("click", async () => {
+        try {
+            await renderAdminApprovals(dietitianId);
+        } catch (error) {
+            showWorkspaceMessage(error.message, true);
+        }
+    });
 }
 
 async function renderAdminBusinesses() {
@@ -3016,6 +4246,81 @@ async function renderAdminAuditLogs() {
     )}`;
 }
 
+async function renderDietitianSettings() {
+    const approval = await request("/api/v1/dietitians/me/approval");
+
+    const status = String(approval.status || "UNKNOWN").toUpperCase();
+
+    const statusLabel = {
+        APPROVED: "Approved",
+        PENDING: "Pending review",
+        REJECTED: "Registration rejected",
+    }[status] || "Status unavailable";
+
+    const feedback = approval.rejection_reason
+        ? `<p><strong>Admin feedback:</strong> ${escapeHtml(approval.rejection_reason)}</p>`
+        : "";
+
+    workspaceContent.innerHTML = `
+    ${pageHeading(
+        "PRACTICE",
+        "Settings.",
+        "Manage your professional information and practice details."
+    )}
+
+    ${appearanceSettingsMarkup()}
+
+    <section class="content-panel">
+        <div class="section-heading">
+            <h2>Professional registration</h2>
+            <span>VERIFICATION STATUS</span>
+        </div>
+
+        <dl class="profile-details">
+            <div>
+                <dt>Registration status</dt>
+                <dd>${escapeHtml(statusLabel)}</dd>
+            </div>
+        </dl>
+
+        ${feedback}
+    </section>
+
+    <div class="section-heading">
+        <h2>Account management</h2>
+        <span>YOUR PRACTICE</span>
+    </div>
+
+    <div class="quick-grid">
+        <button class="quick-link" data-go="my-profile" type="button">
+            <strong>My Profile</strong>
+            <span>View your personal and professional information.</span>
+            <span aria-hidden="true">&#8599;</span>
+        </button>
+
+        <button class="quick-link" data-go="verification-documents" type="button">
+            <strong>Professional Verification</strong>
+            <span>View and manage your verification documents.</span>
+            <span aria-hidden="true">&#8599;</span>
+        </button>
+
+        <button class="quick-link" data-go="dietitian-branches" type="button">
+            <strong>My Practice Branches</strong>
+            <span>View and manage your practice locations.</span>
+            <span aria-hidden="true">&#8599;</span>
+        </button>
+
+        <button class="quick-link" data-go="support" type="button">
+            <strong>Support & Tickets</strong>
+            <span>Get assistance with your account and practice.</span>
+            <span aria-hidden="true">&#8599;</span>
+        </button>
+    </div>`;
+
+    bindAppearanceSettings();
+    bindGoButtons();
+}
+
 async function renderAdminSettings() {
     const [health, setup] = await Promise.all([
         request("/health"),
@@ -3023,19 +4328,22 @@ async function renderAdminSettings() {
     ]);
     workspaceContent.innerHTML = `
     ${pageHeading("SETTINGS", "System settings.", "Review installation status and the active administrator account.")}
+    ${appearanceSettingsMarkup()}
     <section class="content-panel"><dl class="profile-details">
       <div><dt>API status</dt><dd>${escapeHtml(health.status)}</dd></div>
       <div><dt>Database</dt><dd>${escapeHtml(health.database)}</dd></div>
       <div><dt>Recommendation model</dt><dd>${escapeHtml("Configured on server")}</dd></div>
-      <div><dt>Administrator</dt><dd>${escapeHtml(currentUser.full_name)} · ${escapeHtml(currentUser.email)}</dd></div>
+      <div><dt>Administrator</dt><dd>${escapeHtml(currentUser.full_name)} Â· ${escapeHtml(currentUser.email)}</dd></div>
       <div><dt>Initial setup</dt><dd>${setup.available ? "Available" : "Complete"}</dd></div>
     </dl></section>`;
+    bindAppearanceSettings();
 }
 
-async function renderAdminApprovals() {
-    const pending = await request("/api/v1/admin/approvals/pending");
+async function renderAdminApprovals(dietitianId = null) {
+    const queue = await request("/api/v1/admin/approvals/pending");
+    const pending = dietitianId ? queue.filter((item) => item.dietitian_id === dietitianId) : queue;
     workspaceContent.innerHTML = `
-    ${pageHeading("ADMINISTRATION", "Dietitian approvals.", "Review license registrations before adding dietitians to the directory.")}
+    ${pageHeading("ADMINISTRATION", "Dietitian approvals.", "Review submitted documents before adding dietitians to the directory.")}
     <div data-message class="workspace-message" hidden></div>
     <div class="admin-approval-list">${
         pending.length
@@ -3044,15 +4352,8 @@ async function renderAdminApprovals() {
                       (dietitian) => `
       <article class="admin-approval-row" data-dietitian-id="${escapeHtml(dietitian.dietitian_id)}">
         <div class="admin-approval-main">
-          <div class="dietitian-avatar" aria-hidden="true">${escapeHtml(
-              dietitian.full_name
-                  .split(/\s+/)
-                  .slice(0, 2)
-                  .map((part) => part[0])
-                  .join("")
-                  .toUpperCase(),
-          )}</div>
-          <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.email)} · License ${escapeHtml(dietitian.license_number)}</p><p>${escapeHtml(dietitian.practice_name || "Nutrition practice")} · ${escapeHtml(dietitian.branch_name || "Branch not provided")} · ${escapeHtml(dietitian.branch_address || "Address not provided")}</p><p class="document-hint">Branch ID: ${escapeHtml(dietitian.branch_id || "—")} · Business ID: ${escapeHtml(dietitian.business_id || "—")}</p></div>
+          ${profilePhotoAvatarMarkup("dietitian", dietitian.dietitian_id, dietitian.full_name)}
+          <div class="dietitian-details"><h2>${escapeHtml(dietitian.full_name)}</h2><p>${escapeHtml(dietitian.email)} Â· License ${escapeHtml(dietitian.license_number)}</p><p>${escapeHtml(dietitian.practice_name || "Nutrition practice")} Â· ${escapeHtml(dietitian.branch_name || "Branch not provided")} Â· ${escapeHtml(dietitian.branch_address || "Address not provided")}</p><p class="document-hint">Branch ID: ${escapeHtml(dietitian.branch_id || "â€”")} Â· Business ID: ${escapeHtml(dietitian.business_id || "â€”")}</p></div>
           <span class="dietitian-status status-pending">PENDING</span>
         </div>
         <div class="admin-document-list">${
@@ -3060,7 +4361,7 @@ async function renderAdminApprovals() {
                 ? dietitian.documents
                       .map(
                           (document) => `
-          <div class="admin-document-row"><div><span>${escapeHtml(document.file_name)} · ${escapeHtml(document.content_type)}</span><p class="document-hint">${escapeHtml(document.practice_name || "Practice")} · ${escapeHtml(document.branch_name || "Branch")} · ${escapeHtml(document.branch_address || "Address not provided")}</p><p class="document-hint">Branch ID: ${escapeHtml(document.branch_id || "—")} · Business ID: ${escapeHtml(document.business_id || "—")}</p></div><button class="button quiet-button button-small" data-document-id="${escapeHtml(document.document_id)}" data-file-name="${escapeHtml(document.file_name)}" type="button">View document</button></div>`,
+          <div class="admin-document-row"><div><span>${escapeHtml(document.file_name)} Â· ${escapeHtml(document.content_type)}</span><p class="document-hint">${escapeHtml(document.practice_name || "Practice")} Â· ${escapeHtml(document.branch_name || "Branch")} Â· ${escapeHtml(document.branch_address || "Address not provided")}</p><p class="document-hint">Branch ID: ${escapeHtml(document.branch_id || "â€”")} Â· Business ID: ${escapeHtml(document.business_id || "â€”")}</p></div><button class="button quiet-button button-small" data-document-id="${escapeHtml(document.document_id)}" data-file-name="${escapeHtml(document.file_name)}" type="button">View document</button></div>`,
                       )
                       .join("")
                 : '<p class="document-hint">No verification documents submitted yet.</p>'
@@ -3078,12 +4379,12 @@ async function renderAdminApprovals() {
     workspaceContent.querySelectorAll("[data-document-id]").forEach((button) => {
         button.addEventListener("click", viewDietitianDocument);
     });
-    document.querySelector("#adminApprovalCount").textContent = String(pending.length);
+    document.querySelector("#adminApprovalCount").textContent = String(queue.length);
 }
 
 async function viewDietitianDocument(event) {
     const button = event.currentTarget;
-    const token = sessionStorage.getItem(adminTokenKey);
+    const token = sessionStorage.getItem(adminTokenKey) || sessionStorage.getItem(staffTokenKey);
     button.disabled = true;
     try {
         const response = await fetch(
@@ -3182,6 +4483,21 @@ function escapeHtml(value) {
     );
 }
 
+// Accessible dropdown behavior: click, outside click and Escape.
+document.querySelector("#accountMenuButton").addEventListener("click", () => {
+    const panel = document.querySelector("#accountMenuPanel");
+    panel.hidden = !panel.hidden;
+    document.querySelector("#accountMenuButton").setAttribute("aria-expanded", String(!panel.hidden));
+});
+document.querySelector("#accountProfileButton").addEventListener("click", openAccountProfile);
+document.querySelector("#accountSignOutButton").addEventListener("click", signOut);
+document.addEventListener("click", (event) => {
+    if (!document.querySelector("#accountMenu").contains(event.target)) closeAccountMenu();
+});
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeAccountMenu();
+});
+
 document.querySelector("#loginTab").addEventListener("click", () => setAuthMode("login"));
 document.querySelector("#signupTab").addEventListener("click", () => setAuthMode("signup"));
 document
@@ -3194,7 +4510,6 @@ document.querySelectorAll("#signOutButton, #mobileSignOutButton").forEach((butto
 document
     .querySelectorAll(".nav-item")
     .forEach((item) => item.addEventListener("click", () => navTo(item.dataset.view)));
-
 loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = loginForm.querySelector("button[type=submit]");
@@ -3338,8 +4653,52 @@ signupForm.addEventListener("submit", async (event) => {
         signupForm.elements.confirm_password.reportValidity();
         return;
     }
+    const email = signupForm.elements.email.value.trim().toLowerCase();
+    if (signupVerificationEmail !== email) {
+        signupVerificationEmail = "";
+        signupVerificationMethodId = "";
+        signupVerificationState = "unchecked";
+    }
+    if (signupVerificationState === "unchecked") {
+        button.disabled = true;
+        try {
+            const result = await request("/api/v1/auth/email/send-code", {
+                method: "POST",
+                body: JSON.stringify({ email }),
+            });
+            if (!result.enabled || !result.method_id) {
+                throw new Error(result.message || "Email verification is unavailable.");
+            }
+            signupVerificationEmail = email;
+            signupVerificationMethodId = result.method_id;
+            signupVerificationState = "sent";
+            signupEmailVerification.hidden = false;
+            signupEmailVerificationCode.required = true;
+            signupResendEmail.hidden = false;
+            signupEmailVerificationMessage.textContent =
+                "A code was sent to your email. Enter it here and verify before creating your account.";
+            signupEmailVerificationCode.focus();
+            return;
+        } catch (error) {
+            showAuthMessage(error.message);
+            return;
+        } finally {
+            button.disabled = false;
+        }
+    }
+    if (signupVerificationState === "sent") {
+        signupEmailVerification.hidden = false;
+        signupEmailVerificationMessage.textContent =
+            "Enter the code sent to your email, then select Verify email.";
+        signupEmailVerificationCode.focus();
+        return;
+    }
+    if (signupVerificationState !== "verified") {
+        showAuthMessage("Verify your email before creating your account.");
+        return;
+    }
     const values = Object.fromEntries(new FormData(signupForm));
-    values.email = values.email.trim().toLowerCase();
+    values.email = email;
     if (role === "client") {
         values.phone = values.phone.trim();
         // Never infer consent: send an explicit boolean only when checked.
@@ -3424,28 +4783,42 @@ adminSetupForm.addEventListener("submit", async (event) => {
 
 // FR-1.7: authenticated patient QR view; the code is never the patient's ID.
 async function renderClientCheckin(clientId) {
+    const appointments = await request(`/api/v1/appointments?client_id=${encodeURIComponent(clientId)}`);
+    const today = new Intl.DateTimeFormat("en-CA", {timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit"}).format(new Date());
+    const eligibleAppointments = appointments.filter(appointment => {
+        const localDate = new Intl.DateTimeFormat("en-CA", {timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit"}).format(new Date(appointment.appointment_date));
+        return ["CONFIRMED", "SCHEDULED"].includes(appointment.status) && localDate >= today;
+    });
+    if (!eligibleAppointments.length) {
+        workspaceContent.innerHTML = `${pageHeading("CHECK-IN", "Your QR check-in.", "Your QR code becomes available after your appointment is confirmed.")}
+        <section class="content-panel"><p>Book an appointment and wait for your dietitian to confirm it. Pending, cancelled, rejected and past appointments do not enable check-in.</p><button class="button button-primary" data-go="client-appointments" type="button">View appointments</button></section>`;
+        bindGoButtons();
+        return;
+    }
     workspaceContent.innerHTML = `${pageHeading("CHECK-IN", "Your QR check-in.", "Show your private code to reception when you arrive.")}
     <section class="content-panel" aria-label="Check-in QR"><p>Generate a fresh QR code for your visit. The previous code will stop working.</p>
+    <div class="form-field"><label for="checkinAppointment">Appointment</label><select id="checkinAppointment" class="text-input">${eligibleAppointments.map(a => `<option value="${escapeHtml(a.appointment_id)}">${escapeHtml(new Date(a.appointment_date).toLocaleString())} · ${escapeHtml(a.consultation_type || "Consultation")} · ${escapeHtml(a.appointment_id)}</option>`).join("")}</select></div>
     <button class="button button-primary" id="generateCheckinQR" type="button">Generate my check-in QR</button>
     <div id="clientQRDisplay" class="qr-display" role="status"></div></section>`;
     document.querySelector("#generateCheckinQR").addEventListener("click", async (event) => {
-        event.currentTarget.disabled = true;
+        const button = event.currentTarget;
+        button.disabled = true;
         try {
             const result = await request(
                 `/api/v1/clients/${encodeURIComponent(clientId)}/checkin-code`,
-                { method: "POST" },
+                { method: "POST", body: JSON.stringify({appointment_id: document.querySelector("#checkinAppointment").value}) },
             );
             const svgBlob = new Blob([result.qr_svg], { type: "image/svg+xml" });
             const url = URL.createObjectURL(svgBlob);
             const target = document.querySelector("#clientQRDisplay");
-            target.innerHTML = `<img alt="Your private check-in QR code" src="${url}" width="260" height="260"><p>Show this QR to authorized reception staff.</p>`;
+            target.innerHTML = `<img alt="Your private check-in QR code" src="${url}" width="260" height="260"><p>Show this QR to an administrator or your assigned dietitian.</p>`;
             target
                 .querySelector("img")
                 .addEventListener("load", () => URL.revokeObjectURL(url), { once: true });
         } catch (error) {
             document.querySelector("#clientQRDisplay").textContent = error.message;
         } finally {
-            event.currentTarget.disabled = false;
+            button.disabled = false;
         }
     });
 }
@@ -3495,31 +4868,177 @@ async function renderReceptionOnboarding() {
     });
 }
 
-async function renderReceptionCheckin() {
-    workspaceContent.innerHTML = `${pageHeading("RECEPTION", "Patient check-in.", "Scan the patient's QR with a keyboard-type scanner or paste the code.")}
+async function renderPatientCheckin() {
+    workspaceContent.innerHTML = `${pageHeading("PATIENT CHECK-IN", "Scan an appointment QR code.", "Admins can check in any appointment. Dietitians can check in appointments assigned to them.")}
   <div data-message class="workspace-message" hidden></div>
-  <section class="content-panel"><form id="receptionCheckinForm" class="form-grid">
-  <div class="form-field full-width"><label for="receptionQRValue">Check-in code</label><input id="receptionQRValue" class="text-input" name="checkin_code" autocomplete="off" required placeholder="Scan the QR code"></div>
-  <div class="form-field full-width"><button class="button button-primary" type="submit">Check in patient</button></div>
-  </form></section>`;
-    const form = document.querySelector("#receptionCheckinForm");
+  <section class="content-panel qr-checkin-panel">
+    <div class="qr-scanner-controls">
+      <button id="startQRScanner" class="button button-primary" type="button">Start camera scanner</button>
+      <button id="stopQRScanner" class="button qr-scanner-stop" type="button" disabled>Stop camera</button>
+    </div>
+    <video id="checkinScannerVideo" class="qr-scanner-video" muted playsinline hidden></video>
+    <p id="qrScannerStatus" class="qr-scanner-status" role="status" aria-live="polite">Use a camera-enabled browser over HTTPS, or enter a scanned code below.</p>
+    <form id="adminDietitianCheckinForm" class="form-grid">
+      <div class="form-field full-width"><label for="checkinQRValue">Check-in code</label><input id="checkinQRValue" class="text-input" name="checkin_code" autocomplete="off" required placeholder="Scan the QR code or enter its code"></div>
+      <div class="form-field full-width"><button class="button button-primary" type="submit">Record check-in</button></div>
+    </form>
+  </section>`;
+    const form = document.querySelector("#adminDietitianCheckinForm");
+    const startButton = document.querySelector("#startQRScanner");
+    const stopButton = document.querySelector("#stopQRScanner");
+    const video = document.querySelector("#checkinScannerVideo");
+    const status = document.querySelector("#qrScannerStatus");
+
+    startButton.addEventListener("click", async () => {
+        if (window.isSecureContext === false) {
+            status.textContent =
+                "Camera access requires a secure connection. Open this site using HTTPS, then allow camera access.";
+            return;
+        }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            status.textContent =
+                "This device does not allow camera access in the current browser. Open the site in your phone's browser over HTTPS.";
+            return;
+        }
+
+        startButton.disabled = true;
+        try {
+            let detector = null;
+            if (typeof window.BarcodeDetector === "function") {
+                try {
+                    detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+                } catch {
+                    detector = null;
+                }
+            }
+            if (!detector && typeof window.jsQR !== "function") {
+                throw new Error("The QR decoder did not load. Refresh the page and try again.");
+            }
+            const canvas = document.createElement("canvas");
+            const context = canvas.getContext("2d", { willReadFrequently: true });
+            if (!detector && !context) {
+                throw new Error("This browser could not initialize QR image scanning.");
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: {
+                    facingMode: { ideal: "environment" },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                },
+            });
+            if (!video.isConnected) {
+                stream.getTracks().forEach((track) => track.stop());
+                return;
+            }
+            qrCameraStream = stream;
+            video.srcObject = qrCameraStream;
+            video.hidden = false;
+            await video.play();
+            stopButton.disabled = false;
+            status.textContent = "Camera is on. Hold the patient's QR code in view.";
+            let lastScanTime = 0;
+
+            const scanFrame = async (timestamp) => {
+                if (!qrCameraStream || !video.isConnected) return;
+                if (!qrScanBusy && timestamp - lastScanTime >= 180) {
+                    qrScanBusy = true;
+                    lastScanTime = timestamp;
+                    try {
+                        let code = "";
+                        if (detector) {
+                            try {
+                                const codes = await detector.detect(video);
+                                code = codes.find((item) => item.rawValue)?.rawValue || "";
+                            } catch (error) {
+                                if (typeof window.jsQR !== "function") throw error;
+                                detector = null;
+                            }
+                        }
+                        if (!detector && video.videoWidth > 0 && video.videoHeight > 0) {
+                            canvas.width = video.videoWidth;
+                            canvas.height = video.videoHeight;
+                            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                            const image = context.getImageData(0, 0, canvas.width, canvas.height);
+                            code =
+                                window.jsQR(image.data, image.width, image.height, {
+                                    inversionAttempts: "attemptBoth",
+                                })?.data || "";
+                        }
+                        if (!qrCameraStream || !video.isConnected) return;
+                        if (code) {
+                            form.elements.checkin_code.value = code;
+                            status.textContent = "QR code found. Recording check-in…";
+                            stopQRScanner();
+                            form.requestSubmit();
+                            return;
+                        }
+                    } catch (error) {
+                        stopQRScanner();
+                        status.textContent = `QR scanning stopped: ${error.message}`;
+                        return;
+                    } finally {
+                        qrScanBusy = false;
+                    }
+                }
+                qrScanFrame = requestAnimationFrame(scanFrame);
+            };
+            qrScanFrame = requestAnimationFrame(scanFrame);
+        } catch (error) {
+            stopQRScanner();
+            const message =
+                error.name === "NotAllowedError"
+                    ? "Camera permission was denied. Allow camera access or enter the scanned code below."
+                    : error.name === "NotFoundError"
+                      ? "No camera was found on this device."
+                      : error.name === "NotReadableError"
+                        ? "The camera is already in use by another app. Close it and try again."
+                        : `Could not start the camera: ${error.message}`;
+            status.textContent = message;
+        }
+    });
+
+    stopButton.addEventListener("click", () => {
+        stopQRScanner();
+        status.textContent = "Camera stopped. You can start it again or enter a code below.";
+    });
+
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const button = form.querySelector("button");
         button.disabled = true;
         try {
-            const result = await request("/api/v1/reception/check-in", {
+            const result = await request("/api/v1/check-in/scan", {
                 method: "POST",
                 body: JSON.stringify({ checkin_code: form.elements.checkin_code.value }),
             });
             form.reset();
-            showWorkspaceMessage(`Check-in recorded for patient ${result.client_id}.`, false);
+            showWorkspaceMessage("Patient check-in recorded.", false);
+            status.textContent = `Check-in recorded for appointment ${result.appointment_id}.`;
         } catch (error) {
             showWorkspaceMessage(error.message, true);
         } finally {
             button.disabled = false;
         }
     });
+}
+
+function stopQRScanner() {
+    if (qrScanFrame !== null) cancelAnimationFrame(qrScanFrame);
+    qrScanFrame = null;
+    qrCameraStream?.getTracks().forEach((track) => track.stop());
+    qrCameraStream = null;
+    qrScanBusy = false;
+    const video = document.querySelector("#checkinScannerVideo");
+    if (video) {
+        video.pause();
+        video.srcObject = null;
+        video.hidden = true;
+    }
+    const startButton = document.querySelector("#startQRScanner");
+    if (startButton) startButton.disabled = false;
+    const stopButton = document.querySelector("#stopQRScanner");
+    if (stopButton) stopButton.disabled = true;
 }
 
 bindPasswordConfirmation("signupPassword", "signupConfirmPassword");

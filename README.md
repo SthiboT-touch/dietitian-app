@@ -43,7 +43,27 @@ they do not grant access to an account or its tickets. Replies are kept in the
 admin ticket thread; email delivery is not automatic. Existing databases also
 need `python back-end/migrations/apply_016_guest_support.py` after migration 015.
 
-## Run with Llama
+## Run the nutrition AI
+
+In a dietitian's **Nutrition Coach** workspace, choose an assigned patient, add
+clinical guidance or restrictions, and select **Activate patient assistant**.
+Questions then use that patient's recorded allergies, conditions, measurements,
+recent progress, goals, and care history, together with the dietitian's recorded
+specialty and guidance. This patient assistant does not search the reference
+library; the patient's records personalize suggestions but are not a medical
+evidence source. Patient records are refreshed and assignment access is checked
+on every question. Missing information must not be treated as a normal finding,
+and model suggestions remain drafts requiring practitioner review. Activation
+does not update clinical records or publish a care plan.
+
+Changing the patient or guidance requires reactivation, which clears that
+patient's assistant conversation. Activations and histories are separated by
+dietitian and patient, stored in process memory, and cleared on API restart.
+The assistant reads structured records and recorded care notes; it does not
+extract text from uploaded PDFs or images. It requires the configured Ollama
+chat model; patient-specific questions are not sent to LangSmith tracing.
+Other AI workflows may still use the semantic reference library as described
+below.
 
 SQLite is the default persistent database. PostgreSQL is available only as a migration source profile. For a PostgreSQL-to-SQLite migration, keep the current database password in the root `.env` file:
 
@@ -75,12 +95,12 @@ Start the services:
 
 ```powershell
 docker compose up --build -d
-docker compose exec ollama ollama pull llama3.2
+docker compose exec ollama ollama pull qwen2.5:0.5b
 ```
 
-The model download is several gigabytes and is stored in the `ollama_data` volume. The API uses `llama3.2` by default. To select another model, set `OLLAMA_MODEL` in a `.env` file before starting Compose, then pull that model with `docker compose exec ollama ollama pull <model>`.
+The selected model is stored in the `ollama_data` volume. Compose uses `qwen2.5:0.5b` by default. To select another model, set `OLLAMA_MODEL` in `.env` before starting Compose, then pull the same model with `docker compose exec ollama ollama pull <model>`. Deployments automatically pull the configured model before starting the API.
 
-The API container connects to Ollama at `http://ollama:11434` over the Compose network and waits for the Ollama service to become healthy. If the AI still cannot reply, confirm the model is installed with `docker compose exec ollama ollama list`, then pull it if needed with `docker compose exec ollama ollama pull llama3.2`. Rebuild and restart the API after changing its configuration with `docker compose up --build -d api`.
+The API container connects to Ollama at `http://ollama:11434` over the Compose network. If the AI still cannot reply, confirm the configured model is installed with `docker compose exec ollama ollama list`, and pull it with `docker compose exec ollama ollama pull qwen2.5:0.5b` if it is missing. Rebuild and restart the API after changing its configuration with `docker compose up --build -d api`.
 
 LangSmith tracing is optional. The root `.env.example` has a blank `LANGSMITH_API_KEY` slot. Copy it to `.env` if you do not already have a `.env`, keep your existing database password, paste your LangSmith key into that slot, and set tracing to `true`:
 
@@ -119,13 +139,29 @@ AI workflows use LangGraph `StateGraph`s: chat loads recent context, routes gree
 
 The Oracle Cloud deployment workflow applies the client health schema repair and dietitian document-branch association before starting the API. It creates any missing client health tables, adds the missing lactation end date column, and associates existing verification documents with each dietitian's current branch without replacing existing records. For other deployments, run `python back-end/migrations/apply_002_client_health_schema.py` and `python back-end/migrations/apply_003_dietitian_document_branch.py` once with `DATABASE_URL` configured.
 
+All signed-in account roles can upload, replace, or remove a JPEG/PNG profile picture (up to 1 MB) from **My Profile**. Uploaded pictures appear in signed-in user and dietitian listings; signed-out visitors cannot view them. For an existing PostgreSQL database outside the deployment workflow, run `python back-end/migrations/apply_021_account_profile_photos.py` after `012_registration_uploads.sql`; existing patient registration photos are carried forward.
+
 Appointment requests are created as `PENDING`; dietitian decisions change them to `CONFIRMED` or `REJECTED`, and patients can cancel future pending or confirmed appointments. Patients may create an account before joining a dietitian. For an existing PostgreSQL database, apply the status migration once with `python back-end/migrations/apply_001_appointment_approval_states.py`.
+
+Appointment requests use 50-minute visits with a 5-minute buffer, offered in 55-minute slots from 08:00 through 16:15. Clients must choose an initial visit or follow-up. For existing PostgreSQL databases, apply `python back-end/migrations/apply_022_appointment_visit_type.py` to store the visit type.
+
+When a client requests an appointment, the assigned dietitian is emailed the client's name and email and the appointment details. Configure `RESEND_API_KEY` and `RESEND_FROM_EMAIL` on the API server to enable delivery. The appointment is still created if email delivery is unavailable; the response and client UI report that the notification could not be sent.
+
+Appointment check-in QR codes stay on the appointment record and can be scanned only by administrators or the dietitian assigned to the appointment. The camera scanner prefers native QR detection and falls back to the locally bundled jsQR decoder on browsers without `BarcodeDetector`; camera access requires HTTPS and permission from the device. Keyboard QR scanners and manual code entry are also available. The bundled decoder is licensed under Apache-2.0; see `front-end/jsQR-LICENSE.txt`. For existing PostgreSQL deployments, apply `back-end/migrations/023_checkin_actor_roles.sql` after the check-in schema migrations. The deployment workflow applies it automatically.
 
 For running the API outside Compose, set `OLLAMA_BASE_URL` (default `http://localhost:11434`) and `OLLAMA_MODEL` (default `llama3.2`) to match an Ollama instance with the selected model downloaded.
 
 ## Admin approvals
 
-When the database has no administrator, the **Admin setup** tab appears on the local sign-in page. Create the first admin from this computer; the setup endpoint is loopback-only and becomes unavailable after that account is created. Dietitians can upload PDF, JPEG, or PNG verification documents up to 10 MB from the **Verification documents** screen. Admins can preview them before approving or rejecting a registration; decisions and notes are recorded in `approval_log`. Admin and dietitian document sessions are held in process memory, so sign in again after an API restart.
+Branch managers can inspect, approve, and reject dietitians in their assigned branch.
+Other branches and system administration remain restricted. Decisions record the
+reviewing manager in the approval history. Before using this with an existing
+PostgreSQL database, run `python back-end/migrations/apply_024_branch_manager_approvals.py`.
+The deployment workflow applies this migration automatically.
+
+Dietitian registrations use the `PENDING` / `APPROVED` / `REJECTED` workflow. Dietitians add a branch and submit PDF, JPEG, or PNG verification documents up to 10 MB from the **Verification documents** screen. Administrators can preview submitted documents before approving or rejecting a registration; rejection requires a reason, and decisions are recorded in `approval_log`. Branch managers can inspect dietitians and documents belonging to their assigned branch but cannot approve registrations. Documents remain private and are served through authenticated endpoints.
+
+When the database has no administrator, the **Admin setup** tab appears on the local sign-in page. Create the first admin from this computer; the setup endpoint is loopback-only and becomes unavailable after that account is created. Admin and dietitian document sessions are held in process memory, so sign in again after an API restart.
 
 To provision three local admin accounts, run `python back-end/seed_admin_accounts.py` with `DATABASE_URL` configured. It skips existing seeded accounts, generates random temporary passwords, and prints passwords only for newly created accounts. Store those credentials securely; they are not hard-coded in the source.
 

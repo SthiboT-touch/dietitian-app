@@ -10,18 +10,28 @@ from langchain_core.runnables import RunnableLambda
 
 import app
 import config
+import email_verification
 import state
 from state import client_sessions_db
 from routers import ai
+from routers import auth_admin
+from routers import appointments as appointments_router
 from security import hash_password
 
 client = TestClient(app.app)
+require_verified_registration_email = auth_admin._require_verified_registration_email
 
 
 @pytest.fixture(autouse=True)
 def clear_in_memory_data(monkeypatch):
     monkeypatch.setattr(config, "DATABASE_ENABLED", False)
+    monkeypatch.setattr(
+        auth_admin,
+        "_require_verified_registration_email",
+        lambda email: {"stytch_user_id": None},
+    )
     client_sessions_db.clear()
+    state.verified_email_db.clear()
     state.ai_recommendations_db.clear()
     state.ai_conversations_db.clear()
     state.admins_db.clear()
@@ -36,6 +46,7 @@ def clear_in_memory_data(monkeypatch):
     state.goals_db.clear()
     state.recipes_db.clear()
     state.users_db.clear()
+    state.verified_email_db.clear()
     yield
     client_sessions_db.clear()
     state.ai_recommendations_db.clear()
@@ -52,6 +63,56 @@ def clear_in_memory_data(monkeypatch):
     state.goals_db.clear()
     state.recipes_db.clear()
     state.users_db.clear()
+    state.verified_email_db.clear()
+
+
+def test_registration_requires_verified_email(monkeypatch):
+    monkeypatch.setattr(
+        auth_admin,
+        "_require_verified_registration_email",
+        require_verified_registration_email,
+    )
+    monkeypatch.setattr(config, "RESEND_API_KEY", "test-api-key")
+    monkeypatch.setattr(config, "RESEND_FROM_EMAIL", "care@example.com")
+    monkeypatch.setattr(email_verification.secrets, "randbelow", lambda upper: 123456)
+    monkeypatch.setattr(email_verification.secrets, "token_urlsafe", lambda length: "method-id")
+    payload = {
+        "first_name": "Avery",
+        "last_name": "Chen",
+        "email": "verified@example.com",
+        "license_number": "DT9122103",
+        "password": "nutrition-safe-pass",
+    }
+
+    with patch(
+        "email_verification.resend.Emails.send",
+        return_value={"id": "test-email-id"},
+    ):
+        send_result = client.post(
+            "/api/v1/auth/email/send-code",
+            json={"email": payload["email"]},
+        )
+        assert send_result.status_code == 200
+        method_id = send_result.json()["method_id"]
+
+        unverified = client.post("/api/v1/auth/register/dietitian", json=payload)
+        assert unverified.status_code == 403
+
+        verified = client.post(
+            "/api/v1/auth/email/verify-code",
+            json={
+                "email": payload["email"],
+                "method_id": method_id,
+                "code": "123456",
+            },
+        )
+        assert verified.status_code == 200
+        assert verified.json()["verified"] is True
+
+    registration = client.post("/api/v1/auth/register/dietitian", json=payload)
+
+    assert registration.status_code == 200
+    assert registration.json()["user"]["email_verified"] is True
 
 
 def authenticated_client_headers(client_id):
@@ -62,6 +123,8 @@ def authenticated_client_headers(client_id):
 
 def authenticated_dietitian_headers(dietitian_id):
     token = f"test_dietitian_token_{dietitian_id}"
+    clinician = state.users_db.setdefault(dietitian_id, {"id": dietitian_id, "type": "dietitian"})
+    clinician.update(status="APPROVED")
     state.dietitian_sessions_db[token] = dietitian_id
     return {"Authorization": f"Bearer {token}"}
 
@@ -73,7 +136,7 @@ def test_signup_and_login_use_saved_credentials():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     )
@@ -104,6 +167,7 @@ def test_database_client_login_includes_date_of_birth(monkeypatch):
         "full_name": "Jordan Lee",
         "email": "jordan@example.com",
         "dietitian_id": "dietitian-1",
+        "email_verified": True,
         "date_of_birth": date(1990, 5, 14),
         "password_hash": hash_password("client-safe-pass"),
     }
@@ -154,7 +218,7 @@ def test_signup_rejects_duplicate_email():
         "first_name": "Avery",
         "last_name": "Chen",
         "email": "avery@example.com",
-        "license_number": "RD-2048",
+        "license_number": "DT9122103",
         "password": "nutrition-safe-pass",
     }
     client.post("/api/v1/auth/register/dietitian", json=payload)
@@ -214,7 +278,7 @@ def test_patient_without_assigned_dietitian_can_book_with_directory_dietitian():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -242,7 +306,7 @@ def test_patient_without_assigned_dietitian_can_book_with_directory_dietitian():
             "client_id": patient["id"],
             "dietitian_id": directory.json()[0]["id"],
             "appointment_date": (datetime.now() + timedelta(days=5))
-            .replace(microsecond=0)
+            .replace(hour=8, minute=0, second=0, microsecond=0)
             .isoformat(),
         },
         headers=authenticated_client_headers(patient["id"]),
@@ -261,7 +325,7 @@ def test_approved_appointment_links_patient_to_dietitian_for_dashboard():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -286,7 +350,7 @@ def test_approved_appointment_links_patient_to_dietitian_for_dashboard():
             "client_id": patient["id"],
             "dietitian_id": dietitian["id"],
             "appointment_date": (datetime.now() + timedelta(days=5))
-            .replace(microsecond=0)
+            .replace(hour=8, minute=0, second=0, microsecond=0)
             .isoformat(),
         },
         headers=authenticated_client_headers(patient["id"]),
@@ -315,7 +379,7 @@ def test_client_signup_joins_registered_dietitian():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     )
@@ -350,7 +414,7 @@ def test_client_list_is_scoped_to_dietitian():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -395,7 +459,7 @@ def test_admin_workspace_data_routes_require_admin_and_return_practice_data():
             "first_name": "Avery",
             "last_name": "Chen",
             "email": "avery@example.com",
-            "license_number": "RD-2048",
+            "license_number": "DT9122103",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -472,7 +536,7 @@ def test_dietitian_directory_lists_registered_dietitians():
                 "first_name": full_name.split(" ", 1)[0],
                 "last_name": full_name.split(" ", 1)[1],
                 "email": email,
-                "license_number": f"RD-{email.split('@')[0]}",
+                "license_number": "DT" + str(int.from_bytes(email.encode(), "big") % 10000000).zfill(7),
                 "password": "nutrition-safe-pass",
             },
         )
@@ -494,7 +558,7 @@ def test_approved_dietitian_can_add_practice_branch_as_current_base():
             "first_name": "Riley",
             "last_name": "Parker",
             "email": "riley@example.com",
-            "license_number": "RD-BRANCH",
+            "license_number": "DT0669200",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -541,7 +605,7 @@ def test_pending_dietitian_can_add_branch_before_registration_approval():
             "first_name": "Pending",
             "last_name": "Practitioner",
             "email": "pending-branch@example.com",
-            "license_number": "RD-PENDING-BRANCH",
+            "license_number": "DT1866211",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -565,7 +629,7 @@ def test_verification_documents_require_branch_name_and_location():
             "first_name": "New",
             "last_name": "Applicant",
             "email": "new-applicant@example.com",
-            "license_number": "RD-NEW-APPLICANT",
+            "license_number": "DT7034873",
             "password": "nutrition-safe-pass",
         },
     ).json()["user"]
@@ -588,7 +652,7 @@ def test_dietitian_rejection_requires_reason_and_allows_resubmission():
             "first_name": "Taylor",
             "last_name": "Morgan",
             "email": "taylor@example.com",
-            "license_number": "RD-REJECTED",
+            "license_number": "DT2437604",
             "password": "dietitian-safe-password",
         },
     ).json()["user"]
@@ -650,7 +714,7 @@ def test_pending_dietitian_is_not_in_client_directory():
             "first_name": "Waiting",
             "last_name": "Dietitian",
             "email": "waiting@example.com",
-            "license_number": "RD-WAITING",
+            "license_number": "DT8063331",
             "password": "nutrition-safe-pass",
         },
     )
@@ -803,7 +867,7 @@ def test_ai_chat_returns_clear_fallback_when_ollama_is_unavailable(caplog):
     with patch("routers.ai._create_chat_agent", return_value=RunnableLambda(fail_model)):
         reply = ai.generate_llama_chat_reply("What should I eat after a workout?", "client")
 
-    assert "can't reach the ai model" in reply.lower()
+    assert "can't reach the nutrition assistant" in reply.lower()
     assert "LangChain AI chat request failed" in caplog.text
 
 
@@ -819,6 +883,7 @@ def ollama_response(plan):
 
 
 def test_generate_plan_returns_pending_recommendation():
+    seed_completed_visit("client-1", "dietitian-1")
     state.clients_db["client-1"] = {
         "id": "client-1",
         "dietitian_id": "dietitian-1",
@@ -844,6 +909,7 @@ def test_generate_plan_returns_pending_recommendation():
 
 
 def test_generate_plan_forwards_allergies_and_conditions():
+    seed_completed_visit("client-2", "dietitian-1")
     state.clients_db["client-2"] = {
         "id": "client-2",
         "dietitian_id": "dietitian-1",
@@ -881,6 +947,7 @@ def test_generate_plan_forwards_allergies_and_conditions():
 
 
 def test_generate_plan_returns_503_when_ollama_is_unreachable():
+    seed_completed_visit("client-3", "dietitian-1")
     state.clients_db["client-3"] = {
         "id": "client-3",
         "dietitian_id": "dietitian-1",
@@ -906,6 +973,7 @@ def test_generate_plan_returns_503_when_ollama_is_unreachable():
 
 
 def test_generate_plan_returns_503_for_malformed_model_response():
+    seed_completed_visit("client-4", "dietitian-1")
     state.clients_db["client-4"] = {
         "id": "client-4",
         "dietitian_id": "dietitian-1",
@@ -1026,14 +1094,16 @@ def test_meal_plan_create_and_list():
 
 
 def test_appointments_can_be_filtered_by_client():
-    appointment_date = (datetime.now() + timedelta(days=8)).replace(microsecond=0).isoformat()
-    for client_id in ("client-a", "client-b"):
+    appointment_date = (datetime.now() + timedelta(days=8)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    )
+    for client_id, slot in (("client-a", "08:00"), ("client-b", "08:55")):
         response = client.post(
             "/api/v1/appointments",
             json={
                 "client_id": client_id,
                 "dietitian_id": "dietitian-1",
-                "appointment_date": appointment_date,
+                "appointment_date": f"{appointment_date:%Y-%m-%d}T{slot}:00",
             },
             headers=authenticated_client_headers(client_id),
         )
@@ -1050,7 +1120,164 @@ def test_appointments_can_be_filtered_by_client():
     assert response.json()[0]["client_id"] == "client-a"
 
 
-def test_goals_can_be_created_and_listed_by_client():
+def test_appointment_creation_emails_assigned_dietitian(monkeypatch):
+    sent = {}
+    state.users_db["dietitian-email-test"] = {
+        "id": "dietitian-email-test",
+        "type": "dietitian",
+        "full_name": "Avery Chen",
+        "email": "avery@example.com",
+    }
+    state.users_db["client-email-test"] = {
+        "id": "client-email-test",
+        "type": "client",
+        "full_name": "Jordan Lee",
+        "email": "jordan@example.com",
+    }
+
+    def capture_email(**details):
+        sent.update(details)
+
+    monkeypatch.setattr(
+        appointments_router,
+        "send_appointment_created_email",
+        capture_email,
+    )
+    appointment_date = (datetime.now() + timedelta(days=8)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    )
+    response = client.post(
+        "/api/v1/appointments",
+        json={
+            "client_id": "client-email-test",
+            "dietitian_id": "dietitian-email-test",
+            "appointment_date": appointment_date.isoformat(),
+            "consultation_type": "FOLLOW_UP",
+        },
+        headers=authenticated_client_headers("client-email-test"),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["email_notification"] == {"status": "sent"}
+    assert sent["recipient_email"] == "avery@example.com"
+    assert sent["dietitian_name"] == "Avery Chen"
+    assert sent["client_name"] == "Jordan Lee"
+    assert sent["client_email"] == "jordan@example.com"
+    assert sent["appointment"]["consultation_type"] == "FOLLOW_UP"
+    assert sent["appointment"]["appointment_id"] == response.json()["appointment"]["appointment_id"]
+
+
+def test_appointment_checkin_qr_is_returned_and_stays_stable_in_appointment_list():
+    appointment_date = (datetime.now() + timedelta(days=8)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    )
+    created = client.post(
+        "/api/v1/appointments",
+        json={
+            "client_id": "client-qr-test",
+            "dietitian_id": "dietitian-qr-test",
+            "appointment_date": appointment_date.isoformat(),
+        },
+        headers=authenticated_client_headers("client-qr-test"),
+    )
+    listed = client.get(
+        "/api/v1/appointments",
+        params={"client_id": "client-qr-test"},
+        headers=authenticated_client_headers("client-qr-test"),
+    )
+
+    assert created.status_code == 200
+    assert listed.status_code == 200
+    created_appointment = created.json()["appointment"]
+    listed_appointment = listed.json()[0]
+    assert "<svg" in created_appointment["checkin_qr_svg"]
+    assert listed_appointment["checkin_qr_svg"] == created_appointment["checkin_qr_svg"]
+
+
+def test_appointment_qr_checks_in_only_its_matching_appointment_once():
+    from datetime import timezone
+
+    appointment_id = "qr-checkin-test-appointment"
+    dietitian_id = "qr-checkin-test-dietitian"
+    staff_token = "qr-checkin-test-token"
+    branch_id = "qr-checkin-test-branch"
+    state.users_db[dietitian_id] = {
+        "type": "dietitian",
+        "branch_id": branch_id,
+    }
+    state.dietitian_sessions_db[staff_token] = dietitian_id
+    state.appointments_db[appointment_id] = {
+        "appointment_id": appointment_id,
+        "client_id": "qr-checkin-test-client",
+        "dietitian_id": dietitian_id,
+        "appointment_date": datetime.now(timezone(timedelta(hours=2))).isoformat(),
+        "status": "CONFIRMED",
+    }
+    headers = {"Authorization": f"Bearer {staff_token}"}
+    payload = {"checkin_code": f"NC1:APPT:{appointment_id}"}
+
+    try:
+        first_scan = client.post(
+            "/api/v1/check-in/scan", json=payload, headers=headers
+        )
+        repeated_scan = client.post(
+            "/api/v1/check-in/scan", json=payload, headers=headers
+        )
+
+        assert first_scan.status_code == 201
+        assert first_scan.json()["client_id"] == "qr-checkin-test-client"
+        assert repeated_scan.status_code == 409
+    finally:
+        state.dietitian_sessions_db.pop(staff_token, None)
+        state.users_db.pop(dietitian_id, None)
+        state.appointments_db.pop(appointment_id, None)
+        state.checkin_events_db[:] = [
+            event
+            for event in state.checkin_events_db
+            if event.get("appointment_id") != appointment_id
+        ]
+
+
+def test_appointments_require_grid_slots_and_prevent_overlapping_bookings():
+    appointment_date = (datetime.now() + timedelta(days=6)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    )
+    first = client.post(
+        "/api/v1/appointments",
+        json={
+            "client_id": "client-a",
+            "dietitian_id": "dietitian-1",
+            "appointment_date": appointment_date.isoformat(),
+        },
+        headers=authenticated_client_headers("client-a"),
+    )
+    collision = client.post(
+        "/api/v1/appointments",
+        json={
+            "client_id": "client-b",
+            "dietitian_id": "dietitian-1",
+            "appointment_date": appointment_date.isoformat(),
+        },
+        headers=authenticated_client_headers("client-b"),
+    )
+    invalid_slot = client.post(
+        "/api/v1/appointments",
+        json={
+            "client_id": "client-c",
+            "dietitian_id": "dietitian-1",
+            "appointment_date": (appointment_date + timedelta(minutes=5)).isoformat(),
+        },
+        headers=authenticated_client_headers("client-c"),
+    )
+
+    assert first.status_code == 200
+    assert collision.status_code == 409
+    assert invalid_slot.status_code == 422
+
+
+def test_goals_are_created_by_assigned_dietitian_and_viewed_by_client():
+    seed_completed_visit("client-goal-test", "goal-dietitian")
+    state.users_db["client-goal-test"] = {"id": "client-goal-test", "type": "client", "dietitian_id": "goal-dietitian"}
     created = client.post(
         "/api/v1/goals",
         json={
@@ -1058,7 +1285,7 @@ def test_goals_can_be_created_and_listed_by_client():
             "target_metric": "Weight",
             "target_value": 72.5,
         },
-        headers=authenticated_client_headers("client-goal-test"),
+        headers=authenticated_dietitian_headers("goal-dietitian"),
     )
 
     assert created.status_code == 200, created.text
@@ -1073,7 +1300,12 @@ def test_goals_can_be_created_and_listed_by_client():
     assert listing.json() == [created.json()["goal"]]
 
 
-def test_patient_progress_saves_and_preserves_partial_metric_updates():
+def test_dietitian_progress_saves_and_preserves_partial_metric_updates():
+    state.users_db["patient-progress-test"] = {
+        "id": "patient-progress-test",
+        "type": "client",
+        "dietitian_id": "progress-dietitian",
+    }
     first_entry = client.post(
         "/api/v1/clients/patient-progress-test/progress",
         json={
@@ -1085,14 +1317,14 @@ def test_patient_progress_saves_and_preserves_partial_metric_updates():
             "steps": 8500,
             "sleep_hours": 7.33,
         },
-        headers=authenticated_client_headers("patient-progress-test"),
+        headers=authenticated_dietitian_headers("progress-dietitian"),
     )
     assert first_entry.status_code == 200
 
     partial_update = client.post(
         "/api/v1/clients/patient-progress-test/progress",
         json={"weight_kg": 72.2},
-        headers=authenticated_client_headers("patient-progress-test"),
+        headers=authenticated_dietitian_headers("progress-dietitian"),
     )
     history = client.get(
         "/api/v1/clients/patient-progress-test/progress",
@@ -1112,7 +1344,9 @@ def test_patient_progress_saves_and_preserves_partial_metric_updates():
 
 
 def test_appointment_lifecycle_supports_approval_rejection_and_cancellation():
-    appointment_date = (datetime.now() + timedelta(days=5)).replace(microsecond=0).isoformat()
+    appointment_date = (datetime.now() + timedelta(days=5)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    ).isoformat()
     created = client.post(
         "/api/v1/appointments",
         json={
@@ -1173,7 +1407,7 @@ def test_appointment_decisions_only_apply_to_pending_requests():
             "client_id": "client-a",
             "dietitian_id": "dietitian-1",
             "appointment_date": (datetime.now() + timedelta(days=3))
-            .replace(microsecond=0)
+            .replace(hour=8, minute=0, second=0, microsecond=0)
             .isoformat(),
         },
         headers=authenticated_client_headers("client-a"),
@@ -1257,6 +1491,11 @@ def test_pending_recommendations_only_returns_pending_items():
 
 
 def test_client_health_profile_loads_conditions_allergies_and_pregnancy():
+    state.users_db["client-health"] = {
+        "id": "client-health",
+        "type": "client",
+        "maternal_care_enabled": True,
+    }
     state.clients_db["client-health"] = {
         "allergies": [{"allergen": "Peanuts", "severity": "severe"}],
         "conditions": [{"condition_name": "Asthma"}],
@@ -1277,6 +1516,12 @@ def test_client_health_profile_loads_conditions_allergies_and_pregnancy():
 
 
 def test_health_history_entries_save_for_a_client():
+    state.users_db["client-health"] = {
+        "id": "client-health",
+        "type": "client",
+        "dietitian_id": "health-dietitian",
+        "maternal_care_enabled": True,
+    }
     state.clients_db["client-health"] = {
         "allergies": [],
         "conditions": [],
@@ -1292,7 +1537,7 @@ def test_health_history_entries_save_for_a_client():
     condition = client.post(
         "/api/v1/clients/client-health/medical-conditions",
         json={"condition_name": "Asthma"},
-        headers=authenticated_client_headers("client-health"),
+        headers=authenticated_dietitian_headers("health-dietitian"),
     )
     pregnancy = client.post(
         "/api/v1/clients/client-health/pregnancy",
@@ -1313,6 +1558,7 @@ def test_health_history_entries_save_for_a_client():
 
 
 def test_review_recommendation_updates_status_and_notes():
+    seed_completed_visit("client-review", "dietitian-1")
     state.clients_db["client-review"] = {
         "id": "client-review",
         "dietitian_id": "dietitian-1",
@@ -1397,7 +1643,7 @@ def test_admin_setup_login_and_audited_dietitian_approval():
             "first_name": "Pending",
             "last_name": "Dietitian",
             "email": "pending@example.com",
-            "license_number": "RD-PENDING",
+            "license_number": "DT1647441",
             "password": "dietitian-safe-password",
         },
     ).json()["user"]
@@ -1494,3 +1740,8 @@ def test_admin_setup_login_and_audited_dietitian_approval():
     )
     assert approved_directory_entry["branch_name"] == "Later Clinic"
     assert approved_directory_entry["branch_address"] == "99 New Street"
+
+
+def seed_completed_visit(client_id, dietitian_id):
+    appointment_id = "visit-" + client_id
+    state.appointments_db[appointment_id] = {"appointment_id": appointment_id, "client_id": client_id, "dietitian_id": dietitian_id, "status": "COMPLETED", "appointment_date": (datetime.now() - timedelta(days=1)).isoformat()}

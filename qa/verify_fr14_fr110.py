@@ -8,6 +8,8 @@ import sys
 import types
 import base64
 import io
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from PIL import Image
 
@@ -36,15 +38,19 @@ for store in (
     state.admins_db,
     state.staff_accounts_db,
     state.client_sessions_db,
+    state.admin_sessions_db,
+    state.appointments_db,
     state.staff_sessions_db,
     state.welcome_outbox_db,
     state.client_registration_consents_db,
     state.profile_photos_db,
     state.client_documents_db,
     state.checkin_credentials_db,
+    state.verified_email_db,
 ):
     store.clear()
 state.checkin_events_db.clear()
+state.verified_email_db["jordan@example.test"] = {"expires_at": time.time() + 600}
 
 buf = io.BytesIO()
 Image.new("RGB", (24, 24), "white").save(buf, format="PNG")
@@ -112,15 +118,28 @@ assert (
 assert api.get(f"/api/v1/clients/{client_id}/profile-photo").status_code == 401
 
 # FR-1.9: another email with same SA ID fails without creating a patient.
+state.verified_email_db["different@example.test"] = {"expires_at": time.time() + 600}
 r = api.post("/api/v1/auth/register/client", json={**BASE, "email": "different@example.test"})
 assert (
     r.status_code == 409
     and len([u for u in state.users_db.values() if u.get("type") == "client"]) == 1
 )
+state.verified_email_db[BASE["email"]] = {"expires_at": time.time() + 600}
 r = api.post("/api/v1/auth/register/client", json={**BASE, "id_number": "9005140012352"})
 assert r.status_code == 409
 
-# FR-1.7: only patient owner can request QR; reception can scan and record.
+# FR-1.7: only the patient can request QR; administrators and dietitians scan.
+appointment_id = "appointment-for-qr-test"
+state.appointments_db[appointment_id] = {
+    "appointment_id": appointment_id,
+    "client_id": client_id,
+    "dietitian_id": "dietitian-for-qr-test",
+    "branch_id": "branch-test",
+    "status": "CONFIRMED",
+    "appointment_date": (datetime.now() + timedelta(days=1)).isoformat(),
+}
+state.admin_sessions_db["admin-test-token"] = "admin-test-account"
+admin_headers = {"Authorization": "Bearer admin-test-token"}
 assert api.post(f"/api/v1/clients/{client_id}/checkin-code").status_code == 401
 qr = api.post(f"/api/v1/clients/{client_id}/checkin-code", headers=headers)
 assert qr.status_code == 200, qr.text
@@ -139,13 +158,16 @@ state.staff_accounts_db[staff_id] = {
 }
 state.staff_sessions_db["staff-test-token"] = staff_id
 staff_headers = {"Authorization": "Bearer staff-test-token"}
-assert api.post("/api/v1/reception/check-in", json={"checkin_code": code}).status_code == 401
-result = api.post("/api/v1/reception/check-in", json={"checkin_code": code}, headers=staff_headers)
+assert api.post("/api/v1/check-in/scan", json={"checkin_code": code}).status_code == 401
+assert api.post(
+    "/api/v1/check-in/scan", json={"checkin_code": code}, headers=staff_headers
+).status_code == 403
+result = api.post("/api/v1/check-in/scan", json={"checkin_code": code}, headers=admin_headers)
 assert result.status_code == 201, result.text
 assert len(state.checkin_events_db) == 1
 assert (
     api.post(
-        "/api/v1/reception/check-in", json={"checkin_code": code}, headers=staff_headers
+        "/api/v1/check-in/scan", json={"checkin_code": code}, headers=admin_headers
     ).status_code
     == 404
 )
@@ -153,7 +175,7 @@ qr2 = api.post(f"/api/v1/clients/{client_id}/checkin-code", headers=headers)
 assert qr2.status_code == 200
 assert (
     api.post(
-        "/api/v1/reception/check-in", json={"checkin_code": code}, headers=staff_headers
+        "/api/v1/check-in/scan", json={"checkin_code": code}, headers=admin_headers
     ).status_code
     == 404
 )
@@ -162,15 +184,16 @@ expired = api.post(f"/api/v1/clients/{client_id}/checkin-code", headers=headers)
 state.checkin_credentials_db[client_id]["expires_at"] = 0
 assert (
     api.post(
-        "/api/v1/reception/check-in",
+        "/api/v1/check-in/scan",
         json={"checkin_code": expired.json()["checkin_code"]},
-        headers=staff_headers,
+        headers=admin_headers,
     ).status_code
     == 404
 )
 
 # FR-1.8: receptionist may assist only with explicit consent; patient creates password.
 ASSISTED = {**BASE, "email": "assisted@example.test", "id_number": "9005140012352"}
+state.verified_email_db[ASSISTED["email"]] = {"expires_at": time.time() + 600}
 assert api.post("/api/v1/auth/register/client/assisted", json=ASSISTED).status_code == 401
 assert (
     api.post(

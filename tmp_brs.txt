@@ -1,0 +1,2752 @@
+Business Requirements Specification
+
+           Unified Digital Transformation Platform
+
+                       Multi-Branch Dietician Network
+
+                                          Project Title:
+
+                  Integrated Power Platform Solution for
+                         Dietetic Practice Digitization
+
+                                           Confidential
+                     This document contains proprietary information
+Digital Transformation - Dietician Network                                BRS v2.0
+
+Document Control
+
+tableheader Field  Detail                                                 Transformation
+Document Title
+                   Business Requirements Specification - Unified Digital
+Version            Platform
+Date               2.0
+Status             30 October 2025
+Classification     Final Draft
+Distribution       Confidential
+                   Project Team, Stakeholders, Executive Management
+
+Revision History
+
+tableheader Version  Date         Description                    Author
+1.0                  30 Oct 2025                                 Mpapadi Piet Monyela
+                                  Initial draft - Separate BRS
+2.0                  30 Oct 2025  documents                      Mpapadi Piet Monyela
+                                  Consolidated unified platform
+                                  BRS
+
+                                            1
+Contents
+
+Document Control                    1
+
+1 Executive Summary                 5
+
+1.1 Organization Overview . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+1.2 Current State . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+1.3 Critical Challenges . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+1.4 Proposed Solution . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+1.5 Strategic Vision . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+1.6 Key Benefits . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+
+2 Business Context                  7
+
+2.1 Organization Profile . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+2.2 Problem Statement Summary . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+
+      2.2.1 Problem 1: The Broken First Impression (Onboarding & Registration) . . 7
+      2.2.2 Problem 2: Operational Paralysis & Pervasive Risk . . . . . . . . . . . . . 7
+      2.2.3 Problem 3: The Motivation Gap (Disconnected Client Journey) . . . . . . 7
+      2.2.4 Problem 4: Revenue Stagnation (Untapped Growth Potential) . . . . . . . 8
+      2.2.5 Problem 5: The Feedback Black Hole (Customer Satisfaction) . . . . . . . 8
+
+3 Project Objectives                9
+
+3.1 Primary Objectives . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+3.2 Success Metrics . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+
+4 Unified Solution Architecture     10
+
+4.1 Core Concept: One Platform, Multiple Modules . . . . . . . . . . . . . . . . . . . 10
+4.2 Technology Stack . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+4.3 Unified Application Modules . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+
+      4.3.1 Module 1: Digital Onboarding & Registration System . . . . . . . . . . . 10
+      4.3.2 Module 2: Centralized Client Management System (CMS) . . . . . . . . . 11
+      4.3.3 Module 3: Client Engagement & Motivation System . . . . . . . . . . . . 12
+      4.3.4 Module 4: Digital Services & Revenue Platform . . . . . . . . . . . . . . . 12
+      4.3.5 Module 5: Feedback, Analytics & Business Intelligence . . . . . . . . . . . 13
+4.4 Role-Based Access Control (RBAC) Framework . . . . . . . . . . . . . . . . . . . 14
+4.5 Device Provisioning Strategy . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+
+5 Functional Requirements           15
+
+5.1 Module 1: Digital Onboarding & Registration . . . . . . . . . . . . . . . . . . . . 15
+5.2 Module 2: Centralized Client Management System . . . . . . . . . . . . . . . . . 15
+5.3 Module 3: Client Engagement & Motivation System . . . . . . . . . . . . . . . . 16
+5.4 Module 4: Digital Services & Revenue Platform . . . . . . . . . . . . . . . . . . . 17
+5.5 Module 5: Feedback, Analytics & Business Intelligence . . . . . . . . . . . . . . . 18
+5.6 Cross-Module Integration Requirements . . . . . . . . . . . . . . . . . . . . . . . 19
+
+6 Non-Functional Requirements       21
+
+6.1 Performance Requirements . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+6.2 Security Requirements . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+6.3 Availability & Reliability . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+6.4 Usability Requirements . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+6.5 Maintainability & Supportability . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+6.6 Compliance & Regulatory . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+
+                                 2
+Digital Transformation - Dietician Network     BRS v2.0
+
+7 Data Architecture                            23
+
+7.1 Conceptual Data Model . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+      7.1.1 Core Entities . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+
+7.2 Entity Relationships . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24
+7.3 Data Retention & Archival . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25
+
+8 Business Rules                               26
+
+8.1 Client Management Rules . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+8.2 Engagement & Motivation Rules . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+8.3 Appointment & Scheduling Rules . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+8.4 Payment & Billing Rules . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27
+8.5 Access Control & Security Rules . . . . . . . . . . . . . . . . . . . . . . . . . . . 27
+8.6 Data Quality & Integrity Rules . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28
+8.7 Reporting & Analytics Rules . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28
+
+9 Project Scope                                30
+
+9.1 In Scope . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30
+9.2 Out of Scope . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31
+9.3 Future Phase Considerations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31
+
+10 Stakeholders                                32
+
+10.1 Stakeholder Matrix . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32
+10.2 Communication Plan . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 33
+
+11 Assumptions and Dependencies                35
+
+11.1 Assumptions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 35
+11.2 Dependencies . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 35
+
+12 Risks and Mitigation Strategies             37
+
+13 Project Deliverables                        39
+
+13.1 Primary Deliverables . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 39
+13.2 Deliverable Timeline . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 40
+
+14 Implementation Approach                     41
+
+14.1 Methodology . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 41
+14.2 Project Phases . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 41
+
+      14.2.1 Phase 1: Discovery & Planning (Weeks 1-4) . . . . . . . . . . . . . . . . . 41
+      14.2.2 Phase 2: Foundation Build (Weeks 5-8) . . . . . . . . . . . . . . . . . . . 42
+      14.2.3 Phase 3: Core Development (Weeks 9-14) . . . . . . . . . . . . . . . . . . 42
+      14.2.4 Phase 4: Data Migration (Weeks 12-20) . . . . . . . . . . . . . . . . . . . 43
+      14.2.5 Phase 5: Testing & Quality Assurance (Weeks 15-18) . . . . . . . . . . . . 43
+      14.2.6 Phase 6: Training & Change Management (Weeks 16-19) . . . . . . . . . 44
+      14.2.7 Phase 7: Pilot Deployment (Weeks 19-20) . . . . . . . . . . . . . . . . . . 44
+      14.2.8 Phase 8: Full Rollout (Weeks 21-24) . . . . . . . . . . . . . . . . . . . . . 45
+      14.2.9 Phase 9: Hypercare & Stabilization (Weeks 24-28) . . . . . . . . . . . . . 45
+      14.2.10 Phase 10: Review & Optimization (Weeks 32-36) . . . . . . . . . . . . . . 46
+14.3 Deployment Strategy . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46
+14.4 Go-Live Readiness Criteria . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46
+
+15 Support & Maintenance                       48
+
+15.1 Support Model . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 48
+      15.1.1 Hypercare Period (First 30 Days) . . . . . . . . . . . . . . . . . . . . . . . 48
+
+                                            3
+Digital Transformation - Dietician Network     BRS v2.0
+
+      15.1.2 Steady-State Support (Post-Hypercare) . . . . . . . . . . . . . . . . . . . 48
+15.2 Service Level Agreements (SLA) . . . . . . . . . . . . . . . . . . . . . . . . . . . 48
+15.3 Maintenance Activities . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 49
+
+      15.3.1 Preventive Maintenance . . . . . . . . . . . . . . . . . . . . . . . . . . . . 49
+      15.3.2 Corrective Maintenance . . . . . . . . . . . . . . . . . . . . . . . . . . . . 49
+      15.3.3 Adaptive Maintenance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 49
+      15.3.4 Perfective Maintenance . . . . . . . . . . . . . . . . . . . . . . . . . . . . 49
+15.4 Knowledge Transfer . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 50
+
+16 Budget and Resource Estimate                51
+
+16.1 High-Level Cost Breakdown . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 51
+16.2 Ongoing Annual Costs (Years 2+) . . . . . . . . . . . . . . . . . . . . . . . . . . 51
+16.3 Resource Requirements . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 51
+
+17 Success Criteria and Measurement            53
+
+17.1 Critical Success Factors . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 53
+17.2 Key Performance Indicators (KPIs) . . . . . . . . . . . . . . . . . . . . . . . . . . 53
+17.3 Measurement Methodology . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 53
+17.4 Review Cadence . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 53
+
+18 Governance and Decision-Making              54
+
+18.1 Governance Structure . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 54
+      18.1.1 Steering Committee . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 54
+      18.1.2 Project Management Office (PMO) . . . . . . . . . . . . . . . . . . . . . . 54
+      18.1.3 Technical Working Group . . . . . . . . . . . . . . . . . . . . . . . . . . . 55
+      18.1.4 User Advisory Group . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 55
+
+18.2 Decision-Making Framework . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 56
+18.3 Change Control Process . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 56
+
+      18.3.1 Change Request Procedure . . . . . . . . . . . . . . . . . . . . . . . . . . 56
+      18.3.2 Change Request Template . . . . . . . . . . . . . . . . . . . . . . . . . . . 57
+
+19 Appendices                                  58
+
+19.1 Appendix A: Glossary of Terms . . . . . . . . . . . . . . . . . . . . . . . . . . . . 58
+19.2 Appendix B: Acronyms . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 59
+19.3 Appendix C: Reference Documents . . . . . . . . . . . . . . . . . . . . . . . . . . 60
+19.4 Appendix D: Contact Information . . . . . . . . . . . . . . . . . . . . . . . . . . . 60
+19.5 Appendix E: System Architecture Diagrams . . . . . . . . . . . . . . . . . . . . . 61
+19.6 Appendix F: Data Model - Entity Relationship Diagram . . . . . . . . . . . . . . 61
+19.7 Appendix G: User Journey Maps . . . . . . . . . . . . . . . . . . . . . . . . . . . 61
+19.8 Appendix H: Compliance Checklist . . . . . . . . . . . . . . . . . . . . . . . . . . 61
+
+20 Approval and Sign-Off                       63
+
+20.1 Document Approval . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 63
+20.2 Approval Criteria . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 63
+20.3 Next Steps Upon Approval . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 63
+
+                                            4
+Digital Transformation - Dietician Network  BRS v2.0
+
+1 Executive Summary
+
+1.1 Organization Overview
+
+The client is a leading dietician practice with 16 branches across 9 provinces and a client base
+exceeding 120,000 individuals. The organization has achieved significant success through per-
+sonalized care, strong client relationships, and a trusted brand reputation built over years of
+dedicated service.
+
+1.2 Current State
+
+Despite remarkable success in client acquisition and retention, the organization's operational
+infrastructure remains entirely manual and paper-based. All core business processes--including
+client registration, appointment scheduling, dietary plan management, progress tracking, billing,
+and reporting--are conducted using physical documents and manual workflows.
+
+1.3 Critical Challenges
+
+The current operational model presents five critical challenges that threaten the organization's
+ability to scale, maintain compliance, and deliver modern client experiences:
+1. Broken First Impression: Manual, paper-based onboarding creates friction and diminishes
+
+   the professional image
+2. Operational Paralysis: Inaccessible information, time wastage, POPIA compliance failures,
+
+   and zero business intelligence
+3. Motivation Gap: Disconnected client journey between appointments leading to high churn
+
+   rates
+4. Revenue Stagnation: Single revenue stream dependency and geographic limitations
+5. Feedback Black Hole: No systematic client satisfaction measurement or loyalty programs
+
+1.4 Proposed Solution
+
+This project proposes a comprehensive digital transformation using a unified Microsoft Power
+Platform solution. Rather than implementing disparate systems, we will develop an integrated
+Power Apps application with role-based access control (RBAC) that addresses all five problem
+areas through interconnected modules provisioned based on user roles and branch requirements.
+
+1.5 Strategic Vision
+
+Transform the organization from a traditional, paper-based practice into a technology-driven
+wellness ecosystem that:
+· Delivers seamless digital experiences across all client touchpoints
+· Enables data-driven decision making through centralized analytics
+· Ensures regulatory compliance with POPIA and healthcare standards
+· Supports scalable growth across geographic and service boundaries
+· Creates multiple revenue streams through digital service delivery
+· Maintains and enhances the personal care ethos that defines the brand
+
+                                                              5
+Digital Transformation - Dietician Network                              BRS v2.0
+
+1.6 Key Benefits
+
+For the Organization:
+· 90% reduction in paper-based workflows
+· 50% reduction in administrative processing time
+· Full POPIA compliance with comprehensive audit trails
+· Real-time business intelligence across all branches
+· New digital revenue streams (online consultations, digital products)
+· Reduced operational costs and improved efficiency
+
+    For Clients:
+· Modern, streamlined digital onboarding experience
+· 24/7 access to health records, meal plans, and progress tracking
+· Automated motivational support and engagement
+· Seamless service across all branch locations
+· Convenient online booking and virtual consultation options
+· Enhanced communication with dieticians
+
+    For Staff:
+· Centralized access to client information from any location
+· Automated workflows reducing manual tasks
+· Proactive client engagement tools
+· Comprehensive reporting and analytics dashboards
+· Improved collaboration across branches
+
+6
+Digital Transformation - Dietician Network                                       BRS v2.0
+
+2 Business Context
+
+2.1 Organization Profile
+
+tableheader Aspect   Description
+Organization Type
+Geographic Coverage  Dietetic and wellness practice
+Client Base          16 branches across 9 provinces (South Africa)
+Service Model        120,000+ active and historical clients
+Current Operations   Personalized nutrition counseling and wellness programs
+Staff                Manual, paper-based systems for all processes
+Core Competencies    Dieticians, branch managers, administrative personnel
+                     Personal care, client relationships, nutritional expertise
+
+2.2 Problem Statement Summary
+
+2.2.1 Problem 1: The Broken First Impression (Onboarding & Registration)
+The client's first interaction with the practice establishes a poor foundation:
+· Client Friction: Paper forms create a tedious, outdated experience that contradicts the
+
+   premium positioning
+· Administrative Burden: Manual data entry from handwritten forms causes delays and
+
+   errors
+· Lost Engagement: No digital touchpoint between registration and first appointment creates
+
+   relationship gaps
+· Brand Disconnect: Manual processes undermine the professional, modern image expected
+
+   by clients
+
+2.2.2 Problem 2: Operational Paralysis & Pervasive Risk
+Managing 120,000 client files manually has created systemic operational failures:
+· Inaccessible Information: Files locked to physical locations prevent cross-branch service
+
+   and remote access
+· Severe Time Wastage: Hours spent weekly on document retrieval, filing, and searching
+· POPIA Compliance Failure: Physical files vulnerable to loss, damage, unauthorized access,
+
+   and breaches
+· Zero Business Intelligence: No ability to analyze demographics, track outcomes, or measure
+
+   performance
+· Collaboration Barriers: Inability to share insights or coordinate care across branches
+
+2.2.3 Problem 3: The Motivation Gap (Disconnected Client Journey)
+Value delivery limited to 60-minute consultations leaves clients unsupported:
+· High Client Churn: Without continuous engagement, adherence drops and clients abandon
+
+   programs
+
+                                                              7
+Digital Transformation - Dietician Network     BRS v2.0
+
+· Reactive Care Model: Dieticians cannot identify struggling clients until scheduled appoint-
+   ments
+
+· Isolation: Clients lack peer support and community motivation crucial for success
+· Lost Momentum: No proactive interventions when clients become inactive
+· Missed Opportunities: Unable to celebrate wins or provide timely encouragement
+
+2.2.4 Problem 4: Revenue Stagnation (Untapped Growth Potential)
+Business model capped by billable hours and physical presence:
+· Single Revenue Stream: Over-reliance on in-person consultations limits growth
+· Geographic Constraints: Cannot serve clients outside branch locations
+· Capacity Limitations: Revenue directly tied to staff availability and working hours
+· Dormant Digital Presence: Website fails to attract leads, build trust, or convert visitors
+· No Digital Products: Missing opportunities for meal plans, guides, online programs
+· International Market Untapped: Cannot serve diaspora or international clients seeking
+
+   expertise
+
+2.2.5 Problem 5: The Feedback Black Hole (Customer Satisfaction)
+Operating without systematic client feedback mechanisms:
+· Unmeasured Satisfaction: No consistent data on client happiness or perceived value
+· Improvement Blindness: Cannot identify service gaps or training needs systematically
+· No Loyalty Program: Missing mechanisms to retain and reward best clients
+· Lost Referrals: No system to encourage testimonials or word-of-mouth marketing
+· Quality Uncertainty: Assumptions about service quality lack data validation
+
+                                            8
+Digital Transformation - Dietician Network     BRS v2.0
+
+3 Project Objectives
+
+3.1 Primary Objectives
+
+1. Digitize Core Operations
+
+       · Replace all paper-based workflows with integrated digital systems
+       · Implement centralized client management, scheduling, billing, and record-keeping
+       · Establish secure cloud-based infrastructure accessible from all locations
+
+2. Enhance Client Experience
+
+       · Provide seamless digital onboarding and registration
+       · Enable 24/7 secure access to wellness plans and progress tracking
+       · Implement continuous engagement and motivational support
+       · Facilitate direct communication with dieticians
+
+3. Improve Data Management and Insights
+
+       · Centralize all client and operational data in secure repository
+       · Enable real-time analytics, reporting, and evidence-based decisions
+       · Track key performance indicators across branches and services
+       · Support predictive analytics for client outcomes
+
+4. Ensure Regulatory Compliance
+
+       · Achieve full POPIA compliance with comprehensive audit trails
+       · Implement role-based access controls and data encryption
+       · Establish automated compliance monitoring and reporting
+       · Maintain healthcare sector data retention standards
+
+5. Standardize Processes Across Branches
+
+       · Implement consistent digital workflows across all 16 locations
+       · Ensure uniform service delivery and quality control
+       · Enable seamless client service across any branch
+       · Support remote work and virtual collaboration
+
+6. Enable Scalability and Revenue Growth
+
+       · Build modular, cloud-based infrastructure supporting expansion
+       · Create new revenue streams through digital services
+       · Enable geographic expansion and international reach
+       · Support integration with wellness partners and ecosystems
+
+7. Implement Unified Platform Architecture
+
+       · Develop single integrated Power Apps solution
+       · Provision capabilities based on user roles and device types
+       · Ensure seamless experience across all modules
+       · Maintain centralized data model and security framework
+
+3.2 Success Metrics
+
+                                            9
+Digital Transformation - Dietician Network                                      BRS v2.0
+
+tableheader Metric   Target                                                     Timeline
+Data Digitization
+Paper Reduction      100% of active client data digitized                       6 months
+Client Satisfaction  90% reduction in paper-based workflows                     6 months
+Engagement Rate      20% improvement in satisfaction scores                     12 months
+Administrative Time  35% increase in weekly client engagement                   6 months
+POPIA Compliance     50% reduction in manual processing                         6 months
+System Adoption      100% compliance with audit validation                      3 months
+Cross-Branch Access  100% staff trained and actively using                      3 months
+Revenue Growth       Client records accessible from any branch                  3 months
+System Availability  New digital revenue streams active                         9 months
+                     99.5% uptime                                               Ongoing
+
+4 Unified Solution Architecture
+
+4.1 Core Concept: One Platform, Multiple Modules
+
+Rather than deploying separate applications for each problem area, this solution implements a
+single, unified Power Apps platform with integrated modules that work together seamlessly.
+The platform uses Role-Based Access Control (RBAC) and device provisioning to ensure users
+access only the features relevant to their role and location.
+
+4.2 Technology Stack
+
+tableheader Component  Technology                                                 Power
+Primary Platform
+                       Microsoft Power Platform (Power Apps, Power Automate,
+Data Layer             Pages, Power BI)
+Cloud Infrastructure   Microsoft Dataverse (centralized, secure data repository)
+Document Management    Microsoft Azure Cloud Services
+Communication          SharePoint Online / OneDrive for Business
+Authentication         Microsoft Teams integration
+API Integration        Azure Active Directory with Multi-Factor Authentication
+Mobile Access          Power Platform connectors and custom APIs
+Reporting              Power Apps mobile application (iOS and Android)
+Workflow Automation    Power BI with real-time dashboards
+External Website       Power Automate flows
+                       Power Pages for client portal and marketing
+
+4.3 Unified Application Modules
+
+The platform consists of five integrated modules addressing each problem area:
+
+4.3.1 Module 1: Digital Onboarding & Registration System
+Purpose: Transform first client interaction into seamless digital experience
+
+    Key Features:
+· Digital registration forms with progressive disclosure
+· Automated data validation and error checking
+· Electronic consent and POPIA acknowledgment
+
+                                                             10
+Digital Transformation - Dietician Network                            BRS v2.0
+
+· Welcome email automation with brand materials
+· Pre-consultation resource delivery
+· Automated appointment scheduling
+· Digital profile creation in Dataverse
+· QR code generation for quick check-in
+
+    User Access:
+    · Clients: Self-service registration via Power Pages
+    · Reception staff: Assisted registration interface
+    · Administrative team: Registration oversight and management
+
+4.3.2 Module 2: Centralized Client Management System (CMS)
+Purpose: Replace paper files with secure, accessible digital records
+
+    Key Features:
+· Comprehensive digital client profiles
+· Electronic Health Records (EHR) compliant storage
+· Dietary assessment and consultation notes
+· Progress tracking and outcome measurement
+· Cross-branch accessibility
+· Document attachment and management
+· Automated backup and disaster recovery
+· Comprehensive audit trails
+· POPIA-compliant access controls
+· Real-time synchronization across devices
+· Offline capability with sync on reconnection
+
+    User Access:
+    · Dieticians: Full client record access (assigned clients)
+    · Branch managers: Branch-level oversight
+    · Compliance officers: Audit and compliance monitoring
+    · Executives: Aggregated reporting and analytics
+
+11
+Digital Transformation - Dietician Network                             BRS v2.0
+
+4.3.3 Module 3: Client Engagement & Motivation System
+Purpose: Bridge the motivation gap with continuous digital engagement
+
+    Key Features:
+· Meal and activity logging with photo uploads
+· Progress tracking with visual dashboards
+· Automated inactivity detection (3-day and 7-day thresholds)
+· Tiered motivational messaging system
+· Dietician alert escalation
+· In-app messaging with dieticians
+· Community features and peer support
+· Achievement badges and milestone celebrations
+· Educational content delivery
+· Appointment reminders and follow-up prompts
+· Customizable notification preferences
+
+    Automation Workflows:
+    · Daily inactivity scan (06:00 daily)
+    · Level 1: 3-day inactivity  Motivational message
+    · Level 2: 7-day inactivity  Escalation + dietician alert
+    · Status reset upon client re-engagement
+    · All actions logged to Dataverse
+    User Access:
+    · Clients: Mobile app for daily engagement
+    · Dieticians: Monitoring dashboard and alert management
+    · Administrators: Template management and reporting
+
+4.3.4 Module 4: Digital Services & Revenue Platform
+Purpose: Enable new revenue streams and geographic expansion
+
+    Key Features:
+· Online appointment booking system
+· Virtual consultation platform (video integration)
+· Digital product store (meal plans, guides, programs)
+· Content management system for resources
+· Payment gateway integration
+
+                                                             12
+Digital Transformation - Dietician Network                        BRS v2.0
+
+· Subscription management
+· SEO-optimized public website (Power Pages)
+· Lead capture and conversion tools
+· Client testimonial management
+· Automated marketing email campaigns
+· Affiliate and referral program
+
+    User Access:
+    · Public users: Website browsing and registration
+    · Clients: Online booking and product purchases
+    · Dieticians: Virtual consultation delivery
+    · Content managers: Resource publishing and updates
+    · Marketing team: Campaign management and analytics
+
+4.3.5 Module 5: Feedback, Analytics & Business Intelligence
+Purpose: Enable data-driven decisions and systematic improvement
+
+    Key Features:
+· Automated satisfaction surveys (post-consultation)
+· Net Promoter Score (NPS) tracking
+· Real-time operational dashboards
+· Client outcome analytics
+· Branch performance comparison
+· Dietician workload and productivity metrics
+· Revenue and financial reporting
+· Compliance monitoring dashboards
+· Predictive analytics for churn risk
+· Client segmentation and cohort analysis
+· Customizable report generation
+· Automated executive summaries
+
+    User Access:
+    · Executives: Strategic dashboards and KPIs
+    · Branch managers: Operational metrics
+    · Dieticians: Client outcome tracking
+    · Compliance officers: Audit reports
+    · All staff: Relevant insights for their roles
+
+                                                             13
+Digital Transformation - Dietician Network      BRS v2.0
+
+4.4 Role-Based Access Control (RBAC) Framework
+
+tableheader Role  Modules Accessed              Permissions
+Client            · Module 1: Registration      · View own profile and records
+Dietician         · Module 3: Engagement        · Log meals and activities
+Reception Staff   · Module 4: Services          · Book appointments
+Branch Manager    · Module 2: Client Manage-    · Purchase digital products
+Compliance Offi-                                · Communicate with dietician
+cer                  ment                       · View/edit assigned client records
+Executive         · Module 3: Engagement        · Create diet plans and notes
+System Adminis-   · Module 4: Virtual Consults  · Respond to client messages
+trator            · Module 5: Analytics         · Conduct virtual consultations
+Content Manager   · Module 1: Registration      · View client outcome analytics
+                  · Module 2: Client Manage-    · Register new clients
+                                                · Schedule appointments
+                     ment                       · View client contact information
+                  · Module 4: Booking           · Process payments
+                  · All modules                 · Generate reports
+                                                · Full access to branch data
+                  · Module 2: CMS               · Staff management
+                  · Module 5: Analytics         · Branch performance analytics
+                                                · Operational oversight
+                  · Module 5: Analytics         · Quality control
+                  · All modules (overview)      · Audit trail access
+                                                · Compliance monitoring
+                  · All modules                 · Security reports
+                                                · POPIA oversight
+                  · Module 3: Resources         · Read-only access to records
+                  · Module 4: Website           · Strategic dashboards
+                                                · Cross-branch analytics
+                                                · Financial reporting
+                                                · Performance metrics
+                                                · High-level oversight
+                                                · Full system access
+                                                · User management
+                                                · Configuration
+                                                · Security administration
+                                                · System monitoring
+                                                · Publish content
+                                                · Manage templates
+                                                · Update resources
+                                                · Website maintenance
+
+4.5 Device Provisioning Strategy
+
+                                            14
+Digital Transformation - Dietician Network          BRS v2.0
+
+tableheader Device Type  Primary Users           Provisioned Capabilities
+Desktop Workstations         · Dieticians        Full platform access with all
+                             · Admin staff       modules, advanced reporting,
+Tablets                      · Management        multi-monitor support
+Smartphones                  · Dieticians
+Kiosk Devices                · Reception         Client management, appoint-
+                             · All staff         ment scheduling, lightweight
+                             · Clients           data entry
+                             · Public access     Mobile-optimized interface,
+                                                 notifications, quick access,
+                                                 engagement features
+                                                 Self-service registration, infor-
+                                                 mation browsing, appointment
+                                                 booking
+
+5 Functional Requirements
+
+5.1 Module 1: Digital Onboarding & Registration
+
+tableheader  Requirement
+ID
+FR-1.1       System shall provide digital registration form accessible via Power Pages
+             with progressive disclosure of form sections
+FR-1.2       System shall perform real-time validation of required fields including
+             email format, ID number, and phone number
+FR-1.3       System shall capture electronic consent for POPIA compliance with
+             timestamp and IP address
+FR-1.4       System shall automatically create client profile in Dataverse upon suc-
+             cessful registration
+FR-1.5       System shall send automated welcome email within 5 minutes of regis-
+             tration with brand materials and next steps
+FR-1.6       System shall allow clients to upload profile photo and initial health doc-
+             uments during registration
+FR-1.7       System shall generate unique client ID and QR code for future check-ins
+FR-1.8       System shall enable assisted registration mode for reception staff with
+             same validation rules
+FR-1.9       System shall prevent duplicate registrations using email and ID number
+             validation
+FR-1.10      System shall allow registration pause and resume functionality (save
+             draft)
+
+5.2 Module 2: Centralized Client Management System
+
+tableheader  Requirement
+ID           System shall store all client data centrally in Dataverse with cross-branch
+FR-2.1       accessibility
+
+                                            15
+Digital Transformation - Dietician Network           BRS v2.0
+
+tableheader  Requirement
+ID
+FR-2.2       System shall maintain comprehensive client profiles including demo-
+             graphics, medical history, dietary preferences, allergies, and lifestyle in-
+FR-2.3       formation
+FR-2.4       System shall support Electronic Health Records (EHR) compliant stor-
+FR-2.5       age of consultation notes, assessments, and treatment plans
+FR-2.6       System shall enable dieticians to create, modify, and version-control per-
+FR-2.7       sonalized nutrition plans
+FR-2.8       System shall track client progress including weight, measurements, lab
+FR-2.9       results, and wellness metrics over time
+FR-2.10      System shall provide search functionality by client name, ID, email,
+FR-2.11      phone number, and branch
+FR-2.12      System shall support document attachments (PDFs, images) with auto-
+FR-2.13      matic versioning and metadata tagging
+FR-2.14      System shall maintain complete audit trail of all data access and modi-
+FR-2.15      fications with user ID and timestamp
+             System shall enable offline access with automatic synchronization when
+             connectivity restored
+             System shall implement role-based data filtering ensuring users only ac-
+             cess authorized client records
+             System shall support bulk data operations (export, backup) with appro-
+             priate security controls
+             System shall enable client data transfer between branches with approval
+             workflow
+             System shall flag and alert on missing critical information (allergies,
+             medical conditions)
+             System shall support client record archival after configurable inactivity
+             period
+             System shall provide data retention controls compliant with 7-year
+             healthcare storage requirements
+
+5.3 Module 3: Client Engagement & Motivation System
+
+tableheader  Requirement
+ID
+FR-3.1       System shall enable clients to log meals with description, photos, time,
+             and portions via mobile app
+FR-3.2       System shall record timestamp and client ID for each activity entry au-
+             tomatically
+FR-3.3       System shall update last_active_date field in Dataverse after each client
+             interaction
+FR-3.4       System shall provide visual progress dashboard showing weight trends,
+             meal consistency, and milestone achievements
+FR-3.5       Power Automate shall run daily at 06:00 to identify clients meeting in-
+             activity thresholds
+FR-3.6       System shall send Level 1 motivational message via email/SMS after 3
+             consecutive days of inactivity
+
+                                            16
+Digital Transformation - Dietician Network         BRS v2.0
+
+tableheader  Requirement
+ID
+FR-3.7       System shall send Level 2 escalation message and notify assigned dieti-
+FR-3.8       cian via Teams after 7 days of inactivity
+FR-3.9       System shall log all engagement actions (logs, messages, alerts) to Data-
+FR-3.10      verse Engagement Log table
+FR-3.11      System shall use configurable message templates stored in Dataverse with
+FR-3.12      dynamic placeholders (ClientName, Plan, DaysInactive)
+FR-3.13      System shall allow administrators to edit message templates without
+FR-3.14      developer intervention
+FR-3.15      System shall support multiple communication channels: Outlook email,
+FR-3.16      Teams, SMS (Twilio), WhatsApp Business API
+FR-3.17      System shall automatically reset client status to Active upon resumed
+FR-3.18      engagement
+FR-3.19      System shall enable secure in-app messaging between clients and their
+FR-3.20      assigned dietician
+             System shall provide achievement badges for milestones (7-day streak,
+             weight goal reached, consistent logging)
+             System shall deliver educational content (articles, videos, tips) based on
+             client program and progress stage
+             System shall send appointment reminders 24 hours and 2 hours before
+             scheduled consultations
+             System shall enable clients to customize notification preferences and com-
+             munication channels
+             Dieticians shall receive Teams notification with client name, branch, days
+             inactive, and last activity type for escalations
+             System shall allow configurable inactivity thresholds per dietician or
+             branch (default: 3 and 7 days)
+             System shall store all sent messages for 90 days for audit and compliance
+             purposes
+
+5.4 Module 4: Digital Services & Revenue Platform
+
+tableheader  Requirement
+ID
+FR-4.1       System shall provide public-facing Power Pages website optimized for
+             SEO with responsive design
+FR-4.2       System shall enable online appointment booking with real-time availabil-
+             ity from all branches and dieticians
+FR-4.3       System shall integrate calendar synchronization with dietician Out-
+             look/Teams calendars
+FR-4.4       System shall support virtual consultation scheduling with automatic
+             video meeting link generation
+FR-4.5       System shall provide digital product storefront for meal plans, eBooks,
+             programs, and guides
+FR-4.6       System shall integrate payment gateway (Stripe/PayFast) for online
+             transactions with PCI compliance
+FR-4.7       System shall generate automated invoices and send payment confirma-
+             tions via email
+
+                                            17
+Digital Transformation - Dietician Network                 BRS v2.0
+
+tableheader  Requirement
+ID
+FR-4.8       System shall support subscription-based services with recurring billing
+FR-4.9       and automated renewals
+FR-4.10      System shall deliver digital products automatically upon payment con-
+FR-4.11      firmation
+FR-4.12      System shall enable content management for website pages, blog posts,
+FR-4.13      and resources without developer involvement
+FR-4.14      System shall capture leads through contact forms and newsletter signups
+FR-4.15      with CRM integration
+FR-4.16      System shall showcase client testimonials with star ratings and success
+FR-4.17      story images (with consent)
+FR-4.18      System shall implement automated email marketing campaigns for lead
+FR-4.19      nurturing and client retention
+FR-4.20      System shall support referral program with unique referral codes and
+             tracking
+             System shall provide affiliate program functionality for partners with
+             commission tracking
+             System shall integrate video consultation platform with recording capa-
+             bility (with consent)
+             System shall send automated booking confirmations with pre-
+             consultation instructions
+             System shall enable clients to reschedule or cancel appointments with
+             configurable notice periods
+             System shall track conversion rates from website visitor to registered
+             client
+             System shall support multi-language content (English, Afrikaans, Zulu)
+             for broader reach
+
+5.5 Module 5: Feedback, Analytics & Business Intelligence
+
+tableheader  Requirement
+ID
+FR-5.1       System shall automatically send satisfaction survey via email/app within
+FR-5.2       24 hours of consultation completion
+FR-5.3       System shall collect Net Promoter Score (NPS) with standardized 0-10
+FR-5.4       rating scale
+FR-5.5       System shall capture detailed feedback on service quality, dietician per-
+FR-5.6       formance, and facility ratings
+FR-5.7       Power BI dashboard shall display real-time counts of active, inactive,
+FR-5.8       and at-risk clients
+             Dashboard shall support filters by branch, dietician, date range, client
+             status, and program type
+             System shall email daily summary report of client engagement, inactivity,
+             and recoveries to management team
+             System shall track and visualize client outcome metrics (weight loss per-
+             centage, goal achievement rates, program completion)
+             System shall provide branch performance comparison reports including
+             revenue, client satisfaction, and retention rates
+
+                                            18
+Digital Transformation - Dietician Network      BRS v2.0
+
+tableheader  Requirement
+ID
+FR-5.9       System shall monitor dietician workload including client count, consul-
+FR-5.10      tation hours, and appointment utilization
+FR-5.11      System shall generate financial reports with revenue breakdown by ser-
+FR-5.12      vice type, branch, and time period
+FR-5.13      System shall display POPIA compliance dashboard showing access logs,
+FR-5.14      consent status, and security incidents
+FR-5.15      System shall implement predictive analytics for client churn risk scoring
+FR-5.16      based on engagement patterns
+FR-5.17      System shall enable client segmentation by demographics, program type,
+FR-5.18      risk level, and engagement status
+FR-5.19      System shall support cohort analysis comparing outcomes across different
+FR-5.20      programs and time periods
+             System shall provide customizable report builder for ad-hoc analysis
+             without technical expertise
+             System shall generate automated executive summary reports with key
+             KPIs and trend analysis
+             System shall track marketing ROI by source (website, referral, social
+             media, paid ads)
+             System shall alert management on anomalies (sudden churn spike, rev-
+             enue drop, satisfaction decline)
+             System shall maintain historical data for trend analysis over minimum
+             3-year period
+             System shall enable data export to Excel for external analysis with ap-
+             propriate security controls
+
+5.6 Cross-Module Integration Requirements
+
+tableheader  Requirement
+ID
+FR-6.1       All modules shall share single Dataverse data model ensuring consistency
+FR-6.2       across platform
+FR-6.3       Client actions in any module shall update unified activity timeline visible
+FR-6.4       across all modules
+FR-6.5       Changes in client status (inactive, at-risk, active) shall propagate imme-
+FR-6.6       diately across all modules
+FR-6.7       Single sign-on (SSO) shall enable seamless navigation between modules
+FR-6.8       without re-authentication
+FR-6.9       All modules shall respect same RBAC permissions defined in centralized
+             security model
+             Notifications from any module shall appear in unified notification center
+             accessible from all modules
+             Appointment bookings shall automatically trigger engagement tracking
+             and reminder workflows
+             Payment transactions shall update financial dashboards and client ac-
+             count status in real-time
+             Feedback submissions shall link to specific consultations in client man-
+             agement records
+
+                                            19
+Digital Transformation - Dietician Network      BRS v2.0
+
+tableheader  Requirement
+ID           All user interactions across modules shall contribute to unified audit trail
+FR-6.10
+
+                                            20
+Digital Transformation - Dietician Network      BRS v2.0
+
+6 Non-Functional Requirements
+
+6.1 Performance Requirements
+
+tableheader Attribute  Requirement
+Response Time
+Concurrent Users       Page load < 2 seconds for 95% of requests; interactive elements
+Scalability            respond < 500ms
+Data Processing        Support minimum 200 concurrent users across all branches without
+Report Generation      performance degradation
+Search Performance     Architecture must accommodate 2x client growth (240,000 clients)
+Mobile Performance     over 3 years
+Database Performance   Automated workflows must execute within 2 minutes per batch;
+                       daily scans complete within 30 minutes
+                       Standard reports generate within 10 seconds; complex analytics
+                       within 60 seconds
+                       Client search returns results within 1 second for queries across
+                       120,000+ records
+                       Mobile app launch time < 3 seconds; sync operations complete in
+                       background
+                       Dataverse queries execute < 500ms for standard operations
+
+6.2 Security Requirements
+
+tableheader Category   Requirement
+Authentication         · Azure Active Directory integration
+                       · Multi-Factor Authentication (MFA) mandatory for staff
+Authorization          · Biometric authentication supported for mobile app
+Data Encryption        · Session timeout after 30 minutes of inactivity
+POPIA Compliance       · Account lockout after 5 failed login attempts
+                       · Role-Based Access Control (RBAC) enforced at data layer
+                       · Principle of least privilege applied to all roles
+                       · Dynamic permission evaluation based on context
+                       · Mandatory access reviews quarterly
+                       · Data encrypted at rest using AES-256
+                       · Data encrypted in transit using TLS 1.3
+                       · End-to-end encryption for sensitive communications
+                       · Encrypted backups with separate key management
+                       · Explicit client consent captured and logged
+                       · Right to access: clients can request data copies
+                       · Right to erasure: support for deletion requests
+                       · Data minimization: collect only necessary information
+                       · Purpose limitation: use data only for stated purposes
+                       · Comprehensive audit trails for all data access
+                       · Data breach notification procedures implemented
+
+                                            21
+Digital Transformation - Dietician Network      BRS v2.0
+
+tableheader Category   Requirement
+Audit & Logging        · All data access logged with user, timestamp, action
+                       · Audit logs retained for minimum 7 years
+Network Security       · Tamper-proof audit trail implementation
+Application Security   · Real-time security event monitoring
+                       · Automated alerts for suspicious activities
+Data Protection        · Web Application Firewall (WAF) protection
+                       · DDoS protection enabled
+                       · IP whitelisting for administrative access
+                       · VPN required for remote system administration
+                       · Input validation on all user entries
+                       · SQL injection prevention
+                       · Cross-Site Scripting (XSS) protection
+                       · Cross-Site Request Forgery (CSRF) protection
+                       · Secure API endpoints with token authentication
+                       · Personal health information (PHI) classified and protected
+                       · Data masking for non-authorized users
+                       · Secure data deletion (overwrite, not just delete)
+                       · Regular privacy impact assessments
+
+6.3 Availability & Reliability
+
+tableheader Attribute  Requirement
+Uptime
+Backup                 99.5% availability (maximum 43.8 hours downtime per year) aligned
+Disaster Recovery      with Microsoft Power Platform SLA
+Redundancy             Automated daily backups with 30-day retention; weekly full backups
+Maintenance Windows    retained for 1 year
+Error Handling         Recovery Time Objective (RTO): 4 hours; Recovery Point Objective
+Data Integrity         (RPO): 24 hours
+                       Geographic redundancy across multiple Azure regions; automatic
+                       failover capability
+                       Planned maintenance during low-usage periods (02:00-05:00 SAST)
+                       with 7-day advance notice
+                       Graceful error handling with user-friendly messages; detailed errors
+                       logged for troubleshooting
+                       Transactional consistency ensured; referential integrity enforced at
+                       database level
+
+6.4 Usability Requirements
+6.5 Maintainability & Supportability
+6.6 Compliance & Regulatory
+
+                                            22
+Digital Transformation - Dietician Network                               BRS v2.0
+
+tableheader Attribute  Requirement
+User Interface
+Responsiveness         Modern, intuitive design following Microsoft Fluent Design princi-
+Accessibility          ples; consistent across all modules
+Learnability           Mobile-responsive interfaces supporting smartphones (320px+),
+Language Support       tablets (768px+), and desktops (1024px+)
+Offline Capability     WCAG 2.1 Level AA compliance; screen reader compatible; key-
+User Feedback          board navigation support
+Customization          New users able to complete basic tasks within 15 minutes of first
+                       use; contextual help available
+                       Multi-language support (English, Afrikaans, Zulu) with easy lan-
+                       guage switching
+                       Mobile app functions offline with automatic sync when connection
+                       restored
+                       Clear confirmation messages for actions; inline validation with help-
+                       ful error messages
+                       Users can personalize dashboard layouts, notification preferences,
+                       and theme settings
+
+tableheader Attribute  Requirement
+Architecture
+Code Quality           Modular design enabling independent module updates without af-
+Configuration          fecting entire system
+Monitoring             Well-documented code following Power Platform best practices;
+Updates                comprehensive inline comments
+Documentation          Business rules and workflows configurable by administrators without
+Support                developer intervention
+Training               Comprehensive system monitoring with proactive alerting for per-
+                       formance issues
+                       Support for rolling updates with zero downtime; version rollback
+                       capability
+                       Complete technical documentation, user manuals, and admin guides
+                       maintained
+                       Helpdesk ticketing system integrated; issue resolution SLAs defined
+                       (Critical: 4hrs, High: 24hrs, Medium: 72hrs)
+                       Training materials, video tutorials, and knowledge base available
+                       within application
+
+7 Data Architecture
+
+7.1 Conceptual Data Model
+
+7.1.1 Core Entities
+
+tableheader Entity     Key Attributes
+Client
+                       ClientID (PK), FirstName, LastName, Email, Phone, IDNum-
+Dietician              ber, DateOfBirth, Gender, Address, Branch, DieticianID (FK),
+                       RegistrationDate, LastActiveDate, Status, ConsentDate, Pro-
+                       filePhotoURL
+
+                       DieticianID (PK), FirstName, LastName, Email,     Phone,
+                       Branch, Specialization, LicenseNumber, HireDate,  Status,
+                       AvailabilitySchedule
+
+                                            23
+Digital Transformation - Dietician Network                                    BRS v2.0
+
+tableheader Entity  Key Attributes
+Branch
+Consultation        BranchID (PK), BranchName, Province, City, Address, Phone,
+NutritionPlan       Email, ManagerID (FK), OpeningHours, Status
+MealLog             ConsultationID (PK), ClientID (FK), DieticianID (FK),
+ProgressTracking    AppointmentDateTime, Duration, Type (In-Person/Virtual),
+EngagementLog       Notes, Status, BranchID (FK), MeetingLink
+MessageTemplate     PlanID (PK), ClientID (FK), DieticianID (FK), CreatedDate,
+Appointment         StartDate, EndDate, Goals, DailyCalories, MealPlanDetails,
+Payment             Restrictions, Version, Status
+DigitalProduct      MealID (PK), ClientID (FK), LogDateTime, MealType, De-
+ProductPurchase     scription, PhotoURL, Calories, Notes, Status
+Feedback            TrackingID (PK), ClientID (FK), RecordDate, Weight, BMI,
+User                Measurements (JSON), LabResults (JSON), Notes, Record-
+AuditLog            edBy (FK)
+Notification        LogID (PK), ClientID (FK), ActionType, ActionDateTime,
+Content             Channel, MessageContent, Outcome, DaysInactive, Trigger-
+                    Type
+                    TemplateID (PK), Type (Level1/Level2/Welcome/Reminder),
+                    Subject, Body, Language, Placeholders (JSON), CreatedDate,
+                    ModifiedDate, Active
+                    AppointmentID (PK), ClientID (FK), DieticianID (FK),
+                    BranchID (FK), AppointmentDateTime, Duration, Type, Sta-
+                    tus, BookingSource, ReminderSent, Notes
+                    PaymentID (PK), ClientID (FK), Amount, Currency, Pay-
+                    mentDateTime, PaymentMethod, TransactionID, Status, In-
+                    voiceNumber, ServiceType
+                    ProductID (PK), ProductName, Description, Type, Price,
+                    FileURL, ThumbnailURL, Category, CreatedDate, Active,
+                    Downloads
+                    PurchaseID (PK), ClientID (FK), ProductID (FK), Purchase-
+                    DateTime, Amount, PaymentID (FK), DownloadCount, Ex-
+                    piryDate
+                    FeedbackID (PK), ClientID (FK), ConsultationID (FK), Sub-
+                    missionDateTime, NPScore, ServiceRating, DieticianRating,
+                    FacilityRating, Comments, FollowupRequired
+                    UserID (PK), Email, FirstName, LastName, Role, BranchID
+                    (FK), ActiveDirectoryID, CreatedDate, LastLogin, Status, Per-
+                    missions (JSON)
+                    AuditID (PK), UserID (FK), EntityType, EntityID, Action,
+                    Timestamp, IPAddress, Changes (JSON), SessionID
+                    NotificationID (PK), RecipientID (FK), Type, Subject, Mes-
+                    sage, SentDateTime, Channel, Status, ReadDateTime
+                    ContentID (PK), Title, Body, Type (Article/Video/Guide),
+                    Category, PublishedDate, AuthorID (FK), Status, ViewCount,
+                    FeaturedImageURL
+
+7.2 Entity Relationships
+
+· Client  Dietician: Many-to-One (each client assigned to primary dietician)
+· Client  Branch: Many-to-One (each client registered at home branch)
+
+                                            24
+Digital Transformation - Dietician Network               BRS v2.0
+
+tableheader Standard   Requirement
+POPIA (ZA)
+                       Full compliance with Protection of Personal Information Act includ-
+Healthcare Standards   ing data subject rights implementation
+                       Adherence to South African healthcare record retention require-
+ISO 27001              ments (7-year minimum)
+PCI DSS                Information security management aligned with ISO 27001 framework
+                       Payment processing compliant with Payment Card Industry Data
+GDPR                   Security Standards
+Audit Requirements     GDPR-ready for potential international clients (EU citizens)
+                       Annual security audits and penetration testing; quarterly compli-
+                       ance reviews
+
+· Client  Consultation: One-to-Many (client has multiple consultations)
+· Client  NutritionPlan: One-to-Many (client has multiple plans over time)
+· Client  MealLog: One-to-Many (client logs multiple meals)
+· Client  ProgressTracking: One-to-Many (multiple progress records)
+· Client  EngagementLog: One-to-Many (all engagement activities)
+· Client  Appointment: One-to-Many (multiple appointments)
+· Client  Payment: One-to-Many (payment history)
+· Client  Feedback: One-to-Many (feedback submissions)
+· Dietician  Branch: Many-to-One (dietician assigned to branch)
+· Dietician  Consultation: One-to-Many (conducts consultations)
+· Branch  User (Manager): One-to-One (branch manager)
+· DigitalProduct  ProductPurchase: One-to-Many (product sold multiple times)
+· Consultation  Feedback: One-to-One (feedback for consultation)
+
+7.3 Data Retention & Archival
+
+tableheader Data Type  Retention Period                  Archival
+Client Health Records
+Consultation Notes     7 years (regulatory requirement)  Cold storage after 3 years
+Engagement Logs        7 years                           Cold storage after 3 years
+Audit Logs             90 days active, 2 years archive   Cold storage
+Payment Records        7 years (compliance)              Cold storage after 1 year
+Feedback               7 years (tax requirements)        Cold storage after 2 years
+Marketing Data         3 years                           Cold storage
+Session Data           Until consent withdrawn           Immediate deletion on request
+                       90 days                           Permanent deletion
+
+                                            25
+Digital Transformation - Dietician Network      BRS v2.0
+
+8 Business Rules
+
+8.1 Client Management Rules
+
+tableheader  Description
+Rule ID
+BR-1.1       Each client must have unique email address and ID number in system
+BR-1.2       Client must be 18 years or older for self-registration; minors require
+             guardian consent
+BR-1.3       Client must explicitly consent to POPIA terms before registration com-
+             pletion
+BR-1.4       Client status automatically changes to "Inactive" after 90 days without
+             any activity
+BR-1.5       Inactive clients automatically archived after 2 years; health records re-
+             tained per retention policy
+BR-1.6       Client can request data portability (download all personal data) once
+             per 30 days
+BR-1.7       Client data deletion requests processed within 30 days after identity ver-
+             ification
+
+8.2 Engagement & Motivation Rules
+
+tableheader  Description
+Rule ID
+BR-2.1       Client is considered "Inactive" after 3 consecutive days without logging
+             activity or accessing platform
+BR-2.2       Client is considered "Escalated Inactive" after 7 consecutive days without
+             activity
+BR-2.3       Inactivity thresholds (3-day and 7-day) are configurable per dietician or
+             branch
+BR-2.4       Level 1 motivational message sent automatically after 3 days of inactivity
+BR-2.5       Level 2 escalation message and dietician notification sent automatically
+             after 7 days of inactivity
+BR-2.6       Client status automatically resets to "Active" upon any engagement
+             (meal log, app access, message sent)
+BR-2.7       All sent messages must be stored for minimum 90 days for audit purposes
+BR-2.8       Maximum one automated message per client per 24-hour period to pre-
+             vent spam
+BR-2.9       Clients can opt-out of automated motivational messages while retaining
+             appointment reminders
+BR-2.10      Meal logs must include minimum: timestamp, meal type, and description
+             or photo
+BR-2.11      Achievement badges awarded automatically when milestones met (7-day
+             streak, 10kg lost, etc.)
+BR-2.12      In-app messages between client and dietician must be responded to
+             within 24 business hours
+
+8.3 Appointment & Scheduling Rules
+
+                                            26
+Digital Transformation - Dietician Network      BRS v2.0
+
+tableheader  Description
+Rule ID
+BR-3.1       Appointments must be scheduled minimum 2 hours in advance for in-
+             person consultations
+BR-3.2       Virtual consultations can be booked with minimum 1 hour advance no-
+             tice
+BR-3.3       Clients can cancel or reschedule appointments up to 4 hours before sched-
+             uled time without penalty
+BR-3.4       Cancellations within 4 hours incur no-show fee (configurable per branch
+             policy)
+BR-3.5       Maximum 3 consecutive no-shows results in account review and potential
+             suspension
+BR-3.6       First appointment reminder sent 24 hours before scheduled time
+BR-3.7       Second appointment reminder sent 2 hours before scheduled time
+BR-3.8       Appointment slots are 30, 45, or 60 minutes duration based on consul-
+             tation type
+BR-3.9       Dieticians can block time slots for administrative tasks, lunch, or per-
+             sonal time
+BR-3.10      New clients must complete initial consultation (60 minutes) before book-
+             ing follow-ups
+BR-3.11      Follow-up consultations recommended every 2-4 weeks based on program
+             type
+BR-3.12      Virtual consultation links generated automatically 15 minutes before ap-
+             pointment time
+
+8.4 Payment & Billing Rules
+
+tableheader  Description
+Rule ID
+BR-4.1       Payment required at time of booking for virtual consultations
+BR-4.2       In-person consultations can be paid at appointment or in advance
+BR-4.3       Digital product access granted immediately upon successful payment
+             confirmation
+BR-4.4       Subscription-based services renew automatically unless cancelled 48
+             hours before renewal date
+BR-4.5       Failed payment attempts trigger automatic notification and 3-day grace
+             period
+BR-4.6       Refund requests processed within 7 business days after approval
+BR-4.7       Invoice generated automatically within 24 hours of payment receipt
+BR-4.8       VAT calculated and applied according to South African tax regulations
+BR-4.9       Payment methods accepted: Credit/Debit card, EFT, instant EFT, med-
+             ical aid (where applicable)
+BR-4.10      Loyalty points earned at rate of 1 point per R10 spent (configurable)
+
+8.5 Access Control & Security Rules
+
+                                            27
+Digital Transformation - Dietician Network      BRS v2.0
+
+tableheader  Description
+Rule ID
+BR-5.1       Staff must authenticate using Multi-Factor Authentication (MFA) for all
+             system access
+BR-5.2       Dieticians can only access records of clients assigned to them or their
+             branch
+BR-5.3       Branch managers can access all records within their branch
+BR-5.4       Compliance officers have read-only access to all records for audit pur-
+             poses
+BR-5.5       System administrators require dual approval for sensitive operations
+             (data deletion, user privilege changes)
+BR-5.6       User sessions expire after 30 minutes of inactivity
+BR-5.7       Account locked after 5 consecutive failed login attempts; unlocked by
+             administrator
+BR-5.8       Password must meet complexity requirements: minimum 12 characters,
+             uppercase, lowercase, number, special character
+BR-5.9       Passwords must be changed every 90 days
+BR-5.10      All data access and modifications logged with user identity, timestamp,
+             and action details
+BR-5.11      Sensitive data (ID numbers, medical conditions) masked in non-essential
+             views
+BR-5.12      Export of bulk client data requires manager approval and audit notifica-
+             tion
+
+8.6 Data Quality & Integrity Rules
+
+tableheader  Description
+Rule ID
+BR-6.1       Email addresses must be validated for correct format and domain exis-
+             tence
+BR-6.2       South African ID numbers must pass checksum validation algorithm
+BR-6.3       Phone numbers must be validated for correct country code and format
+BR-6.4       Weight measurements must be within realistic range (20kg - 300kg) with
+             outlier alerts
+BR-6.5       Date of birth must result in age between 10 and 120 years
+BR-6.6       Duplicate client records automatically flagged for manual review and
+             merging
+BR-6.7       Required fields cannot be null or empty; system prevents record creation
+             without them
+BR-6.8       Historical data cannot be deleted; only marked as corrected with new
+             version created
+BR-6.9       Client status changes must be logged with reason and authorized user
+BR-6.10      Data imported from external sources must pass validation before accep-
+             tance into system
+
+8.7 Reporting & Analytics Rules
+
+                                            28
+Digital Transformation - Dietician Network      BRS v2.0
+
+tableheader  Description
+Rule ID
+BR-7.1       Daily engagement summary report automatically emailed to manage-
+             ment at 08:00
+BR-7.2       Weekly performance report generated every Monday covering previous
+             week's metrics
+BR-7.3       Monthly executive dashboard compiled first business day of each month
+BR-7.4       Real-time dashboards refresh every 5 minutes during business hours
+BR-7.5       Reports containing personal identifiable information (PII) require au-
+             thentication and are not cacheable
+BR-7.6       Exported reports include watermark with export date, user, and confi-
+             dentiality notice
+BR-7.7       Client outcome metrics calculated only for clients with minimum 4 weeks
+             program participation
+BR-7.8       Anomaly alerts triggered when metrics deviate >2 standard deviations
+             from baseline
+BR-7.9       Historical trend reports require minimum 3 months data for statistical
+             significance
+BR-7.10      Custom reports saved by users automatically expire after 90 days unless
+             marked as permanent
+
+                                            29
+Digital Transformation - Dietician Network  BRS v2.0
+
+9 Project Scope
+
+9.1 In Scope
+
+1. System Design & Development
+
+       · Unified Power Apps application architecture
+       · Five integrated modules (Onboarding, CMS, Engagement, Revenue, Analytics)
+       · Role-Based Access Control (RBAC) implementation
+       · Dataverse data model design and configuration
+       · Power Automate workflow automation
+       · Power BI dashboard development
+       · Power Pages public website and client portal
+
+2. Data Migration
+
+       · Digitization of active client records (last 3 years)
+       · Data cleansing and validation
+       · Pilot migration with validation
+       · Full migration with quality assurance
+       · Post-migration reconciliation
+
+3. Integration
+
+       · Microsoft 365 integration (Outlook, Teams, SharePoint)
+       · Payment gateway integration (Stripe/PayFast)
+       · SMS/WhatsApp integration (Twilio/WhatsApp Business API)
+       · Video consultation platform integration
+       · Calendar synchronization
+
+4. Infrastructure
+
+       · Azure cloud infrastructure setup
+       · Dataverse environment configuration
+       · Security and compliance configuration
+       · Backup and disaster recovery implementation
+       · Performance monitoring setup
+
+5. Training & Change Management
+
+       · Comprehensive training program for all staff roles
+       · User manuals and documentation
+       · Video tutorials and knowledge base
+       · Train-the-trainer sessions for branch champions
+       · Change management communication plan
+       · Post-training support
+
+6. Testing
+
+       · Unit testing of all components
+
+                                                             30
+ Digital Transformation - Dietician Network                                     BRS v2.0
+
+         · Integration testing across modules
+         · User Acceptance Testing (UAT) with key stakeholders
+         · Performance and load testing
+         · Security and penetration testing
+         · Pilot deployment at selected branch
+ 7. Deployment
+         · Phased rollout across branches
+         · Device provisioning and configuration
+         · Go-live support at each branch
+         · Hypercare support (first 30 days post-deployment)
+ 8. Documentation
+         · Technical architecture documentation
+         · System administration guide
+         · User manuals for each role
+         · API documentation
+         · Data dictionary
+         · Business process documentation
+
+ 9.2 Out of Scope
+
+ 1. Integration with unrelated external health systems (deferred to Phase 2)
+ 2. Development of proprietary diagnostic hardware
+ 3. Advanced AI-driven diet personalization algorithms (Phase 2 consideration)
+ 4. International branch expansion beyond South Africa (future phase)
+ 5. Integration with wearable fitness devices (Phase 2)
+ 6. Native iOS/Android app development (using Power Apps mobile initially)
+ 7. Telemedicine integration beyond basic video consultation
+ 8. Genetic testing integration
+ 9. Advanced marketing automation platforms (basic functionality included)
+10. E-commerce platform for physical products (digital products only)
+11. Supply chain management for supplements/products
+12. Franchise management system
+13. Third-party practitioner network management
+
+ 9.3 Future Phase Considerations
+
+31
+Digital Transformation - Dietician Network                                BRS v2.0
+
+tableheader Feature      Description                                      Phase
+Wearable Integration                                                      Phase 2
+AI Meal Recognition      Sync with Fitbit, Apple Health, Garmin           Phase 2
+Predictive Analytics     Auto-identify meals from photos using AI         Phase 2
+Telehealth Platform      ML models for outcome prediction                 Phase 2
+International Expansion  Full telemedicine integration                    Phase 3
+Franchise System         Multi-currency, language support                 Phase 3
+                         Franchise partner management
+
+10 Stakeholders
+
+10.1 Stakeholder Matrix
+
+tableheader              Name               Responsibilities
+Role/Department          Client CEO /
+Project Sponsor          Managing Direc-    · Final decision authority
+                         tor                · Budget approval
+Project Manager          Mpapadi Piet       · Strategic direction
+                         Monyela            · Executive steering
+Technical Lead           Assigned           · Overall project delivery
+                         Assigned           · Timeline management
+Business Analyst         Assigned           · Resource coordination
+                         Assigned           · Stakeholder communication
+Power Platform De-       Assigned           · Risk management
+veloper                                     · System architecture design
+Power BI Developer                          · Technical decision making
+                                            · Code review and quality
+Data Migration Spe-                         · Integration oversight
+cialist                                     · Requirements gathering
+                                            · Process mapping
+                                            · User story creation
+                                            · UAT coordination
+                                            · Power Apps development
+                                            · Power Automate flows
+                                            · Dataverse configuration
+                                            · Custom connectors
+                                            · Dashboard design
+                                            · Data modeling
+                                            · Report development
+                                            · Analytics implementation
+                                            · Data mapping
+                                            · Migration execution
+                                            · Data validation
+                                            · Quality assurance
+
+                                            32
+Digital Transformation - Dietician Network                                     BRS v2.0
+
+tableheader          Name                   Responsibilities
+Role/Department      Assigned
+Security Specialist  Assigned               · Security architecture
+                     All 16 branches        · POPIA compliance
+Change Management    All practitioners      · Access control design
+Lead                 All branches           · Security testing
+Branch Managers      Client IT Team         · Training program design
+                     Assigned               · Communication strategy
+Dieticians           120,000+ regis-        · Adoption monitoring
+                     tered clients          · Resistance management
+Reception/Admin                             · Operational requirements input
+Staff                                       · UAT participation
+IT Administrator                            · Staff coordination
+                                            · Local implementation support
+Compliance Officer                          · End-user feedback
+Clients/End Users                           · Clinical workflow validation
+                                            · UAT testing
+                                            · System adoption champions
+                                            · Front-desk process input
+                                            · Registration testing
+                                            · Appointment management feedback
+                                            · Infrastructure support
+                                            · Network connectivity
+                                            · Device provisioning
+                                            · Ongoing maintenance
+                                            · POPIA compliance validation
+                                            · Audit requirement definition
+                                            · Regulatory alignment
+                                            · Beta testing participation
+                                            · Feedback provision
+                                            · Platform adoption
+
+10.2 Communication Plan
+
+tableheader      Communication              Frequency  Method
+Stakeholder                                 Bi-weekly
+Executive Spon-  Type                       Daily      Executive briefing, Email
+sor                                         Weekly
+Project Team     Strategic  updates,        Bi-weekly  Teams meetings, Project
+                 decisions                             tool
+Branch Managers                                        Virtual meetings, Email
+                 Daily standup, task
+All Staff        updates                               Email newsletter, Intranet
+
+                 Progress   updates,
+                 training
+
+                 General updates, an-
+                 nouncements
+
+                                            33
+Digital Transformation - Dietician Network                                          BRS v2.0
+
+tableheader       Communication             Frequency  Method
+Stakeholder                                 As needed  Email, App notifications
+Clients           Type                      Monthly    Formal presentation
+
+Steering Commit-  Service updates, new
+tee               features
+
+                  Milestone  reviews,
+                  decisions
+
+                                            34
+Digital Transformation - Dietician Network  BRS v2.0
+
+ 11 Assumptions and Dependencies
+
+ 11.1 Assumptions
+
+ 1. All 16 branch locations have stable, reliable internet connectivity with minimum 10Mbps
+     bandwidth
+
+ 2. Client organization has or will procure necessary Microsoft Power Platform licenses for all
+     users
+
+ 3. Key staff members will be available for minimum 4 hours per week during requirements and
+     UAT phases
+
+ 4. Client will provide all existing paper-based data in agreed formats (scanned documents,
+     spreadsheets)
+
+ 5. Client organization has authority to make decisions and provide approvals within defined
+     timelines
+
+ 6. Current client base is receptive to digital transformation and willing to adopt new technologies
+ 7. Third-party payment gateway providers (Stripe/PayFast) will maintain stable service and
+
+     support
+ 8. Client organization will assign dedicated internal project champion at each branch
+ 9. Existing hardware (workstations, tablets) meets minimum specifications for Power Apps de-
+
+     ployment
+10. Client will maintain Microsoft 365 tenant and Azure subscription throughout project and
+
+     beyond
+11. Regulatory environment (POPIA, healthcare regulations) remains stable during implementa-
+
+     tion
+12. Staff turnover remains within normal ranges and does not significantly impact training
+
+ 11.2 Dependencies
+
+ 1. External Dependencies
+         · Microsoft Power Platform service availability and stability
+         · Azure cloud infrastructure uptime and performance
+         · Third-party payment gateway availability (Stripe/PayFast)
+         · Twilio/WhatsApp Business API service for SMS/messaging
+         · Video consultation platform availability
+         · Internet Service Provider reliability at all branches
+
+ 2. Organizational Dependencies
+         · Timely decision-making by executive leadership
+         · Budget allocation and approval process
+         · Staff availability for training and testing
+         · Internal IT support for infrastructure and network
+         · Legal review and approval of terms, policies, and templates
+
+                                                              35
+Digital Transformation - Dietician Network                                      BRS v2.0
+
+       · Completion of data cleansing by client staff
+3. Technical Dependencies
+
+       · Microsoft Power Platform licensing procurement
+       · Azure Active Directory configuration and user provisioning
+       · Network infrastructure readiness at all branches
+       · Device procurement and provisioning timeline
+       · Existing systems stability during parallel running period
+4. Project Dependencies
+       · Data migration must complete before full system go-live
+       · Training must complete before branch-level deployment
+       · Pilot deployment success required before full rollout
+       · Security and compliance validation before production use
+       · Payment gateway integration completion before online bookings enabled
+
+36
+Digital Transformation - Dietician Network          BRS v2.0
+
+12 Risks and Mitigation Strategies
+
+tableheader Risk      Impact                Prob.   Mitigation Strategy
+Resistance to change  High                  High    · Early engagement and communica-
+from staff
+                                            Medium     tion
+Data migration errors High                  Low     · Comprehensive training program
+and quality issues                          Medium  · Branch champions program
+POPIA non-compliance High                   Medium  · Phased rollout with support
+                                                    · Success stories sharing
+Budget overruns       Medium                High    · Pilot migration with validation
+                                            Medium  · Automated data quality checks
+Cyber security threats High                 Low     · Manual verification sampling
+                                                    · Rollback procedures
+Poor data quality in ex- Medium                     · Parallel running period
+isting records                                      · Legal review of design
+                                                    · Compliance officer involvement
+Slow user adoption    Medium                        · Security audits
+                                                    · Comprehensive audit trails
+Technical  integration High                         · Regular compliance monitoring
+failures                                            · Clear scope control
+                                                    · Change request process
+                                                    · Regular budget reviews
+                                                    · Contingency reserve (15%)
+                                                    · Milestone-based payments
+                                                    · Multi-layered security architecture
+                                                    · Regular security audits
+                                                    · Penetration testing
+                                                    · Staff security training
+                                                    · Incident response plan
+                                                    · Continuous monitoring
+                                                    · Pre-migration data cleansing
+                                                    · Validation rules enforcement
+                                                    · Prioritize active clients
+                                                    · Accept imperfect historical data
+                                                    · Progressive data improvement
+                                                    · Intuitive user interface design
+                                                    · Extensive training and support
+                                                    · Quick wins demonstration
+                                                    · Gamification elements
+                                                    · Adoption metrics monitoring
+                                                    · Proof of concept for integrations
+                                                    · Fallback options identified
+                                                    · Comprehensive testing
+                                                    · Vendor support agreements
+
+                                            37
+Digital Transformation - Dietician Network          BRS v2.0
+
+tableheader Risk           Impact           Prob.   Mitigation Strategy
+Internet connectivity is-  Medium           Medium  · Offline capability in mobile app
+sues at branches                            Low     · Backup connectivity options
+                                            High    · Auto-sync when restored
+Key personnel turnover Medium                       · Service level agreements with ISPs
+during project                              Low     · Knowledge documentation
+                                            Medium  · Cross-training team members
+Scope creep                Medium           Low     · Contractor backup resources
+                                            Medium  · Retention incentives
+Performance issues at Medium                Low     · Formal change control process
+scale                                               · Clear BRS documentation
+                                                    · Stakeholder education
+Delayed      decision- Medium                       · Phase 2 parking lot
+making                                              · Impact assessment for changes
+                                                    · Load testing with 2x capacity
+Third-party service dis- Medium                     · Scalable cloud architecture
+ruptions                                            · Performance monitoring tools
+                                                    · Optimization iterations
+Client resistance to dig- Low                       · Clear decision authority matrix
+ital onboarding                                     · Escalation procedures
+                                                    · Regular steering committee
+Regulatory changes Low                              · Decision deadlines in plan
+during implementation                               · Multiple vendor options
+                                                    · Service level agreements
+                                                    · Failover mechanisms
+                                                    · Regular service monitoring
+                                                    · Hybrid option (assisted digital)
+                                                    · Simple, intuitive interface
+                                                    · Clear value communication
+                                                    · Incentives for digital adoption
+                                                    · Monitor regulatory environment
+                                                    · Flexible design architecture
+                                                    · Legal counsel on retainer
+                                                    · Quick adaptation capability
+
+                                            38
+Digital Transformation - Dietician Network                            BRS v2.0
+
+13 Project Deliverables
+
+13.1 Primary Deliverables
+
+1. Strategic Documents
+
+       · Business Requirements Specification (BRS) - Final Version
+       · Functional Specification Document (FSD)
+       · Technical Architecture Document
+       · Business Process Mapping & Digital Transformation Blueprint
+       · Data Migration Strategy & Plan
+
+2. System Components
+
+       · Unified Power Apps Application (all 5 modules)
+       · Power Pages Website (public and client portal)
+       · Power Automate Workflows (30+ automated processes)
+       · Dataverse Data Model (configured and tested)
+       · Power BI Analytics Dashboard Suite (10+ dashboards)
+       · Mobile Application (iOS and Android via Power Apps)
+
+3. Integration Components
+
+       · Microsoft 365 Integration (Teams, Outlook, SharePoint)
+       · Payment Gateway Integration
+       · SMS/WhatsApp Messaging Integration
+       · Video Consultation Platform Integration
+       · Calendar Synchronization
+
+4. Data Migration
+
+       · Migrated Client Database (120,000+ records)
+       · Historical Data Archive (3 years)
+       · Data Quality Report
+       · Migration Reconciliation Report
+
+5. Security & Compliance
+
+       · POPIA Compliance Documentation
+       · Security Architecture Document
+       · Role-Based Access Control (RBAC) Configuration
+       · Security Audit Report
+       · Penetration Test Report
+       · Disaster Recovery Plan
+
+6. Training & Documentation
+
+       · User Manuals (per role: Client, Dietician, Admin, Manager)
+       · System Administrator Guide
+       · Video Tutorial Library (20+ videos)
+
+                                                             39
+ Digital Transformation - Dietician Network                          BRS v2.0
+
+         · Quick Reference Guides
+         · Training Presentation Materials
+         · Knowledge Base Articles
+         · FAQ Documentation
+
+ 7. Technical Documentation
+
+         · System Architecture Diagram
+         · Data Model Documentation (ERD)
+         · API Documentation
+         · Integration Specifications
+         · Configuration Documentation
+         · Deployment Guide
+         · Troubleshooting Guide
+
+ 8. Testing Artifacts
+
+         · Test Plan & Test Cases
+         · User Acceptance Testing (UAT) Report
+         · Performance Test Results
+         · Security Test Results
+         · Pilot Deployment Report
+
+ 9. Operational Documents
+
+         · Standard Operating Procedures (SOPs)
+         · Support & Maintenance Plan
+         · Incident Management Procedures
+         · Change Management Procedures
+         · Service Level Agreement (SLA) Definition
+
+10. Post-Implementation
+
+         · Go-Live Checklist & Sign-off
+         · Hypercare Support Summary (30 days)
+         · Performance Review Report (3 months post-implementation)
+         · Lessons Learned Document
+         · Phase 2 Recommendations
+
+ 13.2 Deliverable Timeline
+
+40
+Digital Transformation - Dietician Network                             BRS v2.0
+
+tableheader Deliverable  Description                                Timeline
+BRS Approval                                                        Week 2
+FSD Completion           Final Business Requirements Specification  Week 4
+Technical Design         Functional Specification Document          Week 6
+Pilot Module             Architecture and data model design         Week 8
+All Modules Beta         First module (Onboarding) prototype        Week 14
+Data Migration Pilot     Complete integrated platform (beta)        Week 12
+UAT Completion           Test migration with 1,000 records          Week 16
+Security Certification   User acceptance testing finalized          Week 17
+Training Completion      Security audit and compliance sign-off     Week 18
+Pilot Go-Live            All staff trained across branches          Week 19
+Full Migration           One branch production deployment           Week 20
+Full Go-Live             Complete data migration                    Week 22
+Hypercare End            All branches production                    Week 26
+Performance Review       30-day intensive support period ends       Week 34
+                         3-month post-implementation review
+
+14 Implementation Approach
+
+14.1 Methodology
+
+The project will follow an Agile-Hybrid approach combining:
+· Agile development methodology for iterative delivery
+· Waterfall elements for data migration and infrastructure
+· Scrum framework with 2-week sprints
+· Continuous stakeholder engagement and feedback
+· Phased deployment to minimize risk
+
+14.2 Project Phases
+
+14.2.1 Phase 1: Discovery & Planning (Weeks 1-4)
+Activities:
+· Requirements workshops with all stakeholder groups
+· Current state process mapping across all branches
+· Gap analysis and pain point documentation
+· Technical architecture design
+· Data model design
+· Security and compliance framework definition
+· Project plan finalization
+· Risk register creation
+
+    Deliverables:
+    · Approved BRS
+
+                                                             41
+Digital Transformation - Dietician Network                       BRS v2.0
+
+    · Functional Specification Document (FSD)
+    · Technical Architecture Document
+    · Project Charter and Plan
+
+14.2.2 Phase 2: Foundation Build (Weeks 5-8)
+
+Activities:
+· Azure infrastructure provisioning
+· Dataverse environment setup
+· Security framework implementation
+· RBAC configuration
+· Development environment setup
+· Module 1 (Onboarding) development
+· Module 2 (CMS) initial development
+· Integration proof-of-concepts
+
+    Deliverables:
+    · Cloud infrastructure (configured)
+    · Dataverse data model (initial)
+    · Module 1 prototype
+    · Integration POC results
+
+14.2.3 Phase 3: Core Development (Weeks 9-14)
+
+Activities:
+· Complete Module 2 (CMS) development
+· Develop Module 3 (Engagement & Motivation)
+· Develop Module 4 (Digital Services)
+· Develop Module 5 (Analytics & BI)
+· Power Automate workflow creation
+· Power BI dashboard development
+· Power Pages website development
+· Integration implementation
+· Unit testing throughout
+
+    Deliverables:
+    · Complete unified application (all modules)
+    · 30+ automated workflows
+    · Analytics dashboard suite
+    · Public website and client portal
+
+                                                             42
+Digital Transformation - Dietician Network                       BRS v2.0
+
+14.2.4 Phase 4: Data Migration (Weeks 12-20)
+Activities:
+· Data cleansing and preparation (parallel to Phase 3)
+· Data mapping and transformation rules
+· Pilot migration (1,000 records)
+· Pilot validation and reconciliation
+· Migration tool refinement
+· Full migration execution
+· Data quality assurance
+· Final reconciliation
+
+    Deliverables:
+    · Migrated client database (120,000+ records)
+    · Data quality report
+    · Migration reconciliation report
+
+14.2.5 Phase 5: Testing & Quality Assurance (Weeks 15-18)
+Activities:
+· Integration testing across all modules
+· Performance and load testing
+· Security testing and penetration testing
+· POPIA compliance validation
+· User Acceptance Testing (UAT) coordination
+· Bug fixing and refinement
+· Performance optimization
+· Final security audit
+
+    Deliverables:
+    · Test results and reports
+    · UAT sign-off
+    · Security certification
+    · Production-ready system
+
+                                                             43
+Digital Transformation - Dietician Network                  BRS v2.0
+
+14.2.6 Phase 6: Training & Change Management (Weeks 16-19)
+Activities:
+· Training materials development
+· Video tutorial creation
+· Train-the-trainer sessions
+· Branch-by-branch training delivery
+· Knowledge base population
+· Communication campaign execution
+· Branch champion program launch
+· Staff readiness assessment
+
+    Deliverables:
+    · Complete training materials
+    · Video tutorial library
+    · Trained staff (100% coverage)
+    · Knowledge base
+
+14.2.7 Phase 7: Pilot Deployment (Weeks 19-20)
+Activities:
+· Select pilot branch (Polokwane recommended)
+· Device provisioning and configuration
+· Pilot go-live
+· Intensive on-site support
+· Issue identification and resolution
+· User feedback collection
+· Performance monitoring
+· Success criteria validation
+
+    Deliverables:
+    · Pilot deployment report
+    · Lessons learned
+    · Refined deployment plan
+
+44
+Digital Transformation - Dietician Network  BRS v2.0
+
+14.2.8 Phase 8: Full Rollout (Weeks 21-24)
+Activities:
+· Phased deployment to remaining 15 branches
+· 3-4 branches per week rollout schedule
+· On-site go-live support at each branch
+· Device provisioning and user setup
+· Parallel running with legacy processes (2 weeks)
+· Issue tracking and resolution
+· Legacy system decommissioning
+
+    Rollout Schedule:
+    · Week 21: Branches 2-4 (Johannesburg, Cape Town, Durban)
+    · Week 22: Branches 5-8 (Pretoria, eMalahleni, Bloemfontein, Port Elizabeth)
+    · Week 23: Branches 9-12 (East London, Pietermaritzburg, Nelspruit, Rustenburg)
+    · Week 24: Branches 13-16 (Kimberley, George, Mahikeng, Tzaneen)
+    Deliverables:
+    · Full production system (all branches)
+    · Go-live sign-offs (all branches)
+    · Decommissioned legacy systems
+
+14.2.9 Phase 9: Hypercare & Stabilization (Weeks 24-28)
+Activities:
+· 30-day intensive support period
+· 24/7 helpdesk availability
+· Daily system health monitoring
+· Rapid issue resolution
+· User adoption monitoring
+· Performance optimization
+· Early wins documentation
+· Feedback collection and analysis
+
+    Deliverables:
+    · Hypercare support report
+    · System stabilization confirmation
+    · Optimization recommendations
+
+                                                             45
+Digital Transformation - Dietician Network                                        BRS v2.0
+
+14.2.10 Phase 10: Review & Optimization (Weeks 32-36)
+Activities:
+· 3-month performance review
+· Success metrics analysis
+· User satisfaction survey
+· ROI calculation
+· Lessons learned workshop
+· System optimization implementation
+· Phase 2 planning
+· Knowledge transfer to internal IT team
+
+    Deliverables:
+    · Performance review report
+    · Lessons learned document
+    · Phase 2 recommendations
+    · Transition to BAU support
+
+14.3 Deployment Strategy
+
+tableheader Strategy Element  Approach
+Deployment Model
+Pilot Selection               Phased rollout by branch with pilot-first approach
+                              Polokwane branch (moderate size, strong management,
+Rollout Sequence              representative processes)
+Parallel Running              Start with major urban branches, then secondary locations
+                              2-week parallel operation with legacy processes for valida-
+Cutover Timing                tion
+                              Weekend cutover to minimize disruption (Friday evening
+Support Model                 to Sunday)
+                              On-site support during first week, then remote with esca-
+Rollback Plan                 lation
+Success Criteria              Defined rollback procedures if critical issues arise
+                              Defined go/no-go criteria for progression to next branch
+
+14.4 Go-Live Readiness Criteria
+
+Before each branch deployment proceeds, the following criteria must be met:
+1. All staff at the branch completed training and signed competency confirmation
+2. Devices provisioned, configured, and tested
+3. Network connectivity validated (speed, reliability, redundancy)
+4. Data migration for branch completed and validated
+
+                                                             46
+ Digital Transformation - Dietician Network           BRS v2.0
+
+ 5. User accounts created and access tested
+ 6. Branch-specific configuration completed
+ 7. Support channels confirmed and tested
+ 8. Branch manager sign-off obtained
+ 9. Rollback procedures validated
+10. Communication to clients completed (if required)
+
+47
+Digital Transformation - Dietician Network                           BRS v2.0
+
+15 Support & Maintenance
+
+15.1 Support Model
+
+15.1.1 Hypercare Period (First 30 Days)
+
+tableheader Support Element     Details
+Availability
+                                24/7 emergency support, 06:00-22:00 general support
+Response Time                   (SAST)
+                                Critical: 1 hour, High: 4 hours, Medium: 24 hours, Low:
+Support Channels                72 hours
+Resources                       Phone hotline, Email, Teams chat, On-site (if required)
+Escalation                      Dedicated support team of 4 specialists
+Monitoring                      Clear escalation path to technical lead and project manager
+                                Proactive system monitoring and health checks
+
+15.1.2 Steady-State Support (Post-Hypercare)
+
+tableheader Support Element     Details
+Availability
+Response Time                   08:00-18:00 Monday-Friday, On-call for emergencies
+Support Channels                (SAST)
+Resources                       Critical: 4 hours, High: 24 hours, Medium: 72 hours, Low:
+Knowledge Base                  5 days
+                                Ticketing system, Email, Phone (business hours), Knowl-
+                                edge base
+                                2 dedicated support specialists + escalation to development
+                                team
+                                Self-service articles, FAQs, video tutorials
+
+15.2 Service Level Agreements (SLA)
+
+tableheader    Definition       Response        Resolution Examples
+Priority
+Critical (P1)  System       no  1 hour          4 hours   Complete system outage, data
+               down,            4 hours                   loss, security breach
+High (P2)      workaround,      24 hours
+               business-
+Medium (P3)    stopping
+
+               Major function                   24 hours  Appointment booking failure,
+               unavailable,                     5 days    payment processing down,
+               workaround                                 major module error
+               exists                                     Reporting errors, minor fea-
+                                                          ture bugs, performance issues
+               Function
+               impaired,
+               workaround
+               available
+
+                                            48
+Digital Transformation - Dietician Network                             BRS v2.0
+
+tableheader  Definition    Response         Resolution Examples
+Priority
+Low (P4)     Cosmetic is-  5 days           30 days              UI inconsistencies, enhance-
+             sue, feature                                        ment requests, documentation
+             request                                             updates
+
+15.3 Maintenance Activities
+
+15.3.1 Preventive Maintenance
+
+tableheader Activity    Description                                    Frequency
+System Health Checks
+Database Optimization   Monitor system performance, logs, and metrics  Daily
+Security Patching       Index maintenance, query optimization          Weekly
+Backup Verification     Apply security updates and patches             As released
+Performance Tuning      Test backup integrity and restore procedures   Weekly
+Capacity Review         Optimize slow queries and workflows            Monthly
+Security Audit          Assess storage, user growth, performance       Monthly
+Disaster Recovery Test  Comprehensive security review                  Quarterly
+User Access Review      Full DR procedure testing                      Quarterly
+                        Review and validate user permissions           Quarterly
+
+15.3.2 Corrective Maintenance
+· Bug fixing based on reported issues
+· Performance issue resolution
+· Data correction and cleanup
+· Security incident remediation
+· Integration failure resolution
+
+15.3.3 Adaptive Maintenance
+· Updates for regulatory changes (POPIA updates)
+· Platform updates (Microsoft Power Platform releases)
+· Third-party integration updates
+· Browser compatibility updates
+· Mobile OS compatibility updates
+
+15.3.4 Perfective Maintenance
+· Feature enhancements based on user feedback
+· Performance optimizations
+· User experience improvements
+· Report and dashboard refinements
+· Workflow optimizations
+
+                                                             49
+Digital Transformation - Dietician Network      BRS v2.0
+
+15.4 Knowledge Transfer
+
+tableheader Transfer Element  Approach
+Documentation
+                              Complete technical documentation, admin guides, and run-
+Training                      books
+Shadow Period                 Dedicated administrator training program (40 hours)
+Handover Workshops            3-month period where internal IT shadows support team
+Ongoing Support               Structured knowledge transfer sessions by module
+                              Vendor available for consultation post-handover
+
+                                            50
+Digital Transformation - Dietician Network                   BRS v2.0
+
+16 Budget and Resource Estimate
+
+16.1 High-Level Cost Breakdown
+
+tableheader Category      Estimated Cost (ZAR)               Notes
+Professional Services                           2,500,000
+                                                             Design, development, implementa-
+Microsoft Licenses                                480,000    tion
+                                                             Annual Power Platform licenses
+Third-Party Services                              150,000    (200 users)
+                                                             Payment gateway, SMS, video plat-
+Infrastructure                                    240,000    form
+Data Migration                                    300,000    Azure hosting (annual estimate)
+Training                                          200,000    Digitization and migration services
+Testing                                           150,000    Training development and delivery
+Change Management                                 120,000    UAT, security testing, pen testing
+                                                             Communications, adoption pro-
+Contingency (15%)                                 606,000    gram
+lightgray Total (Year 1)                      4,746,000      Risk mitigation reserve
+                                                             One-time + first year recurring
+
+    Note: Budget is indicative and subject to refinement based on detailed scope confirmation,
+licensing negotiations, and market rates at time of procurement.
+
+16.2 Ongoing Annual Costs (Years 2+)
+
+tableheader Category      Annual            Cost (ZAR)       Notes
+Microsoft Licenses
+Azure Infrastructure                                480,000  Power Platform subscriptions
+Third-Party Services                                240,000  Cloud hosting and services
+Support & Maintenance                               150,000  Payment, SMS, video services
+Enhancements                                        600,000  Ongoing support contract
+lightgray Total (Annual)                            300,000  Minor improvements and updates
+                                                             Recurring operational costs
+                                                1,770,000
+
+16.3 Resource Requirements
+
+tableheader Role          FTE               Duration         Responsibilities
+Project Manager                             9 months         Overall project leadership
+Technical Lead            1.0               7 months         Architecture and technical
+                          1.0                                oversight
+                                            6 months         Requirements and process
+Business Analyst          1.0                                mapping
+                                            6 months         Apps, flows, pages develop-
+Power Platform Devel- 2.0                                    ment
+oper                                        4 months         Dashboards and analytics
+                                            3 months         Data migration execution
+Power BI Developer        1.0
+                                            6 months         Security design and testing
+Data Migration Special- 1.0                 7 months         Training and adoption
+ist
+                                              51
+Security Specialist       0.5
+
+Change Manager            0.5
+Digital Transformation - Dietician Network                                           BRS v2.0
+
+tableheader Role    FTE                     Duration  Responsibilities
+QA/Test Engineer    1.0                     4 months  Testing and quality assur-
+                                                      ance
+Support Specialist  2.0                     3 months  Hypercare support
+
+                                            52
+Digital Transformation - Dietician Network                    BRS v2.0
+
+ 17 Success Criteria and Measurement
+
+ 17.1 Critical Success Factors
+
+ 1. System Adoption: 100% of staff trained and actively using system within 3 months of
+     go-live
+
+ 2. Data Completeness: 100% of active client data digitized with 99% accuracy
+ 3. Operational Efficiency: 50% reduction in administrative processing time
+ 4. Paper Reduction: 90% reduction in paper-based workflows
+ 5. Compliance: Full POPIA compliance validated through audit
+ 6. Client Satisfaction: 20% improvement in client satisfaction scores within 12 months
+ 7. Client Engagement: 35% increase in weekly active client engagement
+ 8. System Performance: 99.5% uptime achievement
+ 9. Cross-Branch Access: Client records accessible from any branch location
+10. New Revenue Streams: Digital products and online consultations generating revenue
+
+     within 9 months
+
+17.2 Key Performance Indicators (KPIs)
+
+tableheader KPI              Baseline           Target (6mo)  Target (12mo)
+Data Digitization
+Paper Usage Reduction        0%                 100%          100%
+Administrative Time Savings  0%                 70%           90%
+Client Satisfaction Score    0%                 40%           50%
+Weekly Active Clients        Baseline           +10%          +20%
+Client Churn Rate            Baseline           +25%          +35%
+Average Response Time        Baseline           -15%          -25%
+System Uptime                N/A                <4 hours      <2 hours
+Digital Revenue              N/A                99.0%         99.5%
+Online Bookings              R0                 R50,000/mo    R150,000/mo
+Staff Training Completion    0%                 30%           50%
+POPIA Compliance Score       0%                 100%          100%
+Data Access Time             Unknown            95%           100%
+Appointment No-Show Rate      30 min            <2 min        <1 min
+Client Referral Rate         Baseline           -20%          -30%
+                             Baseline           +15%          +30%
+
+17.3 Measurement Methodology
+
+17.4 Review Cadence
+
+· Weekly: During implementation and hypercare (project team)
+· Monthly: First 6 months post-go-live (steering committee)
+· Quarterly: Ongoing operational reviews (management)
+· Annually: Strategic performance review (executive)
+
+                                            53
+Digital Transformation - Dietician Network                            BRS v2.0
+
+tableheader Measurement Type  Approach
+System Usage Analytics
+                              Built-in Power Platform analytics tracking user activity,
+Performance Monitoring        feature usage, and engagement
+                              Azure Application Insights monitoring response times,
+User Surveys                  uptime, and system health
+Operational Metrics           Quarterly satisfaction surveys for staff and clients
+                              Time-and-motion studies comparing manual vs digital
+Financial Tracking            processes
+                              Revenue tracking by source (traditional, digital prod-
+Compliance Audits             ucts, online consultations)
+Business Intelligence         Quarterly POPIA compliance audits with scoring
+                              Power BI dashboards providing real-time KPI visualiza-
+                              tion
+
+18 Governance and Decision-Making
+
+18.1 Governance Structure
+
+18.1.1 Steering Committee
+Members:
+· CEO / Managing Director (Chair)
+· Project Manager
+· Technical Lead
+· Senior Branch Managers (2 representatives)
+· Compliance Officer
+· IT Manager
+
+    Responsibilities:
+· Strategic direction and oversight
+· Budget approval and financial governance
+· Scope change approval
+· Issue escalation resolution
+· Go/no-go decisions for major milestones
+· Resource allocation decisions
+
+    Meeting Frequency: Monthly (or as needed for critical decisions)
+
+18.1.2 Project Management Office (PMO)
+Members:
+· Project Manager
+· Business Analyst
+
+                                            54
+Digital Transformation - Dietician Network                       BRS v2.0
+
+· Technical Lead
+· Change Manager
+
+    Responsibilities:
+· Day-to-day project execution
+· Schedule management
+· Resource coordination
+· Risk and issue management
+· Stakeholder communication
+· Quality assurance oversight
+
+    Meeting Frequency: Daily standup + weekly planning
+
+18.1.3 Technical Working Group
+Members:
+· Technical Lead
+· Power Platform Developers
+· Power BI Developer
+· Security Specialist
+· IT Administrator (client)
+
+    Responsibilities:
+· Technical design decisions
+· Architecture reviews
+· Integration problem-solving
+· Performance optimization
+· Security implementation
+
+    Meeting Frequency: Bi-weekly + as needed
+
+18.1.4 User Advisory Group
+Members:
+· Dieticians (4 representatives from different branches)
+· Branch Managers (2 representatives)
+· Reception Staff (2 representatives)
+· Business Analyst
+· Change Manager
+
+                                                             55
+Digital Transformation - Dietician Network                                  BRS v2.0
+
+    Responsibilities:
+· User requirements validation
+· UAT participation and feedback
+· Workflow design input
+· Usability testing
+· Training content review
+· Adoption challenge identification
+
+    Meeting Frequency: Bi-weekly during development, monthly post-implementation
+
+18.2 Decision-Making Framework
+
+tableheader Decision    Decision Authority        Escalation Path
+Type
+Strategic Direction     Steering Committee        CEO (final authority)
+Budget Allocation       Steering Committee        CEO (for variances >10%)
+Scope Changes           Steering Committee        N/A
+                        (if budget/timeline
+Technical Architecture  impact)                   Project Manager  Steering Com-
+                        Technical Lead            mittee
+Feature Prioritization                            Steering Committee (conflicts)
+                        Project Manager + User
+Design Decisions        Advisory Group            Project Manager
+                        User Advisory Group
+Resource Allocation     (user-facing), Technical  Steering  Committee       (major
+                        Working Group (techni-    changes)
+Risk Mitigation         cal)
+                        Project Manager           Steering Committee (high-impact
+Quality Standards                                 risks)
+Go-Live Approval        Project Manager
+Issue Resolution (mi-                             Project Manager
+nor)                    Technical Lead
+Issue Resolution (ma-   Steering Committee        CEO (if concerns raised)
+jor)                    Project Manager
+                                                  Technical Lead
+                        Technical Lead +
+                        Project Manager           Steering Committee
+
+18.3 Change Control Process
+
+18.3.1 Change Request Procedure
+1. Initiation: Stakeholder submits change request form with justification
+2. Assessment: Project Manager and Technical Lead evaluate impact on:
+
+       · Scope
+       · Timeline
+
+                                                             56
+Digital Transformation - Dietician Network                                BRS v2.0
+
+       · Budget
+       · Resources
+       · Quality
+       · Other project areas
+3. Classification:
+       · Minor: No budget/timeline impact, PM approval
+       · Moderate: <5% budget/timeline impact, Steering Committee review
+       · Major: >5% impact, Steering Committee approval required
+4. Decision: Appropriate authority approves, rejects, or defers
+5. Implementation: If approved, change integrated into project plan
+6. Communication: Decision and rationale communicated to stakeholders
+
+18.3.2 Change Request Template
+
+tableheader                                         Change Request Form
+Request ID
+Submitted By               CR-[NUMBER]
+Date Submitted             [Name, Role]
+Change Description         [Date]
+Business Justification     [Detailed description of proposed change]
+Impact if Not Implemented  [Why is this change needed?]
+Proposed Solution          [What happens if we don't make this change?]
+Affected Components        [How should this be addressed?]
+Estimated Effort           [Which modules/areas impacted?]
+Budget Impact              [Hours/days required]
+Timeline Impact            [Cost implications]
+Priority                   [Schedule implications]
+Decision                   [Critical / High / Medium / Low]
+Decision Date              [Approved / Rejected / Deferred]
+Approved By                [Date]
+                           [Name, Role]
+
+                                            57
+Digital Transformation - Dietician Network      BRS v2.0
+
+19 Appendices
+
+19.1 Appendix A: Glossary of Terms
+
+tableheader Term        Definition
+Azure Active Directory
+(AAD)                   Microsoft's cloud-based identity and access management ser-
+BRS                     vice
+CMS                     Business Requirements Specification - document defining
+Dataverse               business needs and requirements
+EHR                     Client Management System - centralized system for manag-
+FSD                     ing client records
+MFA                     Microsoft's secure, cloud-based data storage platform for
+NPS                     Power Platform
+PCI DSS                 Electronic Health Records - digital version of patient medical
+PHI                     records
+PII                     Functional Specification Document - detailed specification of
+POPIA                   system functions
+Power Apps              Multi-Factor Authentication - security method requiring
+Power Automate          multiple verification factors
+Power BI                Net Promoter Score - metric measuring customer loyalty and
+Power Pages             satisfaction
+Power Platform          Payment Card Industry Data Security Standard - security
+RBAC                    standards for card payments
+RPO                     Personal Health Information - individually identifiable
+RTO                     health information
+SAST                    Personally Identifiable Information - data that can identify
+SLA                     an individual
+UAT                     Protection of Personal Information Act - South African data
+                        protection legislation
+                        Microsoft's low-code platform for building custom business
+                        applications
+                        Microsoft's workflow automation tool (formerly Microsoft
+                        Flow)
+                        Microsoft's business intelligence and data visualization plat-
+                        form
+                        Microsoft's low-code platform for creating external-facing
+                        websites
+                        Microsoft's suite of low-code tools (Apps, Automate, BI,
+                        Pages)
+                        Role-Based Access Control - access control based on user
+                        roles
+                        Recovery Point Objective - maximum acceptable data loss
+                        measured in time
+                        Recovery Time Objective - maximum acceptable downtime
+                        duration
+                        South African Standard Time (UTC+2)
+                        Service Level Agreement - commitment between service
+                        provider and client
+                        User Acceptance Testing - testing by end users to validate
+                        requirements
+
+                                            58
+Digital Transformation - Dietician Network                      BRS v2.0
+
+tableheader Term  Definition
+WAF               Web Application Firewall - security layer protecting web ap-
+                  plications
+
+19.2 Appendix B: Acronyms
+
+tableheader       Full Form
+
+Acronym           Azure Active Directory
+                  Application Programming Interface
+AAD               Business As Usual
+API               Business Intelligence
+BAU               Business Requirements Specification
+BI                Chief Executive Officer
+BRS               Client Management System
+CEO               Cross-Site Request Forgery
+CMS               Comma-Separated Values
+CSRF              Distributed Denial of Service
+CSV               Disaster Recovery
+DDoS              Electronic Funds Transfer
+DR                Electronic Health Records
+EFT               Entity Relationship Diagram
+EHR               Frequently Asked Questions
+ERD               Functional Specification Document
+FAQ               Full-Time Equivalent
+FSD               General Data Protection Regulation
+FTE               Human Resources
+GDPR              Internet Service Provider
+HR                Information Technology
+ISP               JavaScript Object Notation
+IT                Key Performance Indicator
+JSON              Multi-Factor Authentication
+KPI               Machine Learning
+MFA               Net Promoter Score
+ML                Payment Card Industry Data Security Standard
+NPS               Portable Document Format
+PCI DSS           Personal Health Information
+PDF               Personally Identifiable Information
+PHI               Project Management Office
+PII               Proof of Concept
+PMO               Protection of Personal Information Act
+POC               Quality Assurance
+POPIA             Role-Based Access Control
+QA                Return on Investment
+RBAC              Recovery Point Objective
+ROI               Recovery Time Objective
+RPO               South African Standard Time
+RTO               Search Engine Optimization
+SAST              Service Level Agreement
+SEO
+SLA
+
+                                            59
+Digital Transformation - Dietician Network                   BRS v2.0
+
+tableheader       Full Form
+
+Acronym           Short Message Service
+                  Standard Operating Procedure
+SMS               Structured Query Language
+SOP               Single Sign-On
+SQL               Transport Layer Security
+SSO               User Acceptance Testing
+TLS               User Interface
+UAT               Uniform Resource Locator
+UI                User Experience
+URL               Value Added Tax
+UX                Virtual Private Network
+VAT               Web Application Firewall
+VPN               Web Content Accessibility Guidelines
+WAF               Cross-Site Scripting
+WCAG              South African Rand (currency)
+XSS
+ZAR
+
+ 19.3 Appendix C: Reference Documents
+
+ 1. Activity 1 Presentation Brief - Problem Statement Definition
+ 2. Business Requirements Specification - Operational Paralysis Module
+ 3. Business Requirements Specification - Client Engagement & Motivation App
+ 4. Business Requirements Specification - Digital Services & Revenue Platform (Power Pages)
+ 5. Operational Paralysis BRS 2 - Enhanced Requirements
+ 6. Protection of Personal Information Act (POPIA), 2013
+ 7. Microsoft Power Platform Documentation
+ 8. Microsoft Dataverse Security Model
+ 9. Azure Architecture Best Practices
+10. Healthcare Data Retention Guidelines (South Africa)
+
+ 19.4 Appendix D: Contact Information
+
+tableheader Role  Name                      Contact
+Project Manager
+Technical Lead    Mpapadi Piet Monyela      [Email / Phone]
+Project Sponsor   [To be assigned]          [Email / Phone]
+Business Analyst  Client CEO                [Email / Phone]
+Change Manager    [To be assigned]          [Email / Phone]
+                  Mahada Dakalo             [Email / Phone]
+
+                                            60
+Digital Transformation - Dietician Network                             BRS v2.0
+
+19.5 Appendix E: System Architecture Diagrams
+
+[Placeholder for high-level system architecture diagram showing:
+· Power Platform components (Apps, Automate, Pages, BI)
+· Dataverse as central data repository
+· Azure cloud infrastructure
+· Integration points (Microsoft 365, Payment Gateway, SMS/WhatsApp)
+· Security layers (AAD, MFA, Encryption)
+· User access layers by role
+· Data flow between modules]
+
+19.6 Appendix F: Data Model - Entity Relationship Diagram
+
+[Placeholder for detailed ERD showing:
+· All core entities (Client, Dietician, Consultation, etc.)
+· Relationships and cardinality
+· Key attributes for each entity
+· Primary and foreign keys]
+
+19.7 Appendix G: User Journey Maps
+
+[Placeholder for user journey maps for key scenarios:
+1. New Client Onboarding Journey
+2. Dietician Daily Workflow
+3. Client Engagement Journey (between appointments)
+4. Online Consultation Booking Journey
+5. Branch Manager Reporting Journey]
+
+19.8 Appendix H: Compliance Checklist
+
+tableheader  POPIA Requirement                                Status   Evidence
+Ref
+C1           Accountability - Responsible party identified    Planned  TBD
+C2           Processing limitation - Lawful, reasonable, and  Design   BRS
+             minimal collection                               Design
+C3           Purpose specification - Clear purpose for data   Design   Consent
+             collection                                       Design   forms
+C4           Further processing limitation - Use only for              Access con-
+             stated purpose                                            trols
+C5           Information quality - Data must be complete,              Validation
+             accurate, up-to-date                                      rules
+
+                                            61
+Digital Transformation - Dietician Network                                   BRS v2.0
+
+tableheader  POPIA Requirement                               Status   Evidence
+Ref                                                          Design
+C6           Openness - Data subject aware of processing     Design   Privacy pol-
+                                                             Design   icy
+C7           Security safeguards - Technical and organiza-   Planned  Security
+             tional measures                                 Planned  arch
+C8           Data subject participation - Rights to access,  Design   Self-service
+             correct, delete                                 Design   portal
+C9           Consent obtained from data subjects                      Consent
+                                                                      module
+C10          Data breach notification procedures                      Incident re-
+                                                                      sponse
+C11          Retention and restriction of records (7 years)           Retention
+                                                                      policy
+C12          Audit trail of data access and modifications             Logging
+                                                                      system
+
+                                            62
+Digital Transformation - Dietician Network                                BRS v2.0
+
+20 Approval and Sign-Off
+
+20.1 Document Approval
+
+This Business Requirements Specification has been reviewed and approved by the following
+stakeholders:
+
+tableheader Role  Name                                                    Signature Date
+Project Sponsor   Client CEO
+
+Project Manager   Mpapadi Piet Monyela
+
+Technical Lead    [Name]
+
+Compliance Officer [Name]
+
+Branch Manager Rep [Name]
+
+20.2 Approval Criteria
+
+By signing this document, stakeholders confirm:
+1. The business requirements accurately reflect the organization's needs
+2. The proposed solution approach is sound and feasible
+3. The scope is clearly defined and understood
+4. The risks, assumptions, and dependencies are acceptable
+5. The success criteria and metrics are appropriate
+6. The budget and timeline estimates are reasonable
+7. The governance structure and decision-making process are agreed
+8. Authorization is granted to proceed to the next project phase
+
+20.3 Next Steps Upon Approval
+
+1. Develop detailed Functional Specification Document (FSD)
+2. Conduct detailed business process mapping workshops
+3. Begin technical architecture design
+4. Initiate procurement of licenses and services
+
+                                                             63
+Digital Transformation - Dietician Network                     BRS v2.0
+5. Establish project team and governance bodies
+6. Kick-off project with all stakeholders
+7. Begin Phase 1: Discovery & Planning activities
+
+                                        -- END OF DOCUMENT --
+
+64
+

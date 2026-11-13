@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+import state
 import sys
 from pathlib import Path
 import pytest
@@ -18,7 +20,11 @@ def isolated(monkeypatch):
     mp._draft_store.clear()
     users_db["a"] = {"id": "c1", "type": "client", "dietitian_id": "d1"}
     users_db["b"] = {"id": "c2", "type": "client", "dietitian_id": "d2"}
+    prior_appointments = dict(state.appointments_db)
+    state.appointments_db["completed"] = {"appointment_id": "completed", "client_id": "c1", "dietitian_id": "d1", "status": "COMPLETED", "appointment_date": (datetime.now() - timedelta(days=1)).isoformat()}
     yield
+    state.appointments_db.clear()
+    state.appointments_db.update(prior_appointments)
     users_db.clear()
     users_db.update(old_users)
     meal_plans_db.clear()
@@ -113,3 +119,9 @@ def test_legacy_endpoints_scope_to_dietitian():
     with pytest.raises(HTTPException) as e:
         mp.get_meal_plan("m2", "d1")
     assert e.value.status_code == 403
+
+
+def test_legacy_meal_notes_support_plain_text_and_json():
+    assert mp._meal_notes_as_list("Breakfast oats") == ["Breakfast oats"]
+    assert mp._meal_notes_as_list('["Oats", "Fruit"]') == ["Oats", "Fruit"]
+    assert mp._meal_notes_as_list(None) == []

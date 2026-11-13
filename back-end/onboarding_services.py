@@ -38,20 +38,7 @@ def validate_attachment(attachment, *, photo=False):
         raise HTTPException(422, "Attachment exceeds the permitted size")
     mime = attachment.content_type
     if photo:
-        if mime == "image/jpeg" and raw[:3] == b"\xff\xd8\xff":
-            pass
-        elif mime == "image/png" and raw[:8] == b"\x89PNG\r\n\x1a\n":
-            pass
-        else:
-            raise HTTPException(422, "Profile photo must be a JPEG or PNG image")
-        # Keep stored images inert; decoding also detects truncated/corrupt images.
-        try:
-            from PIL import Image
-
-            with Image.open(io.BytesIO(raw)) as image:
-                image.verify()
-        except Exception:
-            raise HTTPException(422, "Profile photo could not be read as an image") from None
+        validate_profile_photo(mime, raw)
     elif mime == "application/pdf":
         if not raw.startswith(b"%PDF-"):
             raise HTTPException(422, "Document content does not match PDF type")
@@ -62,6 +49,25 @@ def validate_attachment(attachment, *, photo=False):
     else:
         raise HTTPException(422, "Document must be PDF, JPEG or PNG")
     return {"filename": filename, "content_type": mime, "bytes": raw}
+
+
+def validate_profile_photo(content_type, raw):
+    """Validate bounded JPEG/PNG bytes and reject corrupt image files."""
+    if not raw or len(raw) > MAX_PHOTO_BYTES:
+        raise HTTPException(422, "Attachment exceeds the permitted size")
+    if content_type == "image/jpeg" and raw[:3] == b"\xff\xd8\xff":
+        pass
+    elif content_type == "image/png" and raw[:8] == b"\x89PNG\r\n\x1a\n":
+        pass
+    else:
+        raise HTTPException(422, "Profile photo must be a JPEG or PNG image")
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(raw)) as image:
+            image.verify()
+    except Exception:
+        raise HTTPException(422, "Profile photo could not be read as an image") from None
 
 
 def new_checkin_credential():

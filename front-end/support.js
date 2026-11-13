@@ -8,28 +8,45 @@ window.mountSupport = async function (root, { request, isAdmin, escapeHtml }) {
     ${
         !isAdmin
             ? `<form data-new-ticket class="form-grid">
-      <label class="form-field">Subject<input class="text-input" name="subject" maxlength="160" required></label>
-      <label class="form-field full-width">How can we help?<textarea class="text-input" name="body" maxlength="5000" required></textarea></label>
+      <label class="form-field">Subject
+      <input class="text-input" name="subject" maxlength="160" required>
+      </label>
+      <label class="form-field full-width">How can we help?
+      <textarea class="text-input" name="body" maxlength="5000" required></textarea></label>
       <button class="button button-primary" type="submit">Submit ticket</button>
     </form>`
             : ""
     }
     <button class="button quiet-button" type="button" data-refresh-tickets>Refresh tickets</button>
-    <label>Filter by status <select data-ticket-filter><option value="">All tickets</option><option>OPEN</option><option>IN_PROGRESS</option><option>RESOLVED</option></select></label>
-    <div data-ticket-list></div><div data-ticket-detail></div>
+    <label>Filter by status <select data-ticket-filter>
+    <option value="">All tickets</option>
+    <option>OPEN</option>
+    <option>IN_PROGRESS</option>
+    <option>RESOLVED</option>
+    </select></label>
+    <div data-ticket-list></div>
+    <div data-ticket-detail></div>
   </section>
   ${
       isAdmin
           ? `<section class="content-panel">
     <h2>Change a user's password</h2>
     <form data-account-search class="form-grid">
-      <label class="form-field">Find an account by name or email<input class="text-input" name="q" minlength="2" maxlength="150" required></label>
+      <label class="form-field">Find an account by name or email
+      <input class="text-input" name="q" minlength="2" maxlength="150" required>
+      </label>
       <button class="button" type="submit">Search accounts</button>
     </form>
     <form data-password-change class="form-grid" hidden>
-      <label class="form-field full-width">Account<select class="text-input" name="account" required></select></label>
-      <label class="form-field">New password<input class="text-input" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
-      <label class="form-field">Confirm new password<input class="text-input" name="confirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+      <label class="form-field full-width">Account
+      <select class="text-input" name="account" required></select>
+      </label>
+      <label class="form-field">New password
+      <input class="text-input" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+      </label>
+      <label class="form-field">Confirm new password
+      <input class="text-input" name="confirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+      </label>
       <p>Changing the password signs this user out. Share the new password with them securely.</p>
       <button class="button button-primary" type="submit">Change password</button>
     </form>

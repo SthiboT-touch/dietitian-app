@@ -1,12 +1,21 @@
-"""Browser smoke test for reception-assisted registration and QR check-in menus."""
+"""Browser smoke test for receptionist onboarding and role-scoped QR scanning."""
 
+import base64
+import io
 from pathlib import Path
+import qrcode
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1] / "front-end"
 html = (ROOT / "index.html").read_text()
 js = (ROOT / "app.js").read_text()
+decoder = (ROOT / "jsQR.js").read_text()
 css = (ROOT / "styles.css").read_text() + "\n" + (ROOT / "vibrant-theme.css").read_text()
+qr_image = io.BytesIO()
+qrcode.make("NC1:CAMERA-FALLBACK-TEST-TOKEN-12345678901234567890").save(
+    qr_image, format="PNG"
+)
+qr_data = "data:image/png;base64," + base64.b64encode(qr_image.getvalue()).decode()
 with sync_playwright() as p:
     browser = p.chromium.launch(
         headless=True, executable_path="/usr/bin/chromium", args=["--no-sandbox"]
@@ -27,14 +36,16 @@ with sync_playwright() as p:
     window.fetch=async(url,opts={}) => {
       if(url.includes('/api/v1/staff/me'))return {ok:true,status:200,json:async()=>({staff_id:'staff-a',full_name:'Test Reception',role:'reception',branch_id:'test-branch',is_active:true})};
       if(url.includes('/auth/register/client/assisted')) {window.__assisted.push(JSON.parse(opts.body));return {ok:true,status:200,json:async()=>({user:{id:'patient-a'},welcome_email:'queued'})};}
-      if(url.includes('/reception/check-in')) {window.__checkins.push(JSON.parse(opts.body));return {ok:true,status:201,json:async()=>({client_id:'patient-a'})};}
+      if(url.includes('/api/v1/check-in/scan')) {window.__checkins.push(JSON.parse(opts.body));return {ok:true,status:201,json:async()=>({client_id:'patient-a',appointment_id:'visit-a'})};}
       if(url.includes('/admin/setup-status'))return {ok:true,status:200,json:async()=>({available:false})};
       return {ok:true,status:200,json:async()=>([])};
     }
   }""")
+        page.add_script_tag(content=decoder)
         page.add_script_tag(content=js)
         page.wait_for_timeout(150)
         assert page.locator('[data-view="reception-onboarding"]').is_visible()
+        assert page.locator('[data-checkin-scanner]').is_hidden()
         page.evaluate("loadView('reception-onboarding')")
         page.locator("#assistedFirst").fill("Taylor")
         page.locator("#assistedLast").fill("Sample")
@@ -51,14 +62,65 @@ with sync_playwright() as p:
         page.wait_for_timeout(100)
         assert page.evaluate("window.__assisted.length") == 1, errors
         assert page.evaluate("window.__assisted[0].consent_to_care") is True
-        page.evaluate("loadView('reception-checkin')")
-        page.locator("#receptionQRValue").fill(
+        page.evaluate("""() => {
+            sessionStorage.setItem('nutrition-practice-admin-token','admin-secret');
+            showWorkspace({id:'admin-a',type:'admin',full_name:'Test Admin'}, 'reception-checkin');
+        }""")
+        assert page.locator('[data-checkin-scanner]').is_visible()
+        page.locator("#checkinQRValue").fill(
             "NC1:EXAMPLElongrandomcodethatisnotarealcode123456789"
         )
-        page.locator("#receptionCheckinForm button").click()
+        page.locator("#adminDietitianCheckinForm button").click()
         page.wait_for_timeout(100)
         assert page.evaluate("window.__checkins.length") == 1, errors
+        page.evaluate(
+            """async (qrData) => {
+                Object.defineProperty(window, 'isSecureContext', {configurable:true, value:true});
+                Object.defineProperty(navigator, 'mediaDevices', {
+                    configurable:true,
+                    value:{getUserMedia:async () => new MediaStream()},
+                });
+                window.BarcodeDetector = undefined;
+                window.requestAnimationFrame = callback =>
+                    setTimeout(() => callback(performance.now()), 40);
+                window.cancelAnimationFrame = clearTimeout;
+                HTMLMediaElement.prototype.play = () => Promise.resolve();
+                const image = new Image();
+                await new Promise((resolve, reject) => {
+                    image.onload = resolve;
+                    image.onerror = reject;
+                    image.src = qrData;
+                });
+                const source = document.createElement('canvas');
+                source.width = image.width;
+                source.height = image.height;
+                source.getContext('2d').drawImage(image, 0, 0);
+                window.__qrTestCanvas = source;
+                const video = document.querySelector('#checkinScannerVideo');
+                Object.defineProperty(video, 'videoWidth', {configurable:true, value:image.width});
+                Object.defineProperty(video, 'videoHeight', {configurable:true, value:image.height});
+                const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+                CanvasRenderingContext2D.prototype.drawImage = function(input, ...args) {
+                    if (input.id === 'checkinScannerVideo') {
+                        return drawImage.call(this, source, 0, 0, this.canvas.width, this.canvas.height);
+                    }
+                    return drawImage.call(this, input, ...args);
+                };
+            }""",
+            qr_data,
+        )
+        page.locator("#startQRScanner").click()
+        page.wait_for_function(
+            "window.__checkins.length === 2", timeout=10000
+        )
+        assert page.evaluate("window.__checkins[1].checkin_code") == (
+            "NC1:CAMERA-FALLBACK-TEST-TOKEN-12345678901234567890"
+        )
+        page.evaluate("showWorkspace({id:'dietitian-a',type:'dietitian',full_name:'Test Dietitian'})")
+        page.wait_for_timeout(100)
+        assert page.locator('[data-checkin-scanner]').is_hidden()
+        assert page.locator('[data-go="reception-checkin"]').is_visible()
         assert not errors, errors
-        print(f"PASS: reception assisted consent and QR menu at {width}px")
+        print(f"PASS: role access and native-API-free camera QR scan at {width}px")
         page.close()
     browser.close()

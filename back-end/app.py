@@ -4,6 +4,13 @@ Run locally with ``uvicorn app:app --app-dir back-end`` or through Docker.
 """
 
 import os
+import truststore
+
+# Use the platform certificate store for outbound TLS. This lets Requests (used
+# by the Resend SDK) trust certificates Windows already recognizes, while
+# keeping certificate and hostname verification enabled.
+truststore.inject_into_ssl()
+
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +29,7 @@ from routers import (
     onboarding,
     cms,
     support,
+    care,
 )
 from audit import audit_sensitive_requests
 from diagnostics import request_diagnostics
@@ -51,13 +59,16 @@ app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")
 # Serve the web app at the root. API documentation is opt-in, disabled by default.
 @app.get("/", include_in_schema=False)
 def root_redirect():
-    return FileResponse(config.STATIC_DIR / "index.html")
+    return FileResponse(
+        config.STATIC_DIR / "index.html",
+        media_type="text/html",
+    )
 
 
 # A readable health summary for local debugging. An online API does not
 # necessarily mean that its database connection is healthy.
 @app.get("/health", tags=["Health Check"])
-def read_root():
+def health_check():
     database_status = "in_memory"
     if config.DATABASE_ENABLED:
         try:
@@ -86,5 +97,6 @@ for _router in (
     onboarding.router,
     cms.router,
     support.router,
+    care.router,
 ):
     app.include_router(_router)

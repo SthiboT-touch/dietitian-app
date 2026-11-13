@@ -34,7 +34,13 @@ def isolated_in_memory(monkeypatch):
         store.clear()
     state.users_db.update(
         {
-            "c1": {"id": "c1", "type": "client", "full_name": "Client One", "dietitian_id": "d1"},
+            "c1": {
+                "id": "c1",
+                "type": "client",
+                "full_name": "Client One",
+                "dietitian_id": "d1",
+                "maternal_care_enabled": True,
+            },
             "c2": {"id": "c2", "type": "client", "full_name": "Client Two", "dietitian_id": "d2"},
         }
     )
@@ -47,6 +53,10 @@ def isolated_in_memory(monkeypatch):
     state.client_sessions_db.update({"client-1": "c1", "client-2": "c2"})
     state.dietitian_sessions_db.update({"dietitian-1": "d1", "dietitian-2": "d2"})
     state.admin_sessions_db["admin-1"] = "a1"
+    # Clinical sessions represent practitioners with a current reviewed card.
+    for clinician_id in state.dietitian_sessions_db.values():
+        clinician = state.users_db.setdefault(clinician_id, {"id": clinician_id, "type": "dietitian"})
+        clinician.update(status="APPROVED")
     yield
     for store in (
         state.users_db,
@@ -65,11 +75,30 @@ def headers(token):
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest.mark.parametrize("endpoint,payload", [
+    ("progress", {"weight_kg": 72, "steps": 6000}),
+    ("metrics", {"metric_type": "weight", "value": "72"}),
+])
+def test_health_metrics_are_managed_only_by_assigned_dietitian(endpoint, payload):
+    url = f"/api/v1/clients/c1/{endpoint}"
+    assert api.post(url, json=payload).status_code == 401
+    for token in ("client-1", "client-2", "dietitian-2", "admin-1"):
+        assert api.post(url, json=payload, headers=headers(token)).status_code == 403
+    assert state.clients_db["c1"][endpoint] == []
+    assert api.post(url, json=payload, headers=headers("dietitian-1")).status_code == 200
+    response = api.get(url, headers=headers("client-1"))
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
 def booking(client_id="c1", dietitian_id="d1"):
+    # Authorization tests use a valid grid time so they exercise access checks, not slot validation.
     return {
         "client_id": client_id,
         "dietitian_id": dietitian_id,
-        "appointment_date": (datetime.now() + timedelta(days=3)).isoformat(),
+        "appointment_date": (datetime.now() + timedelta(days=3))
+        .replace(hour=8, minute=0, second=0, microsecond=0)
+        .isoformat(),
     }
 
 
@@ -146,6 +175,35 @@ def test_client_meal_and_lactation_routes_are_protected():
     assert api.get("/api/v1/clients/c1/meals").status_code == 401
 
 
+def test_maternal_care_access_is_limited_to_assigned_dietitian():
+    url = "/api/v1/clients/c1/maternal-care"
+    payload = {"enabled": True}
+
+    assert api.patch(url, json=payload).status_code == 401
+    assert api.patch(url, json=payload, headers=headers("dietitian-2")).status_code == 403
+    assert api.patch(url, json=payload, headers=headers("dietitian-1")).status_code == 200
+
+
+def test_assigned_dietitian_can_review_client_meal_logs():
+    meal = {
+        "log_date": "2026-11-11",
+        "meal_time": "08:30",
+        "meal_type": "breakfast",
+        "description": "Oats with banana",
+        "calories": 320,
+    }
+    saved = api.post(
+        "/api/v1/clients/c1/meals", json=meal, headers=headers("client-1")
+    )
+    assert saved.status_code == 200
+    reviewed = api.get("/api/v1/clients/c1/meals", headers=headers("dietitian-1"))
+    assert reviewed.status_code == 200
+    assert len(reviewed.json()) == 1
+    assert reviewed.json()[0]["description"] == meal["description"]
+    assert reviewed.json()[0]["log_date"] == meal["log_date"]
+    assert api.get("/api/v1/clients/c1/meals", headers=headers("dietitian-2")).status_code == 403
+
+
 def test_appointment_booking_requires_client_ownership():
     assert api.post("/api/v1/appointments", json=booking()).status_code == 401
     assert (
@@ -219,11 +277,29 @@ def test_appointment_approval_and_cancellation_enforce_participant_roles():
     )
 
 
+def test_medical_conditions_can_only_be_recorded_by_assigned_dietitian():
+    path = "/api/v1/clients/c1/medical-conditions"
+    payload = {"condition_name": "Asthma", "icd_code": "J45"}
+    assert api.post(path, json=payload).status_code == 401
+    for token in ("client-1", "client-2", "admin-1", "dietitian-2"):
+        assert api.post(path, json=payload, headers=headers(token)).status_code == 403
+    assert state.clients_db["c1"]["conditions"] == []
+    assert api.post(path, json=payload, headers=headers("dietitian-1")).status_code == 200
+    profile = api.get("/api/v1/clients/c1/profile", headers=headers("client-1")).json()
+    assert profile["conditions"] == [payload]
+
+
 def test_goals_require_authenticated_owner_or_assigned_dietitian():
+    state.appointments_db["completed"] = {"appointment_id": "completed", "client_id": "c1", "dietitian_id": "d1", "status": "COMPLETED", "appointment_date": (datetime.now() - timedelta(days=1)).isoformat()}
     payload = {"client_id": "c1", "target_metric": "Water", "target_value": "2"}
     assert api.get("/api/v1/goals", params={"client_id": "c1"}).status_code == 401
     assert api.post("/api/v1/goals", json=payload, headers=headers("client-2")).status_code == 403
-    assert api.post("/api/v1/goals", json=payload, headers=headers("client-1")).status_code == 200
+    assert api.post("/api/v1/goals", json=payload, headers=headers("client-1")).status_code == 403
+    assert api.post("/api/v1/goals", json=payload).status_code == 401
+    assert api.post("/api/v1/goals", json=payload, headers=headers("admin-1")).status_code == 403
+    assert api.post("/api/v1/goals", json=payload, headers=headers("dietitian-2")).status_code == 403
+    assert api.post("/api/v1/goals", json=payload, headers=headers("dietitian-1")).status_code == 200
+    assert len(api.get("/api/v1/goals", params={"client_id": "c1"}, headers=headers("client-1")).json()) == 1
     assert (
         api.get(
             "/api/v1/goals", params={"client_id": "c1"}, headers=headers("dietitian-1")
@@ -257,18 +333,29 @@ def test_database_assignment_check_rejects_an_unassigned_dietitian(monkeypatch):
 def test_every_client_record_route_has_the_authorization_dependency():
     """Make newly introduced health endpoints fail tests if left unprotected."""
     from fastapi.routing import APIRoute
-    from routers.clients import router as clients_router
-    from security import require_client_record_access
+    from routers.clients import require_metric_editor, router as clients_router
+    from security import require_client_record_access, require_maternal_care_access
 
     routes = [
         route
         for route in clients_router.routes
-        if isinstance(route, APIRoute) and "/api/v1/clients/{client_id}" in route.path
+        if isinstance(route, APIRoute)
+        and "/api/v1/clients/{client_id}" in route.path
+        and not route.path.endswith("/maternal-care")
     ]
     assert routes, "Expected to discover clinical client routes"
     for route in routes:
+        expected_dependency = (
+            require_metric_editor
+            if route.path.endswith(("/metrics", "/progress")) and "POST" in route.methods
+            else (
+                require_maternal_care_access
+                if "/pregnancy" in route.path or "/lactation" in route.path
+                else require_client_record_access
+            )
+        )
         assert any(
-            dependency.call is require_client_record_access
+            dependency.call is expected_dependency
             for dependency in route.dependant.dependencies
         ), route.path
 

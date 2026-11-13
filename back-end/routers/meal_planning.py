@@ -9,10 +9,25 @@ import config
 from state import users_db, meal_plans_db, recipes_db
 from schemas import MealPlanRequest, MealPlanResponse
 from security import require_dietitian, require_client
+from consultations import completed_consultation
 from clinical_screening import screen_meal_plan_context
 from pydantic import BaseModel, Field
 
 router = APIRouter()
+
+
+def _meal_notes_as_list(notes: Optional[str]) -> List[str]:
+    if not notes:
+        return []
+    try:
+        parsed = json.loads(notes)
+    except json.JSONDecodeError:
+        return [notes]
+    if isinstance(parsed, list):
+        return [str(item) for item in parsed]
+    if isinstance(parsed, str):
+        return [parsed] if parsed else []
+    return [json.dumps(parsed)]
 
 
 class MealPlanScreeningRequest(BaseModel):
@@ -69,6 +84,7 @@ class MealDraftRequest(MealPlanScreeningRequest):
     """Dietitian-reviewed context. Empty lists mean explicitly reviewed none."""
 
     recipe_ids: List[str] = Field(default_factory=list, min_length=1, max_length=30)
+    appointment_id: Optional[str] = None
 
 
 def _load_candidate_recipes(recipe_ids: List[str]) -> list[dict]:
@@ -108,6 +124,7 @@ def _load_candidate_recipes(recipe_ids: List[str]) -> list[dict]:
 def preview_meal_plan_draft(data: MealDraftRequest, dietitian_id: str = Depends(require_dietitian)):
     """Non-persisted draft preview, never a clinical prescription or client publication."""
     _verify_client_assignment(data.client_id, dietitian_id)
+    appointment_id = completed_consultation(data.client_id, dietitian_id, data.appointment_id)
     recipes = _load_candidate_recipes(data.recipe_ids)
     ingredients = []
     for recipe in recipes:
@@ -139,6 +156,7 @@ def preview_meal_plan_draft(data: MealDraftRequest, dietitian_id: str = Depends(
     ]
     return {
         "status": "DRAFT_PREVIEW",
+        "appointment_id": appointment_id,
         "published": False,
         "saved": False,
         "clinical_approval": False,
@@ -203,9 +221,12 @@ def _owner(record: dict, dietitian_id: str):
 
 @router.post("/api/v1/meal-plans/drafts", status_code=201, tags=["5. Foods & Meal Planning"])
 def save_meal_draft(data: DraftSaveRequest, dietitian_id: str = Depends(require_dietitian)):
+    _verify_client_assignment(data.client_id, dietitian_id)
+    appointment_id = completed_consultation(data.client_id, dietitian_id, data.appointment_id)
     preview = preview_meal_plan_draft(data, dietitian_id)
     plan_id = str(uuid.uuid4())
     draft = {
+        "appointment_id": appointment_id,
         "client_id": data.client_id,
         "diet_type": data.diet_type,
         "life_stage": data.life_stage,
@@ -280,6 +301,7 @@ def review_meal_draft(
     approved = None
     if decision != "REJECTED":
         approved = deepcopy(record["draft_json"])
+        approved["appointment_id"] = completed_consultation(record["client_id"], dietitian_id, approved.get("appointment_id"))
         if decision == "MODIFIED":
             schedule = data.revised_schedule
             expected_days = approved["days"]
@@ -399,7 +421,7 @@ def list_meal_plans(dietitian_id: str = Depends(require_dietitian)):
                 plans.append(
                     {
                         **dict(plan),
-                        "meals": json.loads(day["notes"]) if day and day["notes"] else [],
+                        "meals": _meal_notes_as_list(day["notes"] if day else None),
                         "status": "GENERATED",
                     }
                 )
@@ -441,7 +463,7 @@ def get_meal_plan(meal_plan_id: str, dietitian_id: str = Depends(require_dietiti
             day = cursor.fetchone()
         return {
             **dict(plan),
-            "meals": json.loads(day["notes"]) if day and day["notes"] else [],
+            "meals": _meal_notes_as_list(day["notes"] if day else None),
             "status": "GENERATED",
         }
     plan = meal_plans_db.get(meal_plan_id)

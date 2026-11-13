@@ -112,11 +112,11 @@ CREATE TABLE dietitian (
 
     email                 VARCHAR(150) UNIQUE NOT NULL,
 
-    password              VARCHAR(255) NOT NULL,
-
     email_verified       BOOLEAN NOT NULL DEFAULT TRUE,
 
     stytch_user_id       VARCHAR(80),
+
+    password              VARCHAR(255) NOT NULL,
 
     registration_number   VARCHAR(50) UNIQUE NOT NULL,
 
@@ -181,15 +181,17 @@ CREATE TABLE client (
 
     life_stage_id        VARCHAR(36) REFERENCES life_stage(life_stage_id) ON DELETE SET NULL,
 
+    maternal_care_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+
     name                 VARCHAR(150) NOT NULL,
 
     email                VARCHAR(150) UNIQUE NOT NULL,
 
-    password              VARCHAR(255) NOT NULL,
-
     email_verified       BOOLEAN NOT NULL DEFAULT TRUE,
 
     stytch_user_id       VARCHAR(80),
+
+    password              VARCHAR(255) NOT NULL,
 
     id_number            VARCHAR(30) UNIQUE NOT NULL,
 
@@ -433,6 +435,11 @@ CREATE TABLE appointment (
     status          VARCHAR(20) NOT NULL DEFAULT 'PENDING'
 
         CHECK (status IN ('PENDING','CONFIRMED','REJECTED','SCHEDULED','COMPLETED','CANCELLED','NO_SHOW')),
+
+    -- Store the client's selected visit category; legacy rows default to initial visits.
+    visit_type      VARCHAR(20) NOT NULL DEFAULT 'initial_visit'
+
+        CHECK (visit_type IN ('initial_visit', 'follow_up')),
 
     notes           TEXT
 
@@ -1043,6 +1050,22 @@ CREATE TABLE IF NOT EXISTS client_profile_photo (
     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Self-managed portraits for every authenticated account role.
+CREATE TABLE IF NOT EXISTS account_profile_photo (
+    account_type VARCHAR(30) NOT NULL CHECK (
+        account_type IN (
+            'client', 'dietitian', 'admin', 'reception',
+            'branch_manager', 'compliance_officer', 'executive', 'content_manager'
+        )
+    ),
+    account_id VARCHAR(36) NOT NULL,
+    file_name VARCHAR(120) NOT NULL,
+    content_type VARCHAR(30) NOT NULL CHECK (content_type IN ('image/jpeg', 'image/png')),
+    file_data BYTEA NOT NULL,
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (account_type, account_id)
+);
+
 
 -- Onboarding: 013_client_qr_checkin.sql
 -- FR-1.7: store only SHA256 of random check-in credential; never ID numbers.
@@ -1055,10 +1078,14 @@ CREATE TABLE IF NOT EXISTS client_checkin_credential (
 CREATE TABLE IF NOT EXISTS client_checkin_event (
     checkin_id VARCHAR(36) PRIMARY KEY,
     client_id VARCHAR(36) NOT NULL REFERENCES client(client_id) ON DELETE RESTRICT,
-    staff_id VARCHAR(36) NOT NULL REFERENCES staff_account(staff_id) ON DELETE RESTRICT,
+    staff_id VARCHAR(36) REFERENCES staff_account(staff_id) ON DELETE RESTRICT,
     branch_id VARCHAR(36) NOT NULL REFERENCES branch(branch_id) ON DELETE RESTRICT,
+    appointment_id VARCHAR(36) REFERENCES appointment(appointment_id) ON DELETE SET NULL,
     checked_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE client_checkin_event ALTER COLUMN staff_id DROP NOT NULL;
+ALTER TABLE client_checkin_event ADD COLUMN IF NOT EXISTS actor_id VARCHAR(36);
+ALTER TABLE client_checkin_event ADD COLUMN IF NOT EXISTS actor_role VARCHAR(32) NOT NULL DEFAULT 'reception';
 CREATE INDEX IF NOT EXISTS idx_client_checkin_event_client ON client_checkin_event(client_id, checked_in_at DESC);
 
 ALTER TABLE client_registration_consent ADD CONSTRAINT fk_registration_staff FOREIGN KEY (registered_by_staff_id) REFERENCES staff_account(staff_id) ON DELETE SET NULL;
@@ -1136,3 +1163,49 @@ CREATE INDEX IF NOT EXISTS idx_ehr_note_client ON ehr_note(client_id, created_at
 CREATE INDEX IF NOT EXISTS idx_nutrition_plan_client ON nutrition_plan_version(client_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_client_attachment_client ON client_attachment(client_id, uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_client_access_audit_client ON client_access_audit(client_id, accessed_at DESC);
+
+-- Appointment and care workflow for fresh databases.
+ALTER TABLE appointment
+    ADD COLUMN IF NOT EXISTS appointment_type VARCHAR(20)
+    NOT NULL DEFAULT 'IN_PERSON';
+
+ALTER TABLE appointment
+    ADD COLUMN IF NOT EXISTS meeting_link TEXT;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'appointment_type_check'
+          AND conrelid = 'appointment'::regclass
+    ) THEN
+        ALTER TABLE appointment
+            ADD CONSTRAINT appointment_type_check
+            CHECK (appointment_type IN ('IN_PERSON', 'VIRTUAL'));
+    END IF;
+END
+$$;
+
+ALTER TABLE appointment ADD COLUMN IF NOT EXISTS branch_id VARCHAR(50);
+ALTER TABLE appointment ADD COLUMN IF NOT EXISTS consultation_type VARCHAR(20) NOT NULL DEFAULT 'INITIAL';
+CREATE TABLE IF NOT EXISTS client_care_event (
+    event_id VARCHAR(50) PRIMARY KEY,
+    client_id VARCHAR(50) NOT NULL REFERENCES client(client_id),
+    kind VARCHAR(30) NOT NULL,
+    author_id VARCHAR(50) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    payload JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS client_care_event_client_idx ON client_care_event(client_id, created_at);
+
+ALTER TABLE nutrition_goal ADD COLUMN IF NOT EXISTS appointment_id VARCHAR(36) REFERENCES appointment(appointment_id);
+ALTER TABLE client_checkin_credential ADD COLUMN IF NOT EXISTS appointment_id VARCHAR(36) REFERENCES appointment(appointment_id);
+ALTER TABLE client_checkin_event ADD COLUMN IF NOT EXISTS appointment_id VARCHAR(36) REFERENCES appointment(appointment_id);
+CREATE INDEX IF NOT EXISTS nutrition_goal_appointment_idx ON nutrition_goal(appointment_id);
+CREATE INDEX IF NOT EXISTS client_checkin_event_appointment_idx ON client_checkin_event(appointment_id);
+
+-- Branch-manager approval attribution.
+ALTER TABLE approval_log ALTER COLUMN admin_id DROP NOT NULL;
+ALTER TABLE approval_log ADD COLUMN IF NOT EXISTS staff_id VARCHAR(36)
+    REFERENCES staff_account(staff_id) ON DELETE RESTRICT;

@@ -3,6 +3,8 @@
 import secrets
 import uuid
 import time
+from contextlib import contextmanager
+from psycopg2.errors import UniqueViolation
 from fastapi import (
     APIRouter,
     Depends,
@@ -13,9 +15,13 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import Response
-from datetime import date
+from datetime import date, datetime, timezone
 from onboarding_services import validate_attachment
-from role_management import require_roles
+from role_management import (
+    branch_id_for_manager,
+    require_admin_or_branch_manager,
+    require_roles,
+)
 from registration_consent import consent_details
 import database
 import config
@@ -60,13 +66,29 @@ from security import (
     require_dietitian,
 )
 from helpers import email_is_registered, build_full_name
-from stytch_service import StytchEmailError, send_email_code, verify_email_code
+from email_verification import (
+    EmailVerificationError,
+    email_verification_enabled,
+    send_email_code,
+    verify_email_code,
+)
 
 router = APIRouter()
 
 
+@contextmanager
+def _dietitian_registration_cursor():
+    try:
+        with database.cursor() as cursor:
+            yield cursor
+    except UniqueViolation as error:
+        raise HTTPException(
+            409, "This email or license number is already registered"
+        ) from error
+
+
 def _set_email_verification(email: str, verified: bool, stytch_user_id: str | None = None) -> None:
-    """Update the local account after Stytch verifies an email address."""
+    """Update a matching account after its email address has been verified."""
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -86,8 +108,6 @@ def _set_email_verification(email: str, verified: bool, stytch_user_id: str | No
 
 
 def _require_verified_registration_email(email: str) -> dict | None:
-    if not config.STYTCH_ENABLED:
-        return None
     verification = verified_email_db.get(email.casefold())
     if not verification or verification["expires_at"] < time.time():
         verified_email_db.pop(email.casefold(), None)
@@ -101,24 +121,20 @@ def _require_verified_registration_email(email: str) -> dict | None:
 def send_email_verification_code(data: EmailVerificationSend):
     try:
         result = send_email_code(data.email)
-    except StytchEmailError as error:
+    except EmailVerificationError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return {
         "enabled": result["enabled"],
         "method_id": result.get("method_id"),
-        "message": (
-            "A verification code was sent to your email."
-            if result["enabled"]
-            else "Email verification is disabled in this environment."
-        ),
+        "message": "A verification code was sent to your email.",
     }
 
 
 @router.post("/api/v1/auth/email/verify-code", tags=["1. Auth & Admin"])
 def verify_email_verification_code(data: EmailVerificationCheck):
     try:
-        result = verify_email_code(data.method_id, data.code)
-    except StytchEmailError as error:
+        result = verify_email_code(data.method_id, data.code, data.email)
+    except EmailVerificationError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     if not result.get("enabled"):
         return {
@@ -149,7 +165,7 @@ def register_dietitian(data: DietitianRegister):
         password_hash = hash_password(data.password)
         business_id = str(uuid.uuid4())
         branch_id = str(uuid.uuid4())
-        with database.cursor() as cursor:
+        with _dietitian_registration_cursor() as cursor:
             cursor.execute(
                 "SELECT 1 FROM dietitian WHERE registration_number = %s", (data.license_number,)
             )
@@ -178,14 +194,14 @@ def register_dietitian(data: DietitianRegister):
                     data.email,
                     password_hash,
                     data.license_number,
-                    bool(verified_email) or not config.STYTCH_ENABLED,
+                    bool(verified_email),
                 ),
             )
         user = {
             "id": user_id,
             "type": "dietitian",
             "status": "PENDING",
-            "email_verified": bool(verified_email) or not config.STYTCH_ENABLED,
+            "email_verified": bool(verified_email),
             "stytch_user_id": verified_email.get("stytch_user_id") if verified_email else None,
             **registration,
             "password_hash": password_hash,
@@ -213,7 +229,7 @@ def register_dietitian(data: DietitianRegister):
         "id": user_id,
         "type": "dietitian",
         "status": "PENDING",
-        "email_verified": bool(verified_email) or not config.STYTCH_ENABLED,
+        "email_verified": bool(verified_email),
         "stytch_user_id": verified_email.get("stytch_user_id") if verified_email else None,
         "business_id": business_id,
         "branch_id": branch_id,
@@ -323,7 +339,7 @@ def _create_client(
                         data.consent_date,
                         data.consent_signatory_name,
                         data.consent_signature,
-                        bool(verified_email) or not config.STYTCH_ENABLED,
+                        bool(verified_email),
                         verified_email.get("stytch_user_id") if verified_email else None,
                         client_id,
                     ),
@@ -402,7 +418,7 @@ def _create_client(
         **registration,
         "password_hash": hash_password(data.password),
     }
-    user["email_verified"] = bool(verified_email) or not config.STYTCH_ENABLED
+    user["email_verified"] = bool(verified_email)
     user["stytch_user_id"] = verified_email.get("stytch_user_id") if verified_email else None
     verified_email_db.pop(data.email.casefold(), None)
     users_db[client_id] = user
@@ -547,7 +563,7 @@ def login(data: LoginRequest):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT dietitian_id AS id, 'dietitian' AS type, "
+                "SELECT dietitian_id AS id, 'dietitian' AS type, first_name, last_name, "
                 "TRIM(first_name || ' ' || last_name) AS full_name, email, "
                 "registration_number AS license_number, status, email_verified, password AS password_hash "
                 "FROM dietitian WHERE LOWER(email) = LOWER(%s)",
@@ -606,7 +622,7 @@ def login(data: LoginRequest):
     if not user or not verify_password(data.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if (
-        config.STYTCH_ENABLED
+        email_verification_enabled()
         and user.get("type") in {"client", "dietitian"}
         and not user.get("email_verified", False)
     ):
@@ -621,7 +637,7 @@ def login(data: LoginRequest):
         "compliance",
         "executive",
         "content_manager",
-    } and not user.get("staff_id"):
+    } and user["type"] == "admin":
         access_token = secrets.token_urlsafe(32)
         admin_sessions_db[access_token] = user["id"]
     elif user["type"] == "dietitian":
@@ -653,7 +669,7 @@ def get_dietitians():
             cursor.execute(
                 "SELECT d.dietitian_id AS id, TRIM(d.first_name || ' ' || d.last_name) AS full_name, "
                 "d.registration_number AS license_number, d.specialisation, d.status, "
-                "b.name AS branch_name, b.address AS branch_address, bus.name AS practice_name "
+                "b.branch_id, b.name AS branch_name, b.address AS branch_address, bus.name AS practice_name "
                 "FROM dietitian d JOIN branch b ON b.branch_id = d.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
                 "WHERE d.status = 'APPROVED' "
@@ -667,12 +683,13 @@ def get_dietitians():
             "license_number": user["license_number"],
             "specialisation": user.get("specialisation"),
             "status": user.get("status", "APPROVED"),
+            "branch_id": user.get("branch_id"),
             "branch_name": branches_db.get(user.get("branch_id"), {}).get("name"),
             "branch_address": branches_db.get(user.get("branch_id"), {}).get("address"),
             "practice_name": branches_db.get(user.get("branch_id"), {}).get("business_name"),
         }
         for user in users_db.values()
-        if user.get("type") == "dietitian" and user.get("status") == "APPROVED"
+        if user.get("type") == "dietitian" and user.get("status", "APPROVED") == "APPROVED"
     ]
     return sorted(dietitians, key=lambda user: user["full_name"].casefold())
 
@@ -1022,27 +1039,45 @@ async def submit_dietitian_document(
 
 
 @router.get("/api/v1/admin/dietitian-documents/{document_id}", tags=["1. Auth & Admin"])
-def download_dietitian_document(document_id: str, admin_id: str = Depends(require_admin)):
+def download_dietitian_document(
+    document_id: str,
+    identity=Depends(require_admin_or_branch_manager),
+):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute(
-                "SELECT content_type, file_data FROM dietitian_document WHERE document_id = %s",
-                (document_id,),
-            )
+            if branch_id:
+                cursor.execute(
+                    "SELECT dd.content_type, dd.file_data FROM dietitian_document dd "
+                    "JOIN dietitian d ON d.dietitian_id = dd.dietitian_id "
+                    "WHERE dd.document_id = %s AND d.branch_id = %s",
+                    (document_id, branch_id),
+                )
+            else:
+                cursor.execute(
+                    "SELECT content_type, file_data FROM dietitian_document WHERE document_id = %s",
+                    (document_id,),
+                )
             document = cursor.fetchone()
     else:
         document = dietitian_documents_db.get(document_id)
+        if document and branch_id:
+            dietitian = users_db.get(document.get("dietitian_id"))
+            if not dietitian or str(dietitian.get("branch_id")) != branch_id:
+                document = None
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     return Response(
         content=bytes(document["file_data"]),
         media_type=document["content_type"],
-        headers={"Content-Disposition": "inline; filename=verification-document"},
+        headers={"Content-Disposition": "inline; filename=verification-document",
+                 "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
     )
 
 
 @router.get("/api/v1/admin/approvals/pending", tags=["1. Auth & Admin"])
-def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
+def get_pending_dietitian_approvals(identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
@@ -1053,7 +1088,10 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
                 "bus.name AS practice_name FROM dietitian d "
                 "JOIN branch b ON b.branch_id = d.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
-                "WHERE d.status = 'PENDING' ORDER BY LOWER(d.last_name), LOWER(d.first_name)"
+                "WHERE d.status = 'PENDING' "
+                + ("AND d.branch_id = %s " if branch_id else "")
+                + "ORDER BY LOWER(d.last_name), LOWER(d.first_name)",
+                (branch_id,) if branch_id else None,
             )
             dietitians = cursor.fetchall()
             pending = []
@@ -1104,11 +1142,15 @@ def get_pending_dietitian_approvals(admin_id: str = Depends(require_admin)):
         }
         for user in users_db.values()
         if user.get("type") == "dietitian" and user.get("status") == "PENDING"
+        and (not branch_id or str(user.get("branch_id")) == branch_id)
     ]
 
 
 @router.post("/api/v1/admin/approvals", tags=["1. Auth & Admin"])
-def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)):
+def review_dietitian(data: AdminApproval, identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
+    admin_id = identity[1] if identity[0] == "admin" else None
+    staff_id = identity[1] if identity[0] == "branch_manager" else None
     notes = data.notes.strip() if data.notes else ""
     if data.status == "REJECTED" and not notes:
         raise HTTPException(
@@ -1116,6 +1158,14 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
         )
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+            if branch_id:
+                cursor.execute(
+                    "SELECT dietitian_id FROM dietitian WHERE dietitian_id = %s "
+                    "AND branch_id = %s FOR UPDATE",
+                    (data.dietitian_id, branch_id),
+                )
+                if not cursor.fetchone():
+                    raise HTTPException(status_code=404, detail="Dietitian not found")
             if data.status == "APPROVED":
                 cursor.execute(
                     "SELECT b.name, b.address FROM dietitian d "
@@ -1147,12 +1197,14 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
             if not cursor.fetchone():
                 raise HTTPException(status_code=404, detail="Dietitian not found")
             cursor.execute(
-                "INSERT INTO approval_log (admin_id, entity_type, entity_id, action, comments) "
-                "VALUES (%s, 'DIETITIAN', %s, %s, %s)",
-                (admin_id, data.dietitian_id, data.status, notes or None),
+                "INSERT INTO approval_log (admin_id, staff_id, entity_type, entity_id, action, comments) "
+                "VALUES (%s, %s, 'DIETITIAN', %s, %s, %s)",
+                (admin_id, staff_id, data.dietitian_id, data.status, notes or None),
             )
         return {"message": f"Dietitian status updated to {data.status}"}
-    if data.dietitian_id not in users_db:
+    if data.dietitian_id not in users_db or users_db[data.dietitian_id].get("type") != "dietitian":
+        raise HTTPException(status_code=404, detail="Dietitian not found")
+    if branch_id and str(users_db[data.dietitian_id].get("branch_id")) != branch_id:
         raise HTTPException(status_code=404, detail="Dietitian not found")
     if data.status == "APPROVED":
         branch = branches_db.get(users_db[data.dietitian_id].get("branch_id"))
@@ -1176,14 +1228,15 @@ def review_dietitian(data: AdminApproval, admin_id: str = Depends(require_admin)
     approval_log_db.append(
         {
             "admin_id": admin_id,
+            "staff_id": staff_id,
             "entity_type": "DIETITIAN",
             "entity_id": data.dietitian_id,
             "action": data.status,
             "comments": notes or None,
+            "action_date": datetime.now(timezone.utc).isoformat(),
         }
     )
     return {"message": f"Dietitian status updated to {data.status}"}
-
 
 @router.post("/api/v1/branches", tags=["1. Auth & Admin"])
 def create_branch(data: BranchCreate, admin_id: str = Depends(require_admin)):
@@ -1264,12 +1317,38 @@ def get_admin_dashboard(admin_id: str = Depends(require_admin)):
                 ("appointments", "appointment"),
                 ("meal_plans", "meal_plan"),
             ]:
+                # Existing deployments can have a live database that predates
+                # one of the dashboard's tables. Check first so a missing table
+                # does not abort the whole dashboard request.
+                cursor.execute("SELECT to_regclass(%s) AS table_name", (table,))
+                if cursor.fetchone()["table_name"] is None:
+                    counts[label] = 0
+                    continue
                 cursor.execute(f"SELECT COUNT(*) AS total FROM {table}")
                 counts[label] = cursor.fetchone()["total"]
-            cursor.execute("SELECT COUNT(*) AS total FROM dietitian WHERE status = 'PENDING'")
-            counts["pending_approvals"] = cursor.fetchone()["total"]
-            cursor.execute("SELECT COUNT(*) AS total FROM approval_log")
-            counts["audit_events"] = cursor.fetchone()["total"]
+
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name = %s "
+                "AND column_name = %s) AS has_status",
+                ("dietitian", "status"),
+            )
+            has_dietitian_status = cursor.fetchone()["has_status"]
+            if counts["dietitians"] and has_dietitian_status:
+                cursor.execute(
+                    "SELECT COUNT(*) AS total FROM dietitian WHERE status = 'PENDING'"
+                )
+                counts["pending_approvals"] = cursor.fetchone()["total"]
+            else:
+                counts["pending_approvals"] = 0
+
+            # ``audit_events`` is a convenience counter; older schemas can
+            # lack the approval log even though the core dashboard is valid.
+            counts["audit_events"] = 0
+            cursor.execute("SELECT to_regclass(%s) AS table_name", ("approval_log",))
+            if cursor.fetchone()["table_name"] is not None:
+                cursor.execute("SELECT COUNT(*) AS total FROM approval_log")
+                counts["audit_events"] = cursor.fetchone()["total"]
         return counts
     dietitian_count = 0
     client_count = 0
@@ -1294,22 +1373,28 @@ def get_admin_dashboard(admin_id: str = Depends(require_admin)):
 
 
 @router.get("/api/v1/admin/dietitians", tags=["1. Auth & Admin"])
-def list_admin_dietitians(admin_id: str = Depends(require_admin)):
+def list_admin_dietitians(identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute(
+            query = (
                 "SELECT d.dietitian_id, TRIM(d.first_name || ' ' || d.last_name) AS full_name, "
                 "d.email, d.registration_number AS license_number, d.status, b.name AS branch_name, "
                 "b.address AS branch_address, "
                 "bus.name AS business_name FROM dietitian d "
                 "JOIN branch b ON b.branch_id = d.branch_id "
                 "JOIN business bus ON bus.business_id = b.business_id "
-                "ORDER BY LOWER(d.last_name), LOWER(d.first_name)"
             )
+            if branch_id:
+                query += "WHERE d.branch_id = %s "
+            query += "ORDER BY LOWER(d.last_name), LOWER(d.first_name)"
+            cursor.execute(query, (branch_id,) if branch_id else None)
             return [dict(row) for row in cursor.fetchall()]
     rows = []
     for user in users_db.values():
         if user.get("type") != "dietitian":
+            continue
+        if branch_id and str(user.get("branch_id")) != branch_id:
             continue
         branch = branches_db.get(user.get("branch_id"), {})
         rows.append(
@@ -1325,6 +1410,44 @@ def list_admin_dietitians(admin_id: str = Depends(require_admin)):
             }
         )
     return sorted(rows, key=lambda item: item["full_name"].casefold())
+
+
+@router.get("/api/v1/admin/dietitians/{dietitian_id}", tags=["1. Auth & Admin"])
+def inspect_admin_dietitian(
+    dietitian_id: str,
+    identity=Depends(require_admin_or_branch_manager),
+):
+    record = next(
+        (
+            row
+            for row in list_admin_dietitians(identity)
+            if str(row["dietitian_id"]) == dietitian_id
+        ),
+        None,
+    )
+    if not record:
+        raise HTTPException(404, "Dietitian not found")
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT document_id, file_name, content_type, uploaded_at "
+                "FROM dietitian_document WHERE dietitian_id = %s ORDER BY uploaded_at DESC",
+                (dietitian_id,),
+            )
+            documents = [dict(row) for row in cursor.fetchall()]
+            cursor.execute(
+                "SELECT admin_id, staff_id, action, comments, action_date FROM approval_log "
+                "WHERE entity_type = 'DIETITIAN' AND entity_id = %s ORDER BY action_date DESC",
+                (dietitian_id,),
+            )
+            reviews = [dict(row) for row in cursor.fetchall()]
+    else:
+        documents = [{key: value for key, value in document.items() if key != "file_data"}
+                     for document in dietitian_documents_db.values()
+                     if document["dietitian_id"] == dietitian_id]
+        reviews = [dict(entry) for entry in reversed(approval_log_db)
+                   if entry.get("entity_type") == "DIETITIAN" and entry.get("entity_id") == dietitian_id]
+    return {**record, "documents": documents, "reviews": reviews}
 
 
 @router.get("/api/v1/admin/businesses", tags=["1. Auth & Admin"])
@@ -1400,10 +1523,11 @@ def list_admin_audit_logs(admin_id: str = Depends(require_admin)):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT al.approval_log_id AS log_id, al.admin_id, "
-                "TRIM(a.first_name || ' ' || a.last_name) AS admin_name, al.entity_type, "
+                "SELECT al.approval_log_id AS log_id, al.admin_id, al.staff_id, "
+                "COALESCE(TRIM(a.first_name || ' ' || a.last_name), s.full_name) AS admin_name, al.entity_type, "
                 "al.entity_id, al.action, al.comments, al.action_date "
-                "FROM approval_log al JOIN admin a ON a.admin_id = al.admin_id "
+                "FROM approval_log al LEFT JOIN admin a ON a.admin_id = al.admin_id "
+                "LEFT JOIN staff_account s ON s.staff_id = al.staff_id "
                 "ORDER BY al.action_date DESC LIMIT 500"
             )
             return [

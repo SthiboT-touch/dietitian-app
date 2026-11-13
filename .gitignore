@@ -26,3 +26,7 @@ data/
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm
+
+qa/.deps/
+
+qa/artifacts/

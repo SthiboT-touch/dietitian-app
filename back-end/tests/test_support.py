@@ -18,7 +18,8 @@ def auth(token):
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch):
     monkeypatch.setattr(config, "DATABASE_ENABLED", False)
-    monkeypatch.setattr(config, "STYTCH_ENABLED", False)
+    monkeypatch.setattr(config, "RESEND_API_KEY", "")
+    monkeypatch.setattr(config, "RESEND_FROM_EMAIL", "")
     stores = [
         state.users_db,
         state.admins_db,

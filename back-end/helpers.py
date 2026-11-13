@@ -35,8 +35,12 @@ def email_is_registered(email: str) -> bool:
 
 
 def fetch_client_profile(cursor, client_id: str) -> dict:
-    cursor.execute("SELECT client_id FROM client WHERE client_id = %s", (client_id,))
-    if not cursor.fetchone():
+    cursor.execute(
+        "SELECT client_id, maternal_care_enabled FROM client WHERE client_id = %s",
+        (client_id,),
+    )
+    client = cursor.fetchone()
+    if not client:
         raise HTTPException(status_code=404, detail="Patient record not found")
     cursor.execute(
         "SELECT a.name AS allergen, ca.severity FROM client_allergy ca "
@@ -68,6 +72,7 @@ def fetch_client_profile(cursor, client_id: str) -> dict:
     )
     progress = [dict(row) for row in cursor.fetchall()]
     profile = {
+        "maternal_care_enabled": bool(client["maternal_care_enabled"]),
         "allergies": allergies,
         "conditions": conditions,
         "metrics": metrics,
@@ -106,6 +111,7 @@ def decode_recommendation(row: dict) -> dict:
         "recommendation_id": row["recommendation_id"],
         "client_id": row["client_id"],
         "dietary_goal": details.get("dietary_goal", ""),
+        "appointment_id": details.get("appointment_id"),
         "generated_plan": details.get("generated_plan", []),
         "retrieved_references": details.get("retrieved_references", []),
         "status": row["status"],

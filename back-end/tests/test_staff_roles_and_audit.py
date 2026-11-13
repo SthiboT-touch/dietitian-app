@@ -1,5 +1,7 @@
 """Security milestone 02 tests: only in-memory stores, never external databases."""
 
+from contextlib import contextmanager
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -16,6 +18,8 @@ def isolated_staff(monkeypatch):
     monkeypatch.setattr(config, "DATABASE_ENABLED", False)
     stores = (
         state.users_db,
+        state.dietitian_documents_db,
+        state.approval_log_db,
         state.admins_db,
         state.admin_sessions_db,
         state.client_sessions_db,
@@ -221,3 +225,160 @@ def test_access_events_are_paginated_and_filterable():
         ).status_code
         == 422
     )
+
+
+def test_branch_manager_overview_is_branch_scoped_and_restricted():
+    manager = new_staff(role="branch_manager", email="manager@example.test")
+    assert create_staff(manager).status_code == 201
+    token = login_staff("manager@example.test").json()["access_token"]
+    assert create_staff(new_staff(email="frontdesk@example.test")).status_code == 201
+    state.branches_db["branch-2"] = {"branch_id": "branch-2", "name": "Second Branch"}
+    assert create_staff(new_staff(email="other@example.test", branch_id="branch-2")).status_code == 201
+    result = api.get("/api/v1/branch-manager/overview", headers=bearer(token))
+    assert result.status_code == 200, result.text
+    assert result.json() == {
+        "branch_id": "branch-1", "branch_name": "Main Branch",
+        "active_staff": 2, "reception_staff": 1, "branch_managers": 1,
+        "dietitians": 0,
+    }
+    assert api.get("/api/v1/branch-manager/overview").status_code == 401
+    assert api.get("/api/v1/branch-manager/overview", headers=bearer("admin-token")).status_code == 403
+    assert api.get("/api/v1/admin/staff", headers=bearer(token)).status_code == 403
+
+
+def test_branch_manager_can_inspect_only_own_branch_dietitians():
+    assert create_staff(new_staff(role="branch_manager", email="manager@example.test")).status_code == 201
+    token = login_staff("manager@example.test").json()["access_token"]
+    state.branches_db["branch-2"] = {"branch_id": "branch-2", "name": "Other Branch"}
+    state.users_db.update(
+        {
+            "diet-1": {
+                "id": "diet-1", "type": "dietitian", "full_name": "Branch Dietitian",
+                "first_name": "Branch", "last_name": "Dietitian", "email": "branch@example.test",
+                "license_number": "DT0012345", "status": "PENDING", "branch_id": "branch-1",
+            },
+            "diet-2": {
+                "id": "diet-2", "type": "dietitian", "full_name": "Other Dietitian",
+                "first_name": "Other", "last_name": "Dietitian", "email": "other@example.test",
+                "license_number": "DT0012346", "status": "PENDING", "branch_id": "branch-2",
+            },
+        }
+    )
+    state.dietitian_documents_db.update(
+        {
+            "branch-card": {
+                "document_id": "branch-card", "dietitian_id": "diet-1",
+                "file_name": "card.pdf", "content_type": "application/pdf",
+                "file_data": b"%PDF-1.4 branch",
+            },
+            "other-card": {
+                "document_id": "other-card", "dietitian_id": "diet-2",
+                "file_name": "other.pdf", "content_type": "application/pdf",
+                "file_data": b"%PDF-1.4 other",
+            },
+        }
+    )
+
+    headers = bearer(token)
+    listed = api.get("/api/v1/admin/dietitians", headers=headers)
+    assert listed.status_code == 200
+    assert [item["dietitian_id"] for item in listed.json()] == ["diet-1"]
+    assert api.get("/api/v1/admin/dietitians/diet-1", headers=headers).status_code == 200
+    assert api.get("/api/v1/admin/dietitians/diet-2", headers=headers).status_code == 404
+    assert api.get(
+        "/api/v1/admin/dietitian-documents/branch-card", headers=headers
+    ).status_code == 200
+    assert api.get(
+        "/api/v1/admin/dietitian-documents/other-card", headers=headers
+    ).status_code == 404
+    pending = api.get("/api/v1/admin/approvals/pending", headers=headers)
+    assert pending.status_code == 200
+    assert [item["dietitian_id"] for item in pending.json()] == ["diet-1"]
+    assert api.get("/api/v1/admin/branches", headers=headers).status_code == 401
+    assert api.get("/api/v1/branch-manager/overview", headers=headers).json()["dietitians"] == 1
+
+    for decision in ("APPROVED", "REJECTED"):
+        blocked = api.post("/api/v1/admin/approvals", headers=headers, json={
+            "dietitian_id": "diet-2", "status": decision, "notes": "Reviewed",
+        })
+        assert blocked.status_code == 404
+    assert state.users_db["diet-2"]["status"] == "PENDING"
+    assert not state.approval_log_db
+    # Existing approval safeguards apply to managers too.
+    assert api.post("/api/v1/admin/approvals", headers=headers, json={
+        "dietitian_id": "diet-1", "status": "REJECTED",
+    }).status_code == 422
+    assert api.post("/api/v1/admin/approvals", headers=headers, json={
+        "dietitian_id": "diet-1", "status": "APPROVED",
+    }).status_code == 409
+    state.branches_db["branch-1"]["address"] = "123 Main Street"
+    for decision in ("APPROVED", "REJECTED"):
+        result = api.post("/api/v1/admin/approvals", headers=headers, json={
+            "dietitian_id": "diet-1", "status": decision, "notes": "Reviewed evidence",
+        })
+        assert result.status_code == 200, result.text
+        assert state.users_db["diet-1"]["status"] == decision
+        assert state.approval_log_db[-1]["staff_id"]
+        assert state.approval_log_db[-1]["admin_id"] is None
+
+
+@pytest.mark.parametrize("same_branch", [True, False])
+def test_postgres_manager_review_checks_branch_before_writing(monkeypatch, same_branch):
+    from routers import auth_admin
+    from schemas import AdminApproval
+    from fastapi import HTTPException
+
+    statements = []
+
+    class Cursor:
+        def execute(self, query, params):
+            statements.append((query, params))
+
+        def fetchone(self):
+            return {"dietitian_id": "diet-1"} if same_branch else None
+
+    @contextmanager
+    def cursor():
+        yield Cursor()
+
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+    monkeypatch.setattr(auth_admin, "branch_id_for_manager", lambda _: "branch-1")
+    monkeypatch.setattr(auth_admin.database, "cursor", cursor)
+    data = AdminApproval(dietitian_id="diet-1", status="REJECTED", notes="Evidence missing")
+    if same_branch:
+        auth_admin.review_dietitian(data, ("branch_manager", "manager-1"))
+        assert statements[-1][1] == (None, "manager-1", "diet-1", "REJECTED", "Evidence missing")
+    else:
+        with pytest.raises(HTTPException) as error:
+            auth_admin.review_dietitian(data, ("branch_manager", "manager-1"))
+        assert error.value.status_code == 404
+        assert len(statements) == 1
+    assert "AND branch_id = %s FOR UPDATE" in statements[0][0]
+    assert statements[0][1] == ("diet-1", "branch-1")
+
+
+def test_postgres_branch_manager_dietitian_query_is_branch_scoped(monkeypatch):
+    from routers import auth_admin
+
+    statements = []
+
+    class Cursor:
+        def execute(self, query, params):
+            statements.append((query, params))
+
+        def fetchone(self):
+            return {"branch_id": "branch-1"}
+
+        def fetchall(self):
+            return []
+
+    @contextmanager
+    def cursor():
+        yield Cursor()
+
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+    monkeypatch.setattr(auth_admin.database, "cursor", cursor)
+
+    assert auth_admin.list_admin_dietitians(("branch_manager", "manager-1")) == []
+    assert "WHERE d.branch_id = %s" in statements[1][0]
+    assert statements[1][1] == ("branch-1",)
