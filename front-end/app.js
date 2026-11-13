@@ -1647,6 +1647,7 @@ async function renderMyProfile() {
 
           
        </section>
+     ${isClient ? '<div data-medical-history></div>' : ""}
     ${profilePhotoSectionMarkup()}
     ${user.type === "dietitian" ? `
     <div class="section-heading">
@@ -1670,6 +1671,7 @@ async function renderMyProfile() {
     ` : ""}`;
     if (approval) bindApprovalResubmission();
     bindProfilePhotoControls();
+    if (isClient) await mountMedicalHistoryForm(workspaceContent.querySelector("[data-medical-history]"), user.id);
     if (user.type === "dietitian") bindGoButtons();
 }
 
