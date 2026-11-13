@@ -1,50 +1,10 @@
 /* Medical history and clinician care workflow, using existing authenticated request helpers. */
-const medicalHistoryFields = {
-    medications: "Medications and supplements",
-    surgeries: "Surgeries and hospital admissions",
-    family_history: "Family medical history",
-    dietary_history: "Dietary history and preferences",
-    lifestyle: "Lifestyle and activity",
-    concerns: "Current concerns and consultation goals",
-};
-
 document.addEventListener("click", event => {
     const button = event.target.closest("[data-care-record]");
     if (!button) return;
     renderClientRecord(button.dataset.careRecord);
     loadClientProfile(button.dataset.careRecord);
 });
-
-async function mountMedicalHistoryForm(target, clientId) {
-    const anchor = target.firstElementChild;
-    const base = `/api/v1/clients/${encodeURIComponent(clientId)}/care`;
-    const events = await request(base);
-    const history = events.filter(event => event.kind === "HISTORY").at(-1);
-    const panel = document.createElement("section");
-    panel.className = "content-panel care-workflow";
-    panel.innerHTML = `${clinician ? `<h2>Medical history and care</h2>` : ""}<div data-care-message role="status" aria-live="polite"></div>
-    ${clinician ? `<p class="appointment-note">${history ? `Last history update: ${escapeHtml(new Date(history.created_at).toLocaleString())}` : "No detailed medical history submitted yet."}</p>` : ""}
-      <form data-history class="form-grid">${Object.entries(medicalHistoryFields).map(([key, label]) => `<div class="form-field"><label for="care-${key}">${label}</label><textarea class="text-input" id="care-${key}" name="${key}" maxlength="4000">${escapeHtml(history?.payload[key] || "")}</textarea></div>`).join("")}<div class="form-actions"><button class="button button-primary">Save medical history</button></div></form>`;
-    if (!target.isConnected || target.firstElementChild !== anchor) return;
-    target.append(panel);
-    panel.querySelector("[data-history]").addEventListener("submit", async event => {
-        event.preventDefault();
-        const button = event.currentTarget.querySelector("button");
-        button.disabled = true;
-        try {
-            await request(`${base}/history`, {
-                method: "POST",
-                body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))),
-            });
-            if (!panel.isConnected) return;
-            await mountMedicalHistoryForm(target, clientId);
-            panel.remove();
-        } catch (error) {
-            panel.querySelector("[data-care-message]").textContent = error.message;
-            button.disabled = false;
-        }
-    });
-}
 
 async function bindConsultationChoice(form, preferred = "") {
     const appointments = await request("/api/v1/appointments");
@@ -75,12 +35,13 @@ async function mountCarePanel(target, clientId, clinician) {
     ]);
     const consultations = appointments.filter(a => a.status === "COMPLETED");
     const history = events.filter(e => e.kind === "HISTORY").at(-1);
+    const labels = {medications: "Medications and supplements", surgeries: "Surgeries and hospital admissions", family_history: "Family medical history", dietary_history: "Dietary history and preferences", lifestyle: "Lifestyle and activity", concerns: "Current concerns and consultation goals"};
     const panel = document.createElement("section");
     panel.className = "content-panel care-workflow";
     panel.innerHTML = `<h2>Medical history and care</h2><div data-care-message role="status" aria-live="polite"></div>
       ${clinician ? `<section><h3>Consultation</h3><p>Complete the consultation before setting goals, assigning plans or sharing recommendations.</p>${appointments.filter(a => ["CONFIRMED", "SCHEDULED"].includes(a.status)).map(a => `<p>${escapeHtml(new Date(a.appointment_date).toLocaleString())} <button type="button" class="button quiet-button" data-complete-consultation="${escapeHtml(a.appointment_id)}" ${new Date(a.appointment_date).getTime() > Date.now() ? "disabled" : ""}>Mark consultation completed</button></p>`).join("")}<div class="form-field"><label>Care relates to completed appointment<select class="text-input" data-care-appointment required><option value="">Choose a completed consultation</option>${consultations.map(a => `<option value="${escapeHtml(a.appointment_id)}">${escapeHtml(new Date(a.appointment_date).toLocaleString())} · ${escapeHtml(a.appointment_id)}</option>`).join("")}</select></label></div>${consultations.length ? "" : '<p class="notice">No completed consultation yet. Care creation is unavailable until the appointment is completed.</p>'}</section>` : ""}
       <p class="appointment-note">${history ? `Last history update: ${escapeHtml(new Date(history.created_at).toLocaleString())}` : "No detailed medical history submitted yet."}</p>
-    ${clinician ? `<dl class="care-history">${Object.entries(medicalHistoryFields).map(([key, label]) => `<div><dt>${label}</dt><dd>${escapeHtml(history?.payload[key] || "Not provided")}</dd></div>`).join("")}</dl>` : ""}
+      ${clinician ? `<dl class="care-history">${Object.entries(labels).map(([key, label]) => `<div><dt>${label}</dt><dd>${escapeHtml(history?.payload[key] || "Not provided")}</dd></div>`).join("")}</dl>` : `<form data-history class="form-grid">${Object.entries(labels).map(([key, label]) => `<div class="form-field"><label for="care-${key}">${label}</label><textarea class="text-input" id="care-${key}" name="${key}" maxlength="4000">${escapeHtml(history?.payload[key] || "")}</textarea></div>`).join("")}<div class="form-actions"><button class="button button-primary">Save medical history</button></div></form>`}
       <h3>Progress review</h3><p>Each decision applies to the measurements reviewed. Updated measurements need a new review.</p>
       <div class="care-progress">${progress.length ? progress.map(entry => {
           const review = events.filter(e => e.kind === "PROGRESS_REVIEW" && e.payload.log_date === entry.log_date).at(-1);
@@ -128,6 +89,7 @@ async function mountCarePanel(target, clientId, clinician) {
             button.disabled = false;
         }
     }));
+    bind("[data-history]", `${base}/history`);
     bind("[data-progress-review]", `${base}/progress-reviews`);
     bind("[data-recommendation]", `${base}/recommendations`);
     bind("[data-care-goal]", "/api/v1/goals", values => ({...values, client_id: clientId, target_value: Number(values.target_value)}));
