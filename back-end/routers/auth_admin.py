@@ -1307,7 +1307,101 @@ def create_branch(data: BranchCreate, admin_id: str = Depends(require_admin)):
 
 
 @router.get("/api/v1/admin/dashboard", tags=["1. Auth & Admin"])
-def get_admin_dashboard(admin_id: str = Depends(require_admin)):
+def get_admin_dashboard(identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
+    if branch_id:
+        if config.DATABASE_ENABLED:
+            with database.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(DISTINCT business_id) AS businesses FROM branch "
+                    "WHERE branch_id = %s",
+                    (branch_id,),
+                )
+                businesses = cursor.fetchone()["businesses"]
+                cursor.execute(
+                    "SELECT COUNT(*) AS dietitians, "
+                    "COUNT(*) FILTER (WHERE status = 'PENDING') AS pending_approvals "
+                    "FROM dietitian WHERE branch_id = %s",
+                    (branch_id,),
+                )
+                dietitians = cursor.fetchone()
+                cursor.execute(
+                    "SELECT COUNT(*) AS clients FROM client c "
+                    "JOIN dietitian d ON d.dietitian_id = c.dietitian_id "
+                    "WHERE d.branch_id = %s",
+                    (branch_id,),
+                )
+                clients = cursor.fetchone()["clients"]
+                cursor.execute(
+                    "SELECT COUNT(*) AS appointments FROM appointment a "
+                    "JOIN dietitian d ON d.dietitian_id = a.dietitian_id "
+                    "WHERE d.branch_id = %s",
+                    (branch_id,),
+                )
+                appointments = cursor.fetchone()["appointments"]
+                cursor.execute(
+                    "SELECT COUNT(*) AS meal_plans FROM meal_plan mp "
+                    "JOIN dietitian d ON d.dietitian_id = mp.dietitian_id "
+                    "WHERE d.branch_id = %s",
+                    (branch_id,),
+                )
+                meal_plans = cursor.fetchone()["meal_plans"]
+                cursor.execute(
+                    "SELECT COUNT(*) AS audit_events FROM approval_log al "
+                    "JOIN dietitian d ON d.dietitian_id = al.entity_id "
+                    "WHERE al.entity_type = 'DIETITIAN' AND d.branch_id = %s",
+                    (branch_id,),
+                )
+                audit_events = cursor.fetchone()["audit_events"]
+            return {
+                "businesses": businesses,
+                "branches": 1,
+                "dietitians": dietitians["dietitians"],
+                "clients": clients,
+                "appointments": appointments,
+                "meal_plans": meal_plans,
+                "pending_approvals": dietitians["pending_approvals"],
+                "audit_events": audit_events,
+            }
+
+        branch = branches_db[branch_id]
+        branch_dietitians = {
+            str(user["id"])
+            for user in users_db.values()
+            if user.get("type") == "dietitian" and str(user.get("branch_id")) == branch_id
+        }
+        client_ids = {
+            str(user["id"])
+            for user in users_db.values()
+            if user.get("type") == "client"
+            and str(user.get("dietitian_id")) in branch_dietitians
+        }
+        return {
+            "businesses": int(bool(branch.get("business_id"))),
+            "branches": 1,
+            "dietitians": len(branch_dietitians),
+            "clients": len(client_ids),
+            "appointments": sum(
+                str(item.get("dietitian_id")) in branch_dietitians
+                for item in appointments_db.values()
+            ),
+            "meal_plans": sum(
+                str(item.get("dietitian_id")) in branch_dietitians
+                for item in meal_plans_db.values()
+            ),
+            "pending_approvals": sum(
+                user.get("status") == "PENDING"
+                for user in users_db.values()
+                if user.get("type") == "dietitian"
+                and str(user.get("branch_id")) == branch_id
+            ),
+            "audit_events": sum(
+                entry.get("entity_type") == "DIETITIAN"
+                and str(entry.get("entity_id")) in branch_dietitians
+                for entry in approval_log_db
+            ),
+        }
+
     if config.DATABASE_ENABLED:
         counts = {}
         with database.cursor() as cursor:
@@ -1568,15 +1662,24 @@ def list_admin_branches(admin_id: str = Depends(require_admin)):
 
 
 @router.get("/api/v1/admin/clients", tags=["1. Auth & Admin"])
-def list_admin_clients(admin_id: str = Depends(require_admin)):
+def list_admin_clients(identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute(
+            query = (
                 "SELECT c.client_id, c.name, c.email, c.status, c.date_of_birth, "
                 "TRIM(d.first_name || ' ' || d.last_name) AS dietitian_name "
-                "FROM client c LEFT JOIN dietitian d ON d.dietitian_id = c.dietitian_id "
-                "ORDER BY LOWER(c.name)"
+                "FROM client c "
+                + (
+                    "JOIN dietitian d ON d.dietitian_id = c.dietitian_id "
+                    if branch_id
+                    else "LEFT JOIN dietitian d ON d.dietitian_id = c.dietitian_id "
+                )
             )
+            if branch_id:
+                query += "WHERE d.branch_id = %s "
+            query += "ORDER BY LOWER(c.name)"
+            cursor.execute(query, (branch_id,) if branch_id else None)
             return [
                 {
                     **dict(row),
@@ -1586,7 +1689,7 @@ def list_admin_clients(admin_id: str = Depends(require_admin)):
                 }
                 for row in cursor.fetchall()
             ]
-    return [
+    clients = [
         {
             "client_id": user["id"],
             "name": user["full_name"],
@@ -1600,25 +1703,59 @@ def list_admin_clients(admin_id: str = Depends(require_admin)):
         for user in sorted(users_db.values(), key=lambda item: item.get("full_name", "").casefold())
         if user.get("type") == "client"
     ]
+    if branch_id:
+        branch_dietitian_ids = {
+            str(user["id"])
+            for user in users_db.values()
+            if user.get("type") == "dietitian"
+            and str(user.get("branch_id")) == branch_id
+        }
+        clients = [
+            client
+            for client in clients
+            if str(users_db.get(client["client_id"], {}).get("dietitian_id"))
+            in branch_dietitian_ids
+        ]
+    return clients
 
 
 @router.get("/api/v1/admin/audit-logs", tags=["1. Auth & Admin"])
-def list_admin_audit_logs(admin_id: str = Depends(require_admin)):
+def list_admin_audit_logs(identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute(
+            query = (
                 "SELECT al.approval_log_id AS log_id, al.admin_id, al.staff_id, "
                 "COALESCE(TRIM(a.first_name || ' ' || a.last_name), s.full_name) AS admin_name, al.entity_type, "
                 "al.entity_id, al.action, al.comments, al.action_date "
                 "FROM approval_log al LEFT JOIN admin a ON a.admin_id = al.admin_id "
                 "LEFT JOIN staff_account s ON s.staff_id = al.staff_id "
-                "ORDER BY al.action_date DESC LIMIT 500"
             )
+            if branch_id:
+                query += (
+                    "JOIN dietitian d ON d.dietitian_id = al.entity_id "
+                    "WHERE al.entity_type = 'DIETITIAN' AND d.branch_id = %s "
+                )
+            query += "ORDER BY al.action_date DESC LIMIT 500"
+            cursor.execute(query, (branch_id,) if branch_id else None)
             return [
                 {**dict(row), "action_date": row["action_date"].isoformat()}
                 for row in cursor.fetchall()
             ]
-    return [
+    logs = [
         {"log_id": f"audit-{index + 1}", **entry, "action_date": entry.get("action_date", "")}
         for index, entry in enumerate(reversed(approval_log_db))
     ]
+    if branch_id:
+        branch_dietitians = {
+            str(user["id"])
+            for user in users_db.values()
+            if user.get("type") == "dietitian" and str(user.get("branch_id")) == branch_id
+        }
+        logs = [
+            entry
+            for entry in logs
+            if entry.get("entity_type") == "DIETITIAN"
+            and str(entry.get("entity_id")) in branch_dietitians
+        ]
+    return logs

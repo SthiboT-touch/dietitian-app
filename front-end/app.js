@@ -342,6 +342,11 @@ function showWorkspace(user, initialView = "overview") {
     document.querySelectorAll("[data-manager-approval-only]").forEach((item) => {
         item.hidden = !isAdmin && user.type !== "branch_manager";
     });
+    document.querySelectorAll(
+        "[data-manager-patients-only], [data-manager-reports-only], [data-manager-audit-only], [data-manager-staff-only]",
+    ).forEach((item) => {
+        item.hidden = !isAdmin && user.type !== "branch_manager";
+    });
     // Keep the Dietitian sidebar limited to the six requested menu items.
 if (isDietitian) {
     const nav = document.querySelector(".side-nav");
@@ -3920,6 +3925,10 @@ async function renderStaffDashboard() {
           <div class="quick-grid">
             <button class="quick-link" data-go="admin-dietitians" type="button"><strong>Manage branch dietitians</strong><span aria-hidden="true">&#8599;</span></button>
             <button class="quick-link" data-go="admin-approvals" type="button"><strong>Review branch dietitian approvals</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="admin-clients" type="button"><strong>View branch patients</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="admin-reports" type="button"><strong>View branch reports</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="admin-audit-logs" type="button"><strong>View branch approval history</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="admin-staff" type="button"><strong>Manage reception staff</strong><span aria-hidden="true">&#8599;</span></button>
             <button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong><span aria-hidden="true">&#8599;</span></button>
           </div>
         </section>`;
@@ -3973,11 +3982,26 @@ async function renderAccessEvents() {
 }
 
 async function renderAdminStaff() {
-    const [staff, branches] = await Promise.all([
-        request("/api/v1/admin/staff"),
-        request("/api/v1/admin/branches"),
-    ]);
-    const staffRoles = Object.entries(staffRoleNames);
+    const isBranchManager = currentUser.type === "branch_manager";
+    let staff;
+    let branches;
+    if (isBranchManager) {
+        const [profile, overview, branchStaff] = await Promise.all([
+            request("/api/v1/staff/me"),
+            request("/api/v1/branch-manager/overview"),
+            request("/api/v1/admin/staff"),
+        ]);
+        staff = branchStaff;
+        branches = [{ branch_id: profile.branch_id, name: overview.branch_name }];
+    } else {
+        [staff, branches] = await Promise.all([
+            request("/api/v1/admin/staff"),
+            request("/api/v1/admin/branches"),
+        ]);
+    }
+    const staffRoles = isBranchManager
+        ? [["reception", staffRoleNames.reception]]
+        : Object.entries(staffRoleNames);
     const roleChoices = (selected) =>
         staffRoles
             .map(
@@ -3986,7 +4010,7 @@ async function renderAdminStaff() {
             )
             .join("");
     const branchChoices = (selected) =>
-        `<option value="">Organization-wide / not assigned</option>` +
+        (isBranchManager ? "" : '<option value="">Organization-wide / not assigned</option>') +
         branches
             .map(
                 (branch) =>
@@ -3994,15 +4018,15 @@ async function renderAdminStaff() {
             )
             .join("");
     workspaceContent.innerHTML = `
-    ${pageHeading("ADMINISTRATION", "Staff & roles.", "Provision reception, branch management, compliance, executive, and content accounts.")}
+    ${pageHeading(isBranchManager ? "BRANCH MANAGEMENT" : "ADMINISTRATION", isBranchManager ? "Reception staff." : "Staff & roles.", isBranchManager ? "Create and manage reception accounts for your assigned branch. Branch manager accounts are visible but cannot be changed here." : "Provision reception, branch management, compliance, executive, and content accounts.")}
     <div data-message class="workspace-message" role="status" aria-live="polite" hidden></div>
     <section class="content-panel"><h2 class="compact-heading">Add a staff account</h2>
       <p class="notice">The account password must be shared securely. New roles do not automatically have access to medical records or administrator settings.</p>
       <form id="staffCreateForm" class="form-grid">
         <div class="form-field"><label for="staffFullName">Full name</label><input class="text-input" id="staffFullName" name="full_name" maxlength="200" required></div>
         <div class="form-field"><label for="staffEmail">Email</label><input class="text-input" id="staffEmail" name="email" type="email" maxlength="150" required></div>
-        <div class="form-field"><label for="staffRole">Role</label><select class="text-input" id="staffRole" name="role" required>${roleChoices("reception")}</select></div>
-        <div class="form-field"><label for="staffBranch">Assigned branch</label><select class="text-input" id="staffBranch" name="branch_id">${branchChoices(null)}</select></div>
+        <div class="form-field"><label for="staffRole">Role</label><select class="text-input" id="staffRole" name="role" required ${isBranchManager ? "disabled" : ""}>${roleChoices("reception")}</select>${isBranchManager ? '<input type="hidden" name="role" value="reception">' : ""}</div>
+        <div class="form-field"><label for="staffBranch">Assigned branch</label>${isBranchManager ? `<input class="text-input" id="staffBranch" value="${escapeHtml(branches[0].name)}" disabled><input type="hidden" name="branch_id" value="${escapeHtml(branches[0].branch_id)}">` : `<select class="text-input" id="staffBranch" name="branch_id">${branchChoices(null)}</select>`}</div>
         <div class="form-field full-width"><label for="staffPassword">Initial password (at least 12 characters)</label><input class="text-input" id="staffPassword" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></div>
         <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Create staff account</button></div>
       </form>
@@ -4016,11 +4040,11 @@ async function renderAdminStaff() {
         .map(
             (user) => `<tr data-staff-row="${escapeHtml(user.staff_id)}">
       <td>${escapeHtml(user.full_name)}</td><td>${escapeHtml(user.email)}</td>
-      <td><select class="text-input" data-staff-role aria-label="Role for ${escapeHtml(user.full_name)}">${roleChoices(user.role)}</select></td>
-      <td><select class="text-input" data-staff-branch aria-label="Branch for ${escapeHtml(user.full_name)}">${branchChoices(user.branch_id)}</select></td>
+      <td>${isBranchManager && !user.can_manage ? escapeHtml(staffRoleNames[user.role] || user.role) : `<select class="text-input" data-staff-role aria-label="Role for ${escapeHtml(user.full_name)}" ${isBranchManager ? "disabled" : ""}>${roleChoices(user.role)}</select>`}</td>
+      <td>${isBranchManager ? escapeHtml(branches[0].name) : `<select class="text-input" data-staff-branch aria-label="Branch for ${escapeHtml(user.full_name)}">${branchChoices(user.branch_id)}</select>`}</td>
       <td>${user.is_active ? "Active" : "Inactive"}</td>
-      <td><button class="button" type="button" data-staff-save>Save</button>
-      <button class="button" type="button" data-staff-toggle="${user.is_active ? "off" : "on"}">${user.is_active ? "Disable" : "Enable"}</button></td>
+      <td>${isBranchManager && !user.can_manage ? '<span class="document-hint">Read only</span>' : `<button class="button" type="button" data-staff-save>Save</button>
+      <button class="button" type="button" data-staff-toggle="${user.is_active ? "off" : "on"}">${user.is_active ? "Disable" : "Enable"}</button>`}</td>
     </tr>`,
         )
         .join("")}</tbody></table></div>`
@@ -4050,9 +4074,11 @@ async function renderAdminStaff() {
                     !window.confirm("Disable this staff account and revoke its current session?")
                 )
                     return;
+                const roleSelect = row.querySelector("[data-staff-role]");
+                const branchSelect = row.querySelector("[data-staff-branch]");
                 const payload = {
-                    role: row.querySelector("[data-staff-role]").value,
-                    branch_id: row.querySelector("[data-staff-branch]").value || null,
+                    role: roleSelect ? roleSelect.value : "reception",
+                    branch_id: branchSelect ? branchSelect.value || null : branches[0].branch_id,
                     is_active: button.hasAttribute("data-staff-toggle")
                         ? !turningOff
                         : !row.querySelector('[data-staff-toggle="on"]'),
@@ -4233,8 +4259,9 @@ async function renderAdminBranches() {
 
 async function renderAdminClients() {
     const clients = await request("/api/v1/admin/clients");
+    const isBranchManager = currentUser.type === "branch_manager";
     workspaceContent.innerHTML = `
-    ${pageHeading("ADMINISTRATION", "Patients.", "Review patient account records and care-team assignments.")}
+    ${pageHeading(isBranchManager ? "BRANCH MANAGEMENT" : "ADMINISTRATION", isBranchManager ? "Branch patients." : "Patients.", isBranchManager ? "Patient account directory for patients assigned to dietitians in your branch. This view does not include clinical records." : "Review patient account records and care-team assignments.")}
     ${renderAdminTable(
         ["Name", "Patient ID", "Email", "Dietitian", "Status"],
         clients.map((item) => [
@@ -4250,8 +4277,9 @@ async function renderAdminClients() {
 
 async function renderAdminReports() {
     const summary = await request("/api/v1/admin/dashboard");
+    const isBranchManager = currentUser.type === "branch_manager";
     workspaceContent.innerHTML = `
-    ${pageHeading("REPORTS", "System reports.", "Current organization and care activity totals.")}
+    ${pageHeading("REPORTS", isBranchManager ? "Branch reports." : "System reports.", isBranchManager ? "Care activity for your assigned branch only." : "Current organization and care activity totals.")}
     ${renderAdminTable(
         ["Measure", "Total"],
         [
@@ -4270,8 +4298,9 @@ async function renderAdminReports() {
 
 async function renderAdminAuditLogs() {
     const logs = await request("/api/v1/admin/audit-logs");
+    const isBranchManager = currentUser.type === "branch_manager";
     workspaceContent.innerHTML = `
-    ${pageHeading("AUDIT LOGS", "Administrative activity.", "Review approval decisions and their recorded notes.")}
+    ${pageHeading(isBranchManager ? "BRANCH HISTORY" : "AUDIT LOGS", isBranchManager ? "Branch approval history." : "Administrative activity.", isBranchManager ? "Dietitian approval and status decisions recorded for your assigned branch." : "Review approval decisions and their recorded notes.")}
     ${renderAdminTable(
         ["Date", "Administrator", "Entity", "Entity ID", "Action", "Notes"],
         logs.map((item) => [

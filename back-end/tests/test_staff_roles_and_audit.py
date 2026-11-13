@@ -243,7 +243,157 @@ def test_branch_manager_overview_is_branch_scoped_and_restricted():
     }
     assert api.get("/api/v1/branch-manager/overview").status_code == 401
     assert api.get("/api/v1/branch-manager/overview", headers=bearer("admin-token")).status_code == 403
-    assert api.get("/api/v1/admin/staff", headers=bearer(token)).status_code == 403
+    assert api.get("/api/v1/admin/staff", headers=bearer(token)).status_code == 200
+
+
+def test_branch_manager_can_manage_reception_accounts_only_in_assigned_branch():
+    manager = create_staff(
+        new_staff(role="branch_manager", email="manager@example.test")
+    ).json()
+    token = login_staff("manager@example.test").json()["access_token"]
+    own_staff = create_staff(new_staff(email="own-reception@example.test")).json()
+    state.branches_db["branch-2"] = {"branch_id": "branch-2", "name": "Second Branch"}
+    other_staff = create_staff(
+        new_staff(email="other-reception@example.test", branch_id="branch-2")
+    ).json()
+    headers = bearer(token)
+
+    listed = api.get("/api/v1/admin/staff", headers=headers)
+    assert listed.status_code == 200
+    assert {item["staff_id"] for item in listed.json()} == {
+        manager["staff_id"], own_staff["staff_id"],
+    }
+    assert next(item for item in listed.json() if item["staff_id"] == own_staff["staff_id"])["can_manage"]
+    assert not next(item for item in listed.json() if item["staff_id"] == manager["staff_id"])["can_manage"]
+
+    created = api.post(
+        "/api/v1/admin/staff",
+        headers=headers,
+        json={
+            "full_name": "New Reception",
+            "email": "new-reception@example.test",
+            "password": "local-staff-password-456",
+            "role": "reception",
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["branch_id"] == "branch-1"
+    assert api.post(
+        "/api/v1/admin/staff",
+        headers=headers,
+        json={
+            "full_name": "New Manager",
+            "email": "new-manager@example.test",
+            "password": "local-staff-password-456",
+            "role": "branch_manager",
+            "branch_id": "branch-1",
+        },
+    ).status_code == 403
+    assert api.put(
+        f"/api/v1/admin/staff/{other_staff['staff_id']}",
+        headers=headers,
+        json={"role": "reception", "branch_id": "branch-1", "is_active": False},
+    ).status_code == 404
+    assert api.put(
+        f"/api/v1/admin/staff/{manager['staff_id']}",
+        headers=headers,
+        json={"role": "reception", "branch_id": "branch-1", "is_active": False},
+    ).status_code == 403
+    assert api.put(
+        f"/api/v1/admin/staff/{own_staff['staff_id']}",
+        headers=headers,
+        json={"role": "branch_manager", "branch_id": "branch-1", "is_active": True},
+    ).status_code == 403
+
+    reception_token = login_staff("own-reception@example.test").json()["access_token"]
+    updated = api.put(
+        f"/api/v1/admin/staff/{own_staff['staff_id']}",
+        headers=headers,
+        json={"role": "reception", "branch_id": "branch-1", "is_active": False},
+    )
+    assert updated.status_code == 200, updated.text
+    assert api.get("/api/v1/staff/me", headers=bearer(reception_token)).status_code == 401
+
+
+def test_branch_manager_patients_reports_and_audit_are_branch_scoped():
+    assert create_staff(new_staff(role="branch_manager", email="manager@example.test")).status_code == 201
+    token = login_staff("manager@example.test").json()["access_token"]
+    state.branches_db["branch-1"]["business_id"] = "business-1"
+    state.branches_db["branch-2"] = {
+        "branch_id": "branch-2", "name": "Second Branch", "business_id": "business-2",
+    }
+    state.users_db.update(
+        {
+            "diet-1": {
+                "id": "diet-1", "type": "dietitian", "full_name": "Branch Dietitian",
+                "status": "PENDING", "branch_id": "branch-1",
+            },
+            "diet-2": {
+                "id": "diet-2", "type": "dietitian", "full_name": "Other Dietitian",
+                "status": "APPROVED", "branch_id": "branch-2",
+            },
+            "patient-1": {
+                "id": "patient-1", "type": "client", "full_name": "Branch Patient",
+                "email": "branch-patient@example.test", "dietitian_id": "diet-1",
+            },
+            "patient-2": {
+                "id": "patient-2", "type": "client", "full_name": "Other Patient",
+                "email": "other-patient@example.test", "dietitian_id": "diet-2",
+            },
+            "unassigned": {
+                "id": "unassigned", "type": "client", "full_name": "Unassigned Patient",
+                "email": "unassigned@example.test", "dietitian_id": None,
+            },
+        }
+    )
+    state.users_db["client-1"].update(
+        full_name="Patient Assigned Elsewhere",
+        dietitian_id="diet-2",
+    )
+    state.appointments_db.update(
+        {
+            "appointment-1": {"dietitian_id": "diet-1"},
+            "appointment-2": {"dietitian_id": "diet-2"},
+        }
+    )
+    state.meal_plans_db.update(
+        {
+            "plan-1": {"dietitian_id": "diet-1"},
+            "plan-2": {"dietitian_id": "diet-2"},
+        }
+    )
+    state.approval_log_db.extend(
+        [
+            {"entity_type": "DIETITIAN", "entity_id": "diet-1", "action": "APPROVED"},
+            {"entity_type": "DIETITIAN", "entity_id": "diet-2", "action": "SUSPENDED"},
+            {"entity_type": "BRANCH", "entity_id": "branch-1", "action": "UPDATED"},
+        ]
+    )
+    headers = bearer(token)
+
+    patients = api.get("/api/v1/admin/clients", headers=headers)
+    assert patients.status_code == 200
+    assert [patient["client_id"] for patient in patients.json()] == ["patient-1"]
+    assert api.get("/api/v1/admin/clients").status_code == 401
+    assert api.get("/api/v1/cms/clients/patient-1/record", headers=headers).status_code == 401
+
+    report = api.get("/api/v1/admin/dashboard", headers=headers)
+    assert report.status_code == 200, report.text
+    assert report.json() == {
+        "businesses": 1,
+        "branches": 1,
+        "dietitians": 1,
+        "clients": 1,
+        "appointments": 1,
+        "meal_plans": 1,
+        "pending_approvals": 1,
+        "audit_events": 1,
+    }
+
+    audit = api.get("/api/v1/admin/audit-logs", headers=headers)
+    assert audit.status_code == 200
+    assert [item["entity_id"] for item in audit.json()] == ["diet-1"]
+    assert api.get("/api/v1/admin/branches", headers=headers).status_code == 401
 
 
 def test_branch_manager_can_inspect_only_own_branch_dietitians():
@@ -374,6 +524,56 @@ def test_branch_manager_can_suspend_and_restore_only_own_approved_dietitians():
     assert state.approval_log_db[-2]["staff_id"]
     assert state.approval_log_db[-2]["action"] == "APPROVED"
     assert state.approval_log_db[-1]["action"] == "SUSPENDED"
+
+
+def test_postgres_branch_manager_directory_reports_audit_and_staff_queries_are_scoped(monkeypatch):
+    from routers import auth_admin, staff
+
+    statements = []
+
+    class Cursor:
+        def execute(self, query, params=None):
+            statements.append((query, params))
+
+        def fetchone(self):
+            query = statements[-1][0]
+            if "COUNT(DISTINCT business_id)" in query:
+                return {"businesses": 1}
+            if "COUNT(*) AS dietitians" in query:
+                return {"dietitians": 2, "pending_approvals": 1}
+            if "COUNT(*) AS clients" in query:
+                return {"clients": 3}
+            if "COUNT(*) AS appointments" in query:
+                return {"appointments": 4}
+            if "COUNT(*) AS meal_plans" in query:
+                return {"meal_plans": 5}
+            return {"audit_events": 6}
+
+        def fetchall(self):
+            return []
+
+    @contextmanager
+    def cursor():
+        yield Cursor()
+
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+    monkeypatch.setattr(auth_admin, "branch_id_for_manager", lambda _: "branch-1")
+    monkeypatch.setattr(staff, "branch_id_for_manager", lambda _: "branch-1")
+    monkeypatch.setattr(auth_admin.database, "cursor", cursor)
+    monkeypatch.setattr(staff.database, "cursor", cursor)
+    manager = ("branch_manager", "manager-1")
+
+    assert auth_admin.get_admin_dashboard(manager)["clients"] == 3
+    auth_admin.list_admin_clients(manager)
+    auth_admin.list_admin_audit_logs(manager)
+    staff.list_staff(manager)
+
+    assert len(statements) == 9
+    assert all(params == ("branch-1",) for _, params in statements)
+    assert all("branch_id = %s" in query for query, _ in statements)
+    assert "JOIN dietitian d" in statements[6][0]
+    assert "al.entity_type = 'DIETITIAN'" in statements[7][0]
+    assert "role IN ('reception', 'branch_manager')" in statements[8][0]
 
 
 @pytest.mark.parametrize("same_branch", [True, False])

@@ -139,8 +139,12 @@ Branch managers can inspect, approve, reject, suspend, and restore dietitians in
 their assigned branch. Suspension blocks new and existing dietitian sessions
 without deleting patient, appointment, or care records; restoration returns the
 dietitian to approved status. A reason is required to suspend, and status changes
-are recorded in the approval history. Other branches and system administration
-remain restricted. Before using this with an existing
+are recorded in the approval history. Branch managers can also view the account
+directory for patients assigned to dietitians at their branch, with branch-only
+reports and approval history. They can create and manage reception accounts
+within their branch; other branch-manager accounts are visible but read-only.
+Patient clinical records, other branches, and organization-wide settings remain
+restricted. Before using this with an existing
 PostgreSQL database, run `python back-end/migrations/apply_024_branch_manager_approvals.py`.
 The deployment workflow applies this migration automatically.
 
