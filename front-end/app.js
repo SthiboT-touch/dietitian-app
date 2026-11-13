@@ -1057,13 +1057,14 @@ function renderAIWorkspaceTabs(activePanel) {
     if (currentUser.type !== "dietitian") return "";
     return `
     <div class="ai-workspace-tabs" role="tablist" aria-label="Nutrition workspace">
-      <button class="ai-workspace-tab${activePanel === "coach" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "coach"}" data-ai-panel="coach" type="button">Nutrition Coach</button>
+      <button class="ai-workspace-tab${activePanel === "coach" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "coach"}" data-ai-panel="coach" type="button">Ask AI</button>
+      <button class="ai-workspace-tab${activePanel === "patient" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "patient"}" data-ai-panel="patient" type="button">Patient Assistant</button>
       <button class="ai-workspace-tab${activePanel === "plan" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "plan"}" data-ai-panel="plan" type="button">Plan Studio</button>
     </div>`;
 }
 
 async function renderAIWorkspace(activePanel = "coach", clientId = "") {
-    const panel = activePanel === "plan" && currentUser.type === "dietitian" ? "plan" : "coach";
+    const panel = currentUser.type === "dietitian" && ["plan", "patient"].includes(activePanel) ? activePanel : "coach";
     workspaceContent.innerHTML = `
     ${pageHeading("NUTRITION WORKSPACE", "Food, plans, and care guidance.", "Support a wide range of nutrition needs, from everyday wellbeing to clinical and life-stage care.")}
     <section class="nutrition-workspace-banner" aria-label="Personalised nutrition care">
@@ -1077,7 +1078,7 @@ async function renderAIWorkspace(activePanel = "coach", clientId = "") {
     });
     if (panel === "plan") {
         await renderAIStudio(clientId);
-    } else if (currentUser.type === "dietitian") {
+    } else if (panel === "patient") {
         await renderPatientAgent(clientId);
     } else {
         await renderAIChat();
@@ -1182,6 +1183,7 @@ async function renderAIChat() {
       </div>
     </section>
     <section class="content-panel chat-panel" data-fixed-theme="light">
+      ${role === "dietitian" ? '<p class="document-hint">Ask a general nutrition question here. To use a patient’s records and your clinical guidance, open the Patient Assistant tab.</p>' : ""}
       <div class="chat-thread">
         ${messages
             .map(
