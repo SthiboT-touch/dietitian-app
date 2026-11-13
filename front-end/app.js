@@ -347,7 +347,7 @@ function showWorkspace(user, initialView = "overview") {
     ).forEach((item) => {
         item.hidden = !isAdmin && user.type !== "branch_manager";
     });
-    // Keep the Dietitian sidebar limited to the six requested menu items.
+    // Keep the dietitian's clinical tools and AI workspace available in the sidebar.
 if (isDietitian) {
     const nav = document.querySelector(".side-nav");
 
@@ -356,6 +356,7 @@ if (isDietitian) {
         "appointment-requests",
         "reviews",
         "clients",
+        "ai-workspace",
         "support",
         "dietitian-settings",
     ];
@@ -372,7 +373,7 @@ if (isDietitian) {
         item.hidden = true;
     });
 
-    // Show and arrange the six requested items.
+    // Show and arrange the dietitian menu items.
     dietitianMenu.forEach((view) => {
         const item = menuItems.get(view);
 
