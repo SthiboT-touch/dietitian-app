@@ -1300,6 +1300,43 @@ def test_goals_are_created_by_assigned_dietitian_and_viewed_by_client():
     assert listing.json() == [created.json()["goal"]]
 
 
+def test_client_can_mark_a_goal_as_reached():
+    seed_completed_visit("client-goal-reached-test", "goal-reached-dietitian")
+    state.users_db["client-goal-reached-test"] = {
+        "id": "client-goal-reached-test",
+        "type": "client",
+        "dietitian_id": "goal-reached-dietitian",
+    }
+
+    created = client.post(
+        "/api/v1/goals",
+        json={
+            "client_id": "client-goal-reached-test",
+            "target_metric": "Water",
+            "target_value": 2000,
+        },
+        headers=authenticated_dietitian_headers("goal-reached-dietitian"),
+    )
+    goal_id = created.json()["goal"]["goal_id"]
+
+    updated = client.post(
+        f"/api/v1/goals/{goal_id}/status",
+        json={"status": "REACHED"},
+        headers=authenticated_client_headers("client-goal-reached-test"),
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["status"] == "REACHED"
+
+    listing = client.get(
+        "/api/v1/goals",
+        params={"client_id": "client-goal-reached-test"},
+        headers=authenticated_client_headers("client-goal-reached-test"),
+    )
+    assert listing.status_code == 200, listing.text
+    assert listing.json()[0]["status"] == "REACHED"
+
+
 def test_dietitian_progress_saves_and_preserves_partial_metric_updates():
     state.users_db["patient-progress-test"] = {
         "id": "patient-progress-test",

@@ -957,6 +957,33 @@ select:focus {
 .goal-current strong {
     font-size: 12px;
 }
+.goal-status-wrap {
+    display: grid;
+    justify-items: end;
+    gap: 6px;
+}
+.goal-status,
+.goal-reached-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+.goal-status.reached {
+    background: var(--green-pale);
+    color: var(--green-deep);
+}
+.goal-reached-button {
+    border: 1px solid var(--green-deep);
+    background: transparent;
+    color: var(--green-deep);
+}
 .appointment-row > span {
     color: var(--muted);
     font-size: 10px;

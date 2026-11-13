@@ -324,6 +324,11 @@ class GoalCreate(BaseModel):
     appointment_id: Optional[str] = None
     target_metric: str
     target_value: float
+    status: Literal["ACTIVE", "REACHED"] = "ACTIVE"
+
+
+class GoalStatusUpdate(BaseModel):
+    status: Literal["ACTIVE", "REACHED"] = "ACTIVE"
 
 
 # Section 5 Schemas
