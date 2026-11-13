@@ -1068,9 +1068,81 @@ async function renderAIWorkspace(activePanel = "coach", clientId = "") {
     });
     if (panel === "plan") {
         await renderAIStudio(clientId);
+    } else if (currentUser.type === "dietitian") {
+        await renderPatientAgent(clientId);
     } else {
         await renderAIChat();
     }
+}
+
+async function renderPatientAgent(initialClientId = "") {
+    const panel = document.querySelector("#aiWorkspacePanel");
+    const patients = await request(`/api/v1/clients?dietitian_id=${encodeURIComponent(currentUser.id)}`);
+    panel.innerHTML = `<section class="content-panel">
+      <h2>Patient nutrition assistant</h2>
+      <p>Choose a patient, add your clinical guidance, then activate the assistant using their recorded information.</p>
+      <form id="patientAgentActivation" class="form-grid">
+        <div class="form-field full-width"><label for="agentPatient">1. Choose the patient</label>
+        <select class="text-input" id="agentPatient" required><option value="">Select a patient</option>${patients.map((patient) => `<option value="${escapeHtml(patient.id)}" ${patient.id === initialClientId ? "selected" : ""}>${escapeHtml(patient.name || patient.full_name || patient.id)}</option>`).join("")}</select></div>
+        <div class="form-field full-width"><label for="agentGuidance">Your guidance and restrictions</label><textarea class="text-input" id="agentGuidance" maxlength="3000" placeholder="Add clinical priorities, dietary restrictions, preferences or questions to explore."></textarea></div>
+        <div class="form-actions"><button class="button button-primary" type="submit" ${patients.length ? "" : "disabled"}>2. Activate patient assistant</button></div>
+      </form>
+      ${patients.length ? "" : '<p class="empty-state">No patients are assigned to you yet.</p>'}
+      <p class="document-hint">Draft suggestions require your review. Activation and conversation last until the API restarts. Changing the patient or guidance requires reactivation.</p>
+    </section><div id="patientAgentWorkspace" hidden></div>`;
+    const activation = panel.querySelector("#patientAgentActivation");
+    const patientSelect = panel.querySelector("#agentPatient");
+    const guidance = panel.querySelector("#agentGuidance");
+    const workspace = panel.querySelector("#patientAgentWorkspace");
+    let activePatient = "";
+    let activationVersion = 0;
+    const deactivate = () => { activationVersion += 1; activePatient = ""; workspace.hidden = true; workspace.innerHTML = ""; };
+    patientSelect.addEventListener("change", deactivate);
+    guidance.addEventListener("input", deactivate);
+    activation.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        deactivate();
+        const version = activationVersion;
+        const patientId = patientSelect.value;
+        const button = activation.querySelector("button");
+        button.disabled = true;
+        patientSelect.disabled = true;
+        guidance.disabled = true;
+        try {
+            const result = await request(`/api/v1/ai/patients/${encodeURIComponent(patientId)}/activate`, {
+                method: "POST", body: JSON.stringify({ guidance: guidance.value.trim() }),
+            });
+            activePatient = patientId;
+            const context = result.context;
+            const facts = ["patient_profile", "clinician_guidance", "conditions", "allergies", "metrics", "progress", "goals", "care_history"];
+            workspace.innerHTML = `<section class="content-panel"><h2>Active patient: ${escapeHtml(patientSelect.selectedOptions[0].textContent)}</h2>
+              <p>Records are refreshed on every question. No changes are made to the patient’s care plan.</p>
+              <details><summary>Information available to the assistant</summary>${facts.concat("clinician_profile").map((key) => `<h3>${escapeHtml(key.replaceAll("_", " "))}</h3><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(JSON.stringify(context[key] || [], null, 2))}</pre>`).join("")}</details>
+              <p class="document-hint">The assistant uses these patient records and your guidance; it does not search the reference library. Suggestions are drafts for clinical review.</p>
+              <div class="chat-thread" id="patientAgentThread" aria-live="polite"></div>
+              <form id="patientAgentQuestion" class="form-grid"><div class="form-field full-width"><label for="patientAgentInput">Ask about this patient</label><textarea class="text-input" id="patientAgentInput" required maxlength="4000" placeholder="Based on the recorded conditions and my guidance, suggest nutrition priorities and identify missing information."></textarea></div><div class="form-actions"><button class="button button-primary" type="submit">Ask patient assistant</button></div></form>
+            </section>`;
+            workspace.hidden = false;
+            workspace.querySelector("form").addEventListener("submit", async (questionEvent) => {
+                questionEvent.preventDefault();
+                const input = workspace.querySelector("#patientAgentInput");
+                const message = input.value.trim();
+                if (!message || activePatient !== patientId) return;
+                const send = questionEvent.currentTarget.querySelector("button");
+                send.disabled = true;
+                try {
+                    const response = await request(`/api/v1/ai/patients/${encodeURIComponent(patientId)}/chat`, {
+                        method: "POST", body: JSON.stringify({ message }),
+                    });
+                    if (activePatient !== patientId || activationVersion !== version) return;
+                    workspace.querySelector("#patientAgentThread").innerHTML = response.messages.map((turn) => `<div class="chat-bubble ${turn.role === "assistant" ? "assistant" : "user"}"><strong>${turn.role === "assistant" ? "Patient assistant · draft for review" : "You"}</strong><p style="white-space:pre-wrap">${escapeHtml(turn.content)}</p></div>`).join("");
+                    input.value = "";
+                } catch (error) { showWorkspaceMessage(error.message, true); }
+                finally { send.disabled = false; }
+            });
+        } catch (error) { showWorkspaceMessage(error.message, true); }
+        finally { button.disabled = false; patientSelect.disabled = false; guidance.disabled = false; }
+    });
 }
 
 async function renderAIChat() {
@@ -1196,11 +1268,11 @@ async function renderClientManagementProfile(clientId) {
     ${pageHeading("PATIENT PROFILE", client.name, "Current information recorded for this patient.")}
     <div data-message class="workspace-message" hidden></div>
     <section class="content-panel health-edit-panel">
-      <p class="subsection-label">PREGNANCY &amp; LACTATION PAGES</p>
+      <p class="subsection-label">LACTATION PAGE</p>
       <p>${profile.maternal_care_enabled ? "Enabled for this client." : "Disabled. The client cannot see these pages until you enable them."}</p>
       <div class="form-actions">
         <button class="button button-primary" id="toggleMaternalCare" type="button">${profile.maternal_care_enabled ? "Disable pages" : "Enable pages"}</button>
-        ${profile.maternal_care_enabled ? `<button class="button" id="openPregnancyPage" type="button">Pregnancy details</button><button class="button" id="openLactationPage" type="button">Lactation tracker</button>` : ""}
+        ${profile.maternal_care_enabled ? `<button class="button" id="openLactationPage" type="button">Lactation tracker</button>` : ""}
       </div>
     </section>
     ${patientContextMarkup(client, profile, lactation, documents)}
@@ -1284,13 +1356,12 @@ async function renderClientManagementProfile(clientId) {
                 body: JSON.stringify({ enabled: !profile.maternal_care_enabled }),
             });
             await renderClientManagementProfile(clientId);
-            showWorkspaceMessage(profile.maternal_care_enabled ? "Pregnancy and lactation pages disabled." : "Pregnancy and lactation pages enabled.");
+            showWorkspaceMessage(profile.maternal_care_enabled ? "Lactation page disabled." : "Lactation page enabled.");
         } catch (error) {
             showWorkspaceMessage(error.message, true);
             button.disabled = false;
         }
     });
-    workspaceContent.querySelector("#openPregnancyPage")?.addEventListener("click", () => renderClientHealth(clientId, "pregnancy"));
     workspaceContent.querySelector("#openLactationPage")?.addEventListener("click", () => renderLactationTracking(clientId));
     workspaceContent.querySelector("#editPatientMetrics")?.addEventListener("click", () => renderClientProgress(clientId));
     const conditionForm = workspaceContent.querySelector("#dietitianMedicalConditionForm");
@@ -1718,11 +1789,14 @@ function bindApprovalResubmission() {
 }
 
 async function renderClientHealth(clientId, section) {
+    if (!["conditions", "allergies", "lactation"].includes(section)) {
+        await loadView("overview");
+        return;
+    }
     const profile = await request(`/api/v1/clients/${encodeURIComponent(clientId)}/profile`);
     const sectionTitles = {
         conditions: "Medical Conditions",
         allergies: "Allergies",
-        pregnancy: "Pregnancy",
         lactation: "Lactation",
     };
     const title = sectionTitles[section] || "Health Information";
@@ -1738,12 +1812,6 @@ async function renderClientHealth(clientId, section) {
     } else if (section === "allergies") {
         details = renderTags(profile.allergies, "allergen", "No allergies recorded.");
         form = `<form id="clientHealthForm" class="form-grid"><div class="form-field"><label for="allergenName">Allergen</label><input class="text-input" id="allergenName" name="allergen" required></div><div class="form-field"><label for="allergySeverity">Severity</label><select id="allergySeverity" name="severity"><option value="mild">Mild</option><option value="moderate">Moderate</option><option value="severe">Severe</option><option value="anaphylactic">Anaphylactic</option></select></div><div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Add allergy</button></div></form>`;
-    } else if (section === "pregnancy") {
-        const pregnancy = profile.pregnancy;
-        details = pregnancy
-            ? `<dl class="profile-details"><div><dt>Trimester</dt><dd>${escapeHtml(pregnancy.trimester || "Not provided")}</dd></div><div><dt>Due date</dt><dd>${escapeHtml(pregnancy.due_date || "Not provided")}</dd></div></dl>`
-            : '<p class="empty-state">No pregnancy information recorded.</p>';
-        form = `<form id="clientHealthForm" class="form-grid"><div class="form-field"><label for="trimester">Trimester</label><select id="trimester" name="trimester"><option value="1">First</option><option value="2">Second</option><option value="3">Third</option></select></div><div class="form-field"><label for="dueDate">Due date</label><input class="text-input" id="dueDate" name="due_date" type="date" required></div><div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Save pregnancy details</button></div></form>`;
     } else {
         const lactation = profile.lactation;
         details = lactation
@@ -1802,7 +1870,6 @@ async function renderClientHealth(clientId, section) {
         const values = Object.fromEntries(new FormData(event.currentTarget));
         let endpoint = section;
         if (section === "conditions") endpoint = "medical-conditions";
-        if (section === "pregnancy") values.trimester = Number(values.trimester);
         if (section === "lactation") values.is_active = values.is_active === "true";
         try {
             await request(`/api/v1/clients/${encodeURIComponent(clientId)}/${endpoint}`, {
@@ -2219,7 +2286,7 @@ async function renderClientProgress(clientId) {
       <section class="content-panel weight-trend"><div class="progress-section-heading"><h2>Metrics graph</h2><strong>${escapeHtml(metricCards[0][1])}</strong></div>
         ${weightHistory.length ? renderWeightChart(weightHistory) : '<p class="empty-state">No history yet recorded</p>'}
       </section>
-      <section class="content-panel"><h2 class="compact-heading">Health Metrics</h2><dl class="progress-metrics">${metricCards.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></section>
+      <section class="content-panel"><h2 class="compact-heading">Health Metrics</h2><p class="document-hint">${canEditMetrics ? "Record and update these values for your patient below." : "These values are recorded by your assigned doctor/dietitian. Contact them to add or update a measurement."}</p><dl class="progress-metrics">${metricCards.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></section>
     </div>`;
     if (canEditMetrics) {
         const now = new Date();
@@ -3009,7 +3076,7 @@ async function loadView(view, initialAIPanel = "coach") {
     workspaceContent.classList.add("view-enter");
     const firstName = currentUser.full_name.split(" ")[0];
     const clientId = currentUser.type === "client" ? currentUser.id : "";
-    if (currentUser.type === "client" && ["health-pregnancy", "health-lactation"].includes(view)) {
+    if (currentUser.type === "client" && view === "health-lactation") {
         if (!(await refreshClientMaternalAccess())) {
             await renderClientDashboard(firstName);
             showWorkspaceMessage("These pages are available after your dietitian enables them for your profile.");

@@ -45,6 +45,26 @@ need `python back-end/migrations/apply_016_guest_support.py` after migration 015
 
 ## Run the nutrition AI
 
+In a dietitian's **Nutrition Coach** workspace, choose an assigned patient, add
+clinical guidance or restrictions, and select **Activate patient assistant**.
+Questions then use that patient's recorded allergies, conditions, measurements,
+recent progress, goals, and care history, together with the dietitian's recorded
+specialty and guidance. This patient assistant does not search the reference
+library; the patient's records personalize suggestions but are not a medical
+evidence source. Patient records are refreshed and assignment access is checked
+on every question. Missing information must not be treated as a normal finding,
+and model suggestions remain drafts requiring practitioner review. Activation
+does not update clinical records or publish a care plan.
+
+Changing the patient or guidance requires reactivation, which clears that
+patient's assistant conversation. Activations and histories are separated by
+dietitian and patient, stored in process memory, and cleared on API restart.
+The assistant reads structured records and recorded care notes; it does not
+extract text from uploaded PDFs or images. It requires the configured Ollama
+chat model; patient-specific questions are not sent to LangSmith tracing.
+Other AI workflows may still use the semantic reference library as described
+below.
+
 Create a root `.env` file with the database password before starting the API, database, and Ollama service:
 
 ```dotenv

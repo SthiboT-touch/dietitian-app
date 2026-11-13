@@ -374,6 +374,14 @@ class AIChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
 
 
+class PatientAgentActivation(BaseModel):
+    guidance: str = Field(default="", max_length=3000)
+
+
+class PatientAgentMessage(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+
+
 class RecommendationReview(BaseModel):
     action: Literal["APPROVED", "MODIFIED", "REJECTED"]
     notes: Optional[str] = None
