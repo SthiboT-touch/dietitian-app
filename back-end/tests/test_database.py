@@ -47,12 +47,35 @@ def test_sqlite_initializes_current_feature_tables(tmp_path, monkeypatch):
     with database.cursor() as cursor:
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = {row["name"] for row in cursor.fetchall()}
+        columns = {
+            table: {
+                row["name"]
+                for row in cursor.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            for table in (
+                "appointment",
+                "nutrition_goal",
+                "client_checkin_credential",
+                "client_checkin_event",
+                "approval_log",
+            )
+        }
         cursor.execute("INSERT INTO diet_type (name) VALUES (%s)", ("TEST_DIET",))
         cursor.execute("SELECT diet_type_id FROM diet_type WHERE name=%s", ("TEST_DIET",))
         generated_id = cursor.fetchone()["diet_type_id"]
 
     assert {"client", "appointment", "staff_account", "meal_plan_review",
             "registration_welcome_outbox", "client_checkin_credential"} <= tables
+    assert {
+        "appointment_type",
+        "meeting_link",
+        "branch_id",
+        "consultation_type",
+    } <= columns["appointment"]
+    assert "appointment_id" in columns["nutrition_goal"]
+    assert "appointment_id" in columns["client_checkin_credential"]
+    assert {"actor_id", "actor_role", "appointment_id"} <= columns["client_checkin_event"]
+    assert "staff_id" in columns["approval_log"]
     assert len(generated_id) == 36
 
 
@@ -74,13 +97,14 @@ def test_sqlite_initializes_cms_tables(tmp_path, monkeypatch):
 
 def test_sqlite_patient_registration_succeeds(tmp_path, monkeypatch):
     import config
+    import time
+    import state
     from fastapi.testclient import TestClient
     from app import app
 
     monkeypatch.setenv("DATABASE_URL", "sqlite:///./app.db")
     monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "app.db"))
     monkeypatch.setattr(config, "DATABASE_ENABLED", True)
-    monkeypatch.setattr(config, "STYTCH_ENABLED", False)
     payload = {
         "first_name": "Jordan",
         "last_name": "Lee",
@@ -93,6 +117,11 @@ def test_sqlite_patient_registration_succeeds(tmp_path, monkeypatch):
         "consent_to_care": True,
         "privacy_notice_version": "2026-10-28-v1",
     }
+    monkeypatch.setitem(
+        state.verified_email_db,
+        payload["email"].casefold(),
+        {"stytch_user_id": None, "expires_at": time.time() + 600},
+    )
 
     with TestClient(app) as client:
         response = client.post("/api/v1/auth/register/client", json=payload)
@@ -123,7 +152,6 @@ def test_sqlite_admin_setup_and_login_work(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite:///./app.db")
     monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "app.db"))
     monkeypatch.setattr(config, "DATABASE_ENABLED", True)
-    monkeypatch.setattr(config, "STYTCH_ENABLED", False)
     payload = {
         "first_name": "Avery",
         "last_name": "Admin",

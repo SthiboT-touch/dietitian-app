@@ -30,6 +30,8 @@ sqlite3.register_converter(
     "TIMESTAMPTZ",
     lambda value: datetime.fromisoformat(value.decode().replace("Z", "+00:00")),
 )
+sqlite3.register_adapter(date, date.isoformat)
+sqlite3.register_adapter(datetime, lambda value: value.isoformat(sep=" "))
 
 
 def connection_options():
@@ -160,6 +162,32 @@ def initialize_sqlite_schema(connection):
         "FOREIGN KEY (registered_by_staff_id) REFERENCES staff_account(staff_id) ON DELETE SET NULL;",
         "",
     )
+    schema = re.sub(
+        r"ALTER TABLE \w+ ALTER COLUMN \w+ DROP NOT NULL\s*;",
+        "",
+        schema,
+        flags=re.IGNORECASE,
+    )
+    schema = re.sub(
+        r"ALTER TABLE\s+\w+\s+ADD COLUMN IF NOT EXISTS .*?;",
+        "",
+        schema,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    schema = re.sub(r"DO \$\$.*?\$\$\s*;", "", schema, flags=re.IGNORECASE | re.DOTALL)
+    schema = schema.replace(
+        "admin_id         VARCHAR(36) NOT NULL REFERENCES admin(admin_id) ON DELETE CASCADE,",
+        "admin_id         VARCHAR(36) REFERENCES admin(admin_id) ON DELETE SET NULL,",
+    )
+    schema = schema.replace(
+        "CREATE INDEX IF NOT EXISTS nutrition_goal_appointment_idx ON nutrition_goal(appointment_id);",
+        "",
+    )
+    schema = schema.replace(
+        "CREATE INDEX IF NOT EXISTS client_checkin_event_appointment_idx "
+        "ON client_checkin_event(appointment_id);",
+        "",
+    )
     schema += """
     CREATE TABLE IF NOT EXISTS meal_plan_review (
         plan_id TEXT PRIMARY KEY,
@@ -185,6 +213,50 @@ def initialize_sqlite_schema(connection):
     """
     connection.create_function("gen_random_uuid", 0, lambda: str(uuid.uuid4()))
     connection.executescript(schema)
+    sqlite_columns = {
+        "appointment": {
+            "appointment_type": (
+                "VARCHAR(20) NOT NULL DEFAULT 'IN_PERSON' "
+                "CHECK (appointment_type IN ('IN_PERSON', 'VIRTUAL'))"
+            ),
+            "meeting_link": "TEXT",
+            "branch_id": "VARCHAR(50)",
+            "consultation_type": "VARCHAR(20) NOT NULL DEFAULT 'INITIAL'",
+        },
+        "nutrition_goal": {
+            "appointment_id": "VARCHAR(36) REFERENCES appointment(appointment_id)",
+        },
+        "client_checkin_credential": {
+            "appointment_id": "VARCHAR(36) REFERENCES appointment(appointment_id)",
+        },
+        "client_checkin_event": {
+            "actor_id": "VARCHAR(36)",
+            "actor_role": "VARCHAR(32) NOT NULL DEFAULT 'reception'",
+            "appointment_id": "VARCHAR(36) REFERENCES appointment(appointment_id)",
+        },
+        "approval_log": {
+            "staff_id": (
+                "VARCHAR(36) REFERENCES staff_account(staff_id) ON DELETE RESTRICT"
+            ),
+        },
+    }
+    for table_name, columns in sqlite_columns.items():
+        existing_columns = {
+            row[1] for row in connection.execute(f"PRAGMA table_info({table_name})")
+        }
+        for column_name, declaration in columns.items():
+            if column_name not in existing_columns:
+                connection.execute(
+                    f"ALTER TABLE {table_name} ADD COLUMN {column_name} {declaration}"
+                )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS nutrition_goal_appointment_idx "
+        "ON nutrition_goal(appointment_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS client_checkin_event_appointment_idx "
+        "ON client_checkin_event(appointment_id)"
+    )
 
 
 def open_connection():

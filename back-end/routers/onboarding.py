@@ -230,7 +230,6 @@ def new_client_checkin_code(
                 f"rotated_at=NOW(), expires_at={expiry_expression}",
                 (client_id, digest, appointment_id),
             )
-            )
     else:
         appointment_id = require_checkin_appointment(client_id, appointment_id=data.appointment_id if data else None)
         checkin_credentials_db[client_id] = {
@@ -363,13 +362,14 @@ def scan_checkin(data: CheckinRequest, identity=Depends(require_roles("admin", "
     digest = checkin_hash(token)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute(
+            expiry_check = (
+                "datetime(expires_at) > CURRENT_TIMESTAMP"
+                if database.is_sqlite()
+                else "expires_at > NOW()"
+            )
             cursor.execute(
                 "SELECT client_id, appointment_id FROM client_checkin_credential "
                 f"WHERE token_hash=%s AND {expiry_check} FOR UPDATE",
-                (digest,),
-            )
-            credential = cursor.fetchone()
                 (digest,),
             )
             credential = cursor.fetchone()
