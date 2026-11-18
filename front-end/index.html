@@ -26,7 +26,7 @@
         />
         <link
             rel="stylesheet"
-            href="/static/styles.css?v=26"
+            href="/static/styles.css?v=27"
         />
         <link
             rel="stylesheet"
@@ -39,7 +39,7 @@
         <script src="/static/meetings.js?v=2" defer></script>
         <script src="/static/jsQR.js?v=1" defer></script>
         <script
-            src="/static/app.js?v=53"
+            src="/static/app.js?v=55"
             defer
         ></script>
         <script src="/static/care.js?v=3" defer></script>
@@ -86,6 +86,7 @@
 
                     <div
                         class="auth-tabs"
+                        id="authTabs"
                         role="tablist"
                         aria-label="Account access"
                     >
@@ -148,14 +149,23 @@
                                 >Password</label
                             ></div
                         >
-                        <input
-                            id="loginPassword"
-                            name="password"
-                            type="password"
-                            autocomplete="current-password"
-                            placeholder="Enter your password"
-                            required
-                        />
+                        <div class="password-input-wrap">
+                            <input
+                                id="loginPassword"
+                                name="password"
+                                type="password"
+                                autocomplete="current-password"
+                                placeholder="Enter your password"
+                                required
+                            />
+                            <button
+                                class="password-visibility-toggle"
+                                type="button"
+                                data-password-toggle="loginPassword"
+                                aria-label="Show password"
+                                aria-pressed="false"
+                            >Show</button>
+                        </div>
                         <button
                             class="button button-primary auth-submit"
                             type="submit"
@@ -166,6 +176,67 @@
                                 >&#8594;</span
                             ></button
                         >
+                        <button class="auth-text-button" id="forgotPasswordLink" type="button">Forgot password?</button>
+                    </form>
+
+                    <form id="passwordResetRequestForm" class="auth-form" hidden>
+                        <label class="field-label" for="passwordResetEmail">Email address</label>
+                        <input
+                            id="passwordResetEmail"
+                            name="email"
+                            type="email"
+                            autocomplete="email"
+                            placeholder="you@example.com"
+                            required
+                        />
+                        <button class="button button-primary auth-submit" type="submit">Send reset code</button>
+                        <button class="auth-text-button" id="passwordResetCancelRequest" type="button">Back to sign in</button>
+                    </form>
+
+                    <form id="passwordResetCompleteForm" class="auth-form" hidden>
+                        <p class="form-hint" id="passwordResetEmailSummary"></p>
+                        <input id="passwordResetTargetEmail" name="email" type="hidden" />
+                        <input id="passwordResetMethodId" name="method_id" type="hidden" />
+                        <label class="field-label" for="passwordResetCode">6-digit reset code</label>
+                        <input
+                            id="passwordResetCode"
+                            name="code"
+                            type="text"
+                            inputmode="numeric"
+                            autocomplete="one-time-code"
+                            pattern="[0-9]{6}"
+                            maxlength="6"
+                            placeholder="Enter the code from your email"
+                            required
+                        />
+                        <label class="field-label" for="passwordResetPassword">New password</label>
+                        <div class="password-input-wrap">
+                            <input
+                                id="passwordResetPassword"
+                                name="password"
+                                type="password"
+                                autocomplete="new-password"
+                                minlength="12"
+                                maxlength="128"
+                                placeholder="At least 12 characters"
+                                required
+                            />
+                            <button class="password-visibility-toggle" type="button" data-password-toggle="passwordResetPassword" aria-label="Show password" aria-pressed="false">Show</button>
+                        </div>
+                        <label class="field-label" for="passwordResetConfirmPassword">Confirm new password</label>
+                        <div class="password-input-wrap">
+                            <input
+                                id="passwordResetConfirmPassword"
+                                name="confirm_password"
+                                type="password"
+                                autocomplete="new-password"
+                                placeholder="Re-enter your new password"
+                                required
+                            />
+                            <button class="password-visibility-toggle" type="button" data-password-toggle="passwordResetConfirmPassword" aria-label="Show password" aria-pressed="false">Show</button>
+                        </div>
+                        <button class="button button-primary auth-submit" type="submit">Reset password</button>
+                        <button class="auth-text-button" id="passwordResetUseDifferentEmail" type="button">Use a different email</button>
                     </form>
 
                     <form
@@ -440,28 +511,34 @@
                                 for="signupPassword"
                                 >Create password</label
                             >
-                            <input
-                                id="signupPassword"
-                                name="password"
-                                type="password"
-                                autocomplete="new-password"
-                                minlength="8"
-                                placeholder="At least 8 characters"
-                                required
-                            />
+                            <div class="password-input-wrap">
+                                <input
+                                    id="signupPassword"
+                                    name="password"
+                                    type="password"
+                                    autocomplete="new-password"
+                                    minlength="8"
+                                    placeholder="At least 8 characters"
+                                    required
+                                />
+                                <button class="password-visibility-toggle" type="button" data-password-toggle="signupPassword" aria-label="Show password" aria-pressed="false">Show</button>
+                            </div>
                             <label
                                 class="field-label"
                                 for="signupConfirmPassword"
                                 >Confirm password</label
                             >
-                            <input
-                                id="signupConfirmPassword"
-                                name="confirm_password"
-                                type="password"
-                                autocomplete="new-password"
-                                placeholder="Re-enter your password"
-                                required
-                            />
+                            <div class="password-input-wrap">
+                                <input
+                                    id="signupConfirmPassword"
+                                    name="confirm_password"
+                                    type="password"
+                                    autocomplete="new-password"
+                                    placeholder="Re-enter your password"
+                                    required
+                                />
+                                <button class="password-visibility-toggle" type="button" data-password-toggle="signupConfirmPassword" aria-label="Show password" aria-pressed="false">Show</button>
+                            </div>
                             <div
                                 id="clientPrivacyConsent"
                                 class="privacy-consent"
@@ -691,28 +768,34 @@
                             for="adminSetupPassword"
                             >Create password</label
                         >
-                        <input
-                            id="adminSetupPassword"
-                            name="password"
-                            type="password"
-                            autocomplete="new-password"
-                            minlength="8"
-                            placeholder="At least 8 characters"
-                            required
-                        />
+                        <div class="password-input-wrap">
+                            <input
+                                id="adminSetupPassword"
+                                name="password"
+                                type="password"
+                                autocomplete="new-password"
+                                minlength="8"
+                                placeholder="At least 8 characters"
+                                required
+                            />
+                            <button class="password-visibility-toggle" type="button" data-password-toggle="adminSetupPassword" aria-label="Show password" aria-pressed="false">Show</button>
+                        </div>
                         <label
                             class="field-label"
                             for="adminSetupConfirmPassword"
                             >Confirm password</label
                         >
-                        <input
-                            id="adminSetupConfirmPassword"
-                            name="confirm_password"
-                            type="password"
-                            autocomplete="new-password"
-                            placeholder="Re-enter your password"
-                            required
-                        />
+                        <div class="password-input-wrap">
+                            <input
+                                id="adminSetupConfirmPassword"
+                                name="confirm_password"
+                                type="password"
+                                autocomplete="new-password"
+                                placeholder="Re-enter your password"
+                                required
+                            />
+                            <button class="password-visibility-toggle" type="button" data-password-toggle="adminSetupConfirmPassword" aria-label="Show password" aria-pressed="false">Show</button>
+                        </div>
                         <button
                             class="button button-primary auth-submit"
                             type="submit"

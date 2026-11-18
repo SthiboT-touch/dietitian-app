@@ -118,6 +118,34 @@ class EmailVerificationCheck(BaseModel):
         return validate_email(value)
 
 
+class PasswordResetRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, value: str) -> str:
+        return validate_email(value)
+
+
+class PasswordResetComplete(BaseModel):
+    email: str
+    method_id: str = Field(..., min_length=1)
+    code: str = Field(..., min_length=6, max_length=6)
+    password: str = Field(..., min_length=12, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, value: str) -> str:
+        return validate_email(value)
+
+    @field_validator("password")
+    @classmethod
+    def password_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Password cannot contain only spaces")
+        return value
+
+
 class AdminSetup(BaseModel):
     first_name: str = Field(..., min_length=1)
     last_name: str = Field(..., min_length=1)

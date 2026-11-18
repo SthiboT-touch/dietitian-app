@@ -1,10 +1,14 @@
 """Ticket privacy, administrator access and credential-recovery regressions."""
 
+import re
+
 import pytest
+import resend
 from fastapi.testclient import TestClient
 
 import app
 import config
+import email_verification
 import state
 from security import hash_password, verify_password
 
@@ -33,6 +37,8 @@ def isolated(monkeypatch):
     ]
     for store in stores:
         store.clear()
+    email_verification._challenges.clear()
+    email_verification._last_sent.clear()
     state.admins_db["admin"] = {
         "id": "admin",
         "type": "admin",
@@ -52,6 +58,8 @@ def isolated(monkeypatch):
     yield
     for store in stores:
         store.clear()
+    email_verification._challenges.clear()
+    email_verification._last_sent.clear()
 
 
 def ticket():
@@ -164,6 +172,146 @@ def test_password_reset_hashes_password_and_revokes_sessions(kind):
         ).status_code
         == 200
     )
+
+
+@pytest.mark.parametrize("kind", ["client", "dietitian", "admin", "staff"])
+def test_self_service_password_reset_uses_email_code_and_revokes_sessions(kind, monkeypatch):
+    stores = {
+        "client": (state.users_db, state.client_sessions_db),
+        "dietitian": (state.users_db, state.dietitian_sessions_db),
+        "admin": (state.admins_db, state.admin_sessions_db),
+        "staff": (state.staff_accounts_db, state.staff_sessions_db),
+    }
+    accounts, sessions = stores[kind]
+    account = {
+        "id": "reset-target",
+        "type": kind,
+        "email": "reset-target@example.test",
+        "full_name": "Reset Target",
+        "email_verified": True,
+        "password_hash": hash_password("old-password-123"),
+    }
+    if kind == "staff":
+        account.update(staff_id="reset-target", role="reception", is_active=True)
+    accounts["reset-target"] = account
+    sessions["reset-target-session"] = "reset-target"
+
+    delivered = []
+    monkeypatch.setattr(config, "RESEND_API_KEY", "test-api-key")
+    monkeypatch.setattr(config, "RESEND_FROM_EMAIL", "noreply@example.test")
+    monkeypatch.setattr(
+        resend.Emails,
+        "send",
+        lambda payload: (delivered.append(payload) or {"id": "test-email"}),
+    )
+
+    requested = api.post(
+        "/api/v1/auth/password-reset/request",
+        json={"email": "reset-target@example.test"},
+    )
+    assert requested.status_code == 200
+    assert requested.json()["message"] == (
+        "If an account exists for that email, a password reset code has been sent."
+    )
+    assert len(delivered) == 1
+    assert delivered[0]["subject"] == "Reset your NutriCare password"
+    code = re.search(r"\b([0-9]{6})\b", delivered[0]["text"]).group(1)
+
+    reset = api.post(
+        "/api/v1/auth/password-reset/complete",
+        json={
+            "email": "reset-target@example.test",
+            "method_id": requested.json()["method_id"],
+            "code": code,
+            "password": "new-password-456",
+        },
+    )
+    assert reset.status_code == 200
+    assert verify_password("new-password-456", account["password_hash"])
+    assert "reset-target-session" not in sessions
+    assert reset.json() == {"message": "Password reset. Sign in with your new password."}
+    assert (
+        api.post(
+            "/api/v1/auth/password-reset/complete",
+            json={
+                "email": "reset-target@example.test",
+                "method_id": requested.json()["method_id"],
+                "code": code,
+                "password": "another-password-789",
+            },
+        ).status_code
+        == 400
+    )
+
+
+def test_password_reset_request_does_not_disclose_unknown_accounts(monkeypatch):
+    delivered = []
+    monkeypatch.setattr(config, "RESEND_API_KEY", "test-api-key")
+    monkeypatch.setattr(config, "RESEND_FROM_EMAIL", "noreply@example.test")
+    monkeypatch.setattr(
+        resend.Emails,
+        "send",
+        lambda payload: (delivered.append(payload) or {"id": "test-email"}),
+    )
+    known = api.post(
+        "/api/v1/auth/password-reset/request",
+        json={"email": "alice@example.test"},
+    )
+    unknown = api.post(
+        "/api/v1/auth/password-reset/request",
+        json={"email": "missing@example.test"},
+    )
+    assert known.status_code == unknown.status_code == 200
+    assert known.json()["message"] == unknown.json()["message"]
+    assert known.json().keys() == unknown.json().keys()
+    assert known.json()["method_id"] != unknown.json()["method_id"]
+    assert len(delivered) == 1
+
+
+def test_password_reset_requires_configured_email_delivery():
+    response = api.post(
+        "/api/v1/auth/password-reset/request",
+        json={"email": "alice@example.test"},
+    )
+    assert response.status_code == 503
+    assert "email is not configured" in response.json()["detail"].lower()
+
+
+def test_password_reset_code_remains_bound_to_original_account(monkeypatch):
+    delivered = []
+    monkeypatch.setattr(config, "RESEND_API_KEY", "test-api-key")
+    monkeypatch.setattr(config, "RESEND_FROM_EMAIL", "noreply@example.test")
+    monkeypatch.setattr(
+        resend.Emails,
+        "send",
+        lambda payload: (delivered.append(payload) or {"id": "test-email"}),
+    )
+    requested = api.post(
+        "/api/v1/auth/password-reset/request",
+        json={"email": "alice@example.test"},
+    )
+    code = re.search(r"\b([0-9]{6})\b", delivered[0]["text"]).group(1)
+    state.users_db.pop("alice")
+    replacement = {
+        "id": "replacement",
+        "type": "client",
+        "email": "alice@example.test",
+        "full_name": "Replacement Account",
+        "password_hash": hash_password("old-password-123"),
+    }
+    state.users_db["replacement"] = replacement
+
+    response = api.post(
+        "/api/v1/auth/password-reset/complete",
+        json={
+            "email": "alice@example.test",
+            "method_id": requested.json()["method_id"],
+            "code": code,
+            "password": "new-password-456",
+        },
+    )
+    assert response.status_code == 400
+    assert verify_password("old-password-123", replacement["password_hash"])
 
 
 def test_search_and_password_reset_are_admin_only_and_validate_input():

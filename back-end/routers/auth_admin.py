@@ -53,6 +53,8 @@ from schemas import (
     EmailVerificationCheck,
     AdminCreate,
     AdminSetup,
+    PasswordResetRequest,
+    PasswordResetComplete,
     AdminApproval,
     DietitianStatusUpdate,
     BranchCreate,
@@ -72,6 +74,8 @@ from email_verification import (
     email_verification_enabled,
     send_email_code,
     verify_email_code,
+    send_password_reset_code,
+    verify_password_reset_code,
 )
 
 router = APIRouter()
@@ -149,6 +153,118 @@ def verify_email_verification_code(data: EmailVerificationCheck):
     }
     _set_email_verification(data.email, True, result.get("user_id"))
     return {"verified": True, "enabled": True, "message": "Email verified successfully."}
+
+
+def _find_password_reset_account(email: str) -> tuple[str, str] | None:
+    if config.DATABASE_ENABLED:
+        account_tables = (
+            ("dietitian", "dietitian", "dietitian_id"),
+            ("client", "client", "client_id"),
+            ("admin", "admin", "admin_id"),
+            ("staff", "staff_account", "staff_id"),
+        )
+        with database.cursor() as cursor:
+            for kind, table, key in account_tables:
+                if kind == "staff":
+                    cursor.execute("SELECT to_regclass('public.staff_account') AS relation")
+                    if not cursor.fetchone()["relation"]:
+                        continue
+                cursor.execute(
+                    f"SELECT {key} AS id FROM {table} WHERE LOWER(email) = LOWER(%s) LIMIT 1",
+                    (email,),
+                )
+                account = cursor.fetchone()
+                if account:
+                    return kind, str(account["id"])
+        return None
+
+    for kind, store in (
+        ("dietitian", users_db),
+        ("client", users_db),
+        ("admin", admins_db),
+        ("staff", staff_accounts_db),
+    ):
+        for account_id, account in store.items():
+            if (
+                (kind not in {"dietitian", "client"} or account.get("type") == kind)
+                and account.get("email", "").casefold() == email.casefold()
+            ):
+                return kind, str(account_id)
+    return None
+
+
+@router.post("/api/v1/auth/password-reset/request", tags=["1. Auth & Admin"])
+def request_password_reset(data: PasswordResetRequest):
+    if not email_verification_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Password reset email is not configured. Contact your administrator.",
+        )
+    account = _find_password_reset_account(data.email)
+    if account:
+        try:
+            result = send_password_reset_code(data.email, account)
+            method_id = result["method_id"]
+        except EmailVerificationError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+    else:
+        method_id = secrets.token_urlsafe(24)
+    return {
+        "method_id": method_id,
+        "message": "If an account exists for that email, a password reset code has been sent.",
+    }
+
+
+@router.post("/api/v1/auth/password-reset/complete", tags=["1. Auth & Admin"])
+def complete_password_reset(data: PasswordResetComplete):
+    try:
+        verification = verify_password_reset_code(data.method_id, data.code, data.email)
+    except EmailVerificationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    account = _find_password_reset_account(data.email)
+    if not account or tuple(verification.get("context") or ()) != account:
+        raise HTTPException(status_code=400, detail="That reset code is invalid or expired.")
+
+    account_type, account_id = account
+    password_hash = hash_password(data.password)
+    if config.DATABASE_ENABLED:
+        password_columns = {
+            "dietitian": ("dietitian", "dietitian_id", "password"),
+            "client": ("client", "client_id", "password"),
+            "admin": ("admin", "admin_id", "password"),
+            "staff": ("staff_account", "staff_id", "password_hash"),
+        }
+        table, key, column = password_columns[account_type]
+        with database.cursor() as cursor:
+            cursor.execute(
+                f"UPDATE {table} SET {column} = %s WHERE {key} = %s RETURNING {key}",
+                (password_hash, account_id),
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=400, detail="That reset code is invalid or expired.")
+    else:
+        stores = {
+            "dietitian": users_db,
+            "client": users_db,
+            "admin": admins_db,
+            "staff": staff_accounts_db,
+        }
+        target = stores[account_type].get(account_id)
+        if not target:
+            raise HTTPException(status_code=400, detail="That reset code is invalid or expired.")
+        target["password_hash"] = password_hash
+
+    sessions = {
+        "dietitian": dietitian_sessions_db,
+        "client": client_sessions_db,
+        "admin": admin_sessions_db,
+        "staff": staff_sessions_db,
+    }[account_type]
+    for token, owner in list(sessions.items()):
+        if str(owner) == account_id:
+            sessions.pop(token, None)
+    return {"message": "Password reset. Sign in with your new password."}
 
 
 # --- 1. AUTHENTICATION, ADMINISTRATION & PRACTICE SETUP ---

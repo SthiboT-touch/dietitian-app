@@ -1,6 +1,8 @@
 ﻿const authScreen = document.querySelector("#authScreen");
 const workspace = document.querySelector("#workspace");
 const loginForm = document.querySelector("#loginForm");
+const passwordResetRequestForm = document.querySelector("#passwordResetRequestForm");
+const passwordResetCompleteForm = document.querySelector("#passwordResetCompleteForm");
 const signupForm = document.querySelector("#signupForm");
 const adminSetupForm = document.querySelector("#adminSetupForm");
 const authMessage = document.querySelector("#authMessage");
@@ -27,6 +29,7 @@ const staffRoleNames = {
 };
 
 let currentUser = null;
+let passwordResetMethodId = "";
 let profileAvatarObjectUrl = null;
 let qrCameraStream = null;
 let qrScanFrame = null;
@@ -765,9 +768,13 @@ function updateSignupRole() {
 function setAuthMode(mode) {
     const isSignup = mode === "signup";
     const isAdminSetup = mode === "admin-setup";
-    loginForm.hidden = isSignup || isAdminSetup;
+    const isPasswordReset = mode === "password-reset";
+    loginForm.hidden = isSignup || isAdminSetup || isPasswordReset;
+    passwordResetRequestForm.hidden = !isPasswordReset;
+    passwordResetCompleteForm.hidden = true;
     signupForm.hidden = !isSignup;
     adminSetupForm.hidden = !isAdminSetup;
+    document.querySelector("#authTabs").hidden = isPasswordReset;
     document.querySelector("#loginTab").classList.toggle("is-active", mode === "login");
     document.querySelector("#signupTab").classList.toggle("is-active", isSignup);
     document.querySelector("#adminSetupTab").classList.toggle("is-active", isAdminSetup);
@@ -776,16 +783,37 @@ function setAuthMode(mode) {
     document.querySelector("#adminSetupTab").setAttribute("aria-selected", String(isAdminSetup));
     document.querySelector("#authHeading").textContent = isAdminSetup
         ? "Set up your administrator."
-        : isSignup
-          ? "Create your account."
-          : "Welcome back.";
+        : isPasswordReset
+          ? "Reset your password."
+          : isSignup
+            ? "Create your account."
+            : "Welcome back.";
     document.querySelector("#authSubheading").textContent = isAdminSetup
         ? "Create the first administrator for this installation."
-        : isSignup
-          ? "Join your nutrition practice workspace."
-          : "Sign in to continue to your nutrition workspace.";
+        : isPasswordReset
+          ? "We’ll email you a code to securely reset your password."
+          : isSignup
+            ? "Join your nutrition practice workspace."
+            : "Sign in to continue to your nutrition workspace.";
     authMessage.hidden = true;
+    if (!isPasswordReset) {
+        passwordResetMethodId = "";
+        passwordResetRequestForm.reset();
+        passwordResetCompleteForm.reset();
+        resetPasswordVisibility(passwordResetCompleteForm);
+        passwordResetRequestForm.hidden = true;
+    }
     if (isSignup) updateSignupRole();
+}
+
+function resetPasswordVisibility(form) {
+    form.querySelectorAll("[data-password-toggle]").forEach((button) => {
+        const input = document.getElementById(button.dataset.passwordToggle);
+        input.type = "password";
+        button.textContent = "Show";
+        button.setAttribute("aria-label", "Show password");
+        button.setAttribute("aria-pressed", "false");
+    });
 }
 
 function passwordsMatch(passwordId, confirmationId) {
@@ -3943,12 +3971,17 @@ async function renderStaffDashboard() {
     const profile = await request("/api/v1/staff/me");
     const role = staffRoleNames[profile.role] || profile.role;
     if (profile.role === "branch_manager") {
-        const overview = await request("/api/v1/branch-manager/overview");
+        const [overview, summary] = await Promise.all([
+            request("/api/v1/branch-manager/overview"),
+            request("/api/v1/admin/dashboard"),
+        ]);
         workspaceContent.innerHTML = `
         ${pageHeading("BRANCH MANAGEMENT", `Welcome, ${escapeHtml(profile.full_name)}.`, `Managing ${escapeHtml(overview.branch_name)}.`)}
         <div class="admin-stat-grid">
           <section class="admin-stat"><span>Assigned branch</span><strong class="staff-role-card">${escapeHtml(overview.branch_name)}</strong></section>
           <section class="admin-stat"><span>Branch dietitians</span><strong>${Number(overview.dietitians)}</strong></section>
+          <section class="admin-stat"><span>Branch patients</span><strong>${Number(summary.clients)}</strong></section>
+          <section class="admin-stat"><span>Pending approvals</span><strong>${Number(summary.pending_approvals)}</strong></section>
           <section class="admin-stat"><span>Active branch staff</span><strong>${Number(overview.active_staff)}</strong></section>
           <section class="admin-stat"><span>Reception staff</span><strong>${Number(overview.reception_staff)}</strong></section>
           <section class="admin-stat"><span>Branch managers</span><strong>${Number(overview.branch_managers)}</strong></section>
@@ -3965,6 +3998,9 @@ async function renderStaffDashboard() {
             <button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong><span aria-hidden="true">&#8599;</span></button>
           </div>
         </section>`;
+        document.querySelector("#adminApprovalCount").textContent = String(
+            summary.pending_approvals,
+        );
         bindGoButtons();
         return;
     }
@@ -4606,6 +4642,88 @@ document.querySelector("#signupTab").addEventListener("click", () => setAuthMode
 document
     .querySelector("#adminSetupTab")
     .addEventListener("click", () => setAuthMode("admin-setup"));
+document.querySelector("#forgotPasswordLink").addEventListener("click", () => {
+    passwordResetRequestForm.elements.email.value = loginForm.elements.email.value;
+    setAuthMode("password-reset");
+    passwordResetRequestForm.elements.email.focus();
+});
+document.querySelector("#passwordResetCancelRequest").addEventListener("click", () => {
+    setAuthMode("login");
+});
+document.querySelector("#passwordResetUseDifferentEmail").addEventListener("click", () => {
+    const email = passwordResetCompleteForm.elements.email.value;
+    passwordResetMethodId = "";
+    passwordResetCompleteForm.reset();
+    resetPasswordVisibility(passwordResetCompleteForm);
+    passwordResetRequestForm.reset();
+    passwordResetRequestForm.elements.email.value = email;
+    passwordResetCompleteForm.hidden = true;
+    passwordResetRequestForm.hidden = false;
+    authMessage.hidden = true;
+    passwordResetRequestForm.elements.email.focus();
+});
+passwordResetRequestForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = passwordResetRequestForm.querySelector("button[type=submit]");
+    const email = passwordResetRequestForm.elements.email.value;
+    button.disabled = true;
+    try {
+        const result = await request("/api/v1/auth/password-reset/request", {
+            method: "POST",
+            body: JSON.stringify({ email }),
+        });
+        passwordResetMethodId = result.method_id;
+        passwordResetCompleteForm.elements.email.value = email;
+        passwordResetCompleteForm.elements.method_id.value = passwordResetMethodId;
+        document.querySelector("#passwordResetEmailSummary").textContent =
+            `If an account exists for ${email}, a reset code was sent.`;
+        passwordResetRequestForm.hidden = true;
+        passwordResetCompleteForm.hidden = false;
+        showAuthMessage(result.message, "success");
+        passwordResetCompleteForm.elements.code.focus();
+    } catch (error) {
+        showAuthMessage(error.message);
+    } finally {
+        button.disabled = false;
+    }
+});
+passwordResetCompleteForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!passwordsMatch("passwordResetPassword", "passwordResetConfirmPassword")) {
+        showAuthMessage("Passwords do not match.");
+        passwordResetCompleteForm.elements.confirm_password.focus();
+        return;
+    }
+    const button = passwordResetCompleteForm.querySelector("button[type=submit]");
+    const values = Object.fromEntries(new FormData(passwordResetCompleteForm));
+    delete values.confirm_password;
+    button.disabled = true;
+    try {
+        const result = await request("/api/v1/auth/password-reset/complete", {
+            method: "POST",
+            body: JSON.stringify(values),
+        });
+        const resetEmail = passwordResetCompleteForm.elements.email.value;
+        loginForm.reset();
+        loginForm.elements.email.value = resetEmail;
+        setAuthMode("login");
+        showAuthMessage(result.message, "success");
+    } catch (error) {
+        showAuthMessage(error.message);
+    } finally {
+        button.disabled = false;
+    }
+});
+document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+        const input = document.getElementById(button.dataset.passwordToggle);
+        const showPassword = input.type === "password";
+        input.type = showPassword ? "text" : "password";
+        button.textContent = showPassword ? "Hide" : "Show";
+        button.setAttribute("aria-label", `${showPassword ? "Hide" : "Show"} password`);
+        button.setAttribute("aria-pressed", String(showPassword));
+    });
+});
 signupForm.elements.role.forEach((input) => input.addEventListener("change", updateSignupRole));
 document.querySelectorAll("#signOutButton, #mobileSignOutButton").forEach((button) => {
     button.addEventListener("click", signOut);
@@ -5146,6 +5264,7 @@ function stopQRScanner() {
 
 bindPasswordConfirmation("signupPassword", "signupConfirmPassword");
 bindPasswordConfirmation("adminSetupPassword", "adminSetupConfirmPassword");
+bindPasswordConfirmation("passwordResetPassword", "passwordResetConfirmPassword");
 document.querySelector("#signupPassword").addEventListener("input", (event) => {
     event.currentTarget.setCustomValidity(
         event.currentTarget.validity.tooShort ? "Use at least 8 characters." : "",
