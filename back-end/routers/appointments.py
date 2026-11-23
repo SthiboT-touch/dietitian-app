@@ -17,7 +17,7 @@ from state import (
 users_db, clients_db, checkin_events_db,
 )
 from onboarding_services import qr_svg
-from schemas import AppointmentCreate, AppointmentDecision, GoalCreate
+from schemas import AppointmentCreate, AppointmentDecision, GoalCreate, GoalStatusUpdate
 from security import current_identity, authorize_client_access
 from consultations import completed_consultation
 from virtual_meetings import (
@@ -33,6 +33,19 @@ APPOINTMENT_FIRST_SLOT_MINUTES = 8 * 60
 APPOINTMENT_LAST_SLOT_MINUTES = 16 * 60 + 15
 ACTIVE_APPOINTMENT_STATUSES = ("PENDING", "CONFIRMED", "SCHEDULED")
 logger = logging.getLogger(__name__)
+
+
+def _ensure_goal_status_column() -> None:
+    if not config.DATABASE_ENABLED:
+        return
+    with database.cursor() as cursor:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_name = 'nutrition_goal' AND column_name = 'status'"
+        )
+        if cursor.fetchone() is None:
+            cursor.execute(
+                "ALTER TABLE nutrition_goal ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'REACHED'))"
+            )
 
 
 def _send_appointment_notification(appointment, recipient):
@@ -768,11 +781,12 @@ def set_goal(data: GoalCreate, authorization: Optional[str] = Header(default=Non
     authorize_client_access(data.client_id, identity)
     data.appointment_id = completed_consultation(data.client_id, identity[1], data.appointment_id)
     if config.DATABASE_ENABLED:
+        _ensure_goal_status_column()
         with database.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO nutrition_goal (client_id, goal_type, target_value, appointment_id) VALUES (%s, %s, %s, %s) "
+                "INSERT INTO nutrition_goal (client_id, goal_type, target_value, appointment_id, status) VALUES (%s, %s, %s, %s, %s) "
                 "RETURNING goal_id",
-                (data.client_id, data.target_metric, data.target_value, data.appointment_id),
+                (data.client_id, data.target_metric, data.target_value, data.appointment_id, data.status),
             )
             goal_id = cursor.fetchone()["goal_id"]
     else:
@@ -784,13 +798,64 @@ def set_goal(data: GoalCreate, authorization: Optional[str] = Header(default=Non
     }
 
 
+@router.post("/api/v1/goals/{goal_id}/status", tags=["4. Appointments & Goals"])
+def update_goal_status(
+    goal_id: str,
+    data: GoalStatusUpdate,
+    authorization: Optional[str] = Header(default=None),
+):
+    role, account_id = current_identity(authorization)
+    if config.DATABASE_ENABLED:
+        _ensure_goal_status_column()
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT goal_id, client_id FROM nutrition_goal WHERE goal_id = %s",
+                (goal_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                if role == "client":
+                    cursor.execute(
+                        "SELECT goal_id, client_id FROM nutrition_goal WHERE client_id = %s ORDER BY goal_id DESC LIMIT 1",
+                        (account_id,),
+                    )
+                    row = cursor.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Goal not found")
+                goal_id = row["goal_id"]
+            client_id = row["client_id"]
+            authorize_client_access(client_id, (role, account_id))
+            cursor.execute(
+                "UPDATE nutrition_goal SET status = %s WHERE goal_id = %s",
+                (data.status, goal_id),
+            )
+        return {"goal_id": goal_id, "status": data.status, "message": "Goal status updated"}
+
+    for client_id, client_goals in goals_db.items():
+        for goal in client_goals:
+            if goal.get("goal_id") == goal_id:
+                authorize_client_access(client_id, (role, account_id))
+                goal["status"] = data.status
+                return {"goal_id": goal_id, "status": data.status, "message": "Goal status updated"}
+    if role == "client":
+        client_goals = goals_db.get(account_id, [])
+        if client_goals:
+            goal = client_goals[-1]
+            authorize_client_access(account_id, (role, account_id))
+            goal["status"] = data.status
+            goal_id = goal.get("goal_id") or goal_id
+            return {"goal_id": goal_id, "status": data.status, "message": "Goal status updated"}
+    raise HTTPException(status_code=404, detail="Goal not found")
+
+
 @router.get("/api/v1/goals", tags=["4. Appointments & Goals"])
 def get_goals(client_id: str, authorization: Optional[str] = Header(default=None)):
     authorize_client_access(client_id, current_identity(authorization))
     if config.DATABASE_ENABLED:
+        _ensure_goal_status_column()
         with database.cursor() as cursor:
             cursor.execute(
-                "SELECT goal_id, appointment_id, goal_type AS target_metric, current_value, target_value, target_date "
+                "SELECT goal_id, appointment_id, goal_type AS target_metric, current_value, target_value, target_date, COALESCE(status, 'ACTIVE') AS status "
                 "FROM nutrition_goal WHERE client_id = %s ORDER BY target_date NULLS LAST, goal_id",
                 (client_id,),
             )
@@ -798,7 +863,11 @@ def get_goals(client_id: str, authorization: Optional[str] = Header(default=None
                 {
                     **dict(row),
                     "target_date": row["target_date"].isoformat() if row["target_date"] else None,
+                    "status": row["status"] or "ACTIVE",
                 }
                 for row in cursor.fetchall()
             ]
-    return goals_db.get(client_id, [])
+    return [
+        {**goal, "status": goal.get("status", "ACTIVE")}
+        for goal in goals_db.get(client_id, [])
+    ]

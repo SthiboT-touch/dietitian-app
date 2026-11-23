@@ -118,6 +118,34 @@ class EmailVerificationCheck(BaseModel):
         return validate_email(value)
 
 
+class PasswordResetRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, value: str) -> str:
+        return validate_email(value)
+
+
+class PasswordResetComplete(BaseModel):
+    email: str
+    method_id: str = Field(..., min_length=1)
+    code: str = Field(..., min_length=6, max_length=6)
+    password: str = Field(..., min_length=12, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, value: str) -> str:
+        return validate_email(value)
+
+    @field_validator("password")
+    @classmethod
+    def password_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Password cannot contain only spaces")
+        return value
+
+
 class AdminSetup(BaseModel):
     first_name: str = Field(..., min_length=1)
     last_name: str = Field(..., min_length=1)
@@ -139,6 +167,11 @@ class AdminApproval(BaseModel):
     dietitian_id: str
     status: Literal["APPROVED", "REJECTED"]
     notes: Optional[str] = None
+
+
+class DietitianStatusUpdate(BaseModel):
+    status: Literal["APPROVED", "SUSPENDED"]
+    notes: Optional[str] = Field(default=None, max_length=1000)
 
 
 class BranchCreate(BaseModel):
@@ -319,6 +352,11 @@ class GoalCreate(BaseModel):
     appointment_id: Optional[str] = None
     target_metric: str
     target_value: float
+    status: Literal["ACTIVE", "REACHED"] = "ACTIVE"
+
+
+class GoalStatusUpdate(BaseModel):
+    status: Literal["ACTIVE", "REACHED"] = "ACTIVE"
 
 
 # Section 5 Schemas

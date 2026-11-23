@@ -459,7 +459,11 @@ CREATE TABLE nutrition_goal (
 
     target_value   NUMERIC(6,2),
 
-    target_date    DATE
+    target_date    DATE,
+
+    status         VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
+
+        CHECK (status IN ('ACTIVE', 'REACHED'))
 
 );
 

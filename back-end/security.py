@@ -56,7 +56,28 @@ def require_dietitian(authorization: Optional[str] = Header(default=None)) -> st
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or token not in dietitian_sessions_db:
         raise HTTPException(status_code=401, detail="Dietitian sign-in required")
-    return dietitian_sessions_db[token]
+    dietitian_id = str(dietitian_sessions_db[token])
+    if _dietitian_is_suspended(dietitian_id):
+        dietitian_sessions_db.pop(token, None)
+        raise HTTPException(status_code=401, detail="Dietitian account is suspended")
+    return dietitian_id
+
+
+def _dietitian_is_suspended(dietitian_id: str) -> bool:
+    import config
+    import database
+    from state import users_db
+
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT status FROM dietitian WHERE dietitian_id = %s",
+                (dietitian_id,),
+            )
+            account = cursor.fetchone()
+    else:
+        account = users_db.get(dietitian_id)
+    return bool(account and account.get("status") == "SUSPENDED")
 
 
 def require_client(authorization: Optional[str] = Header(default=None)) -> str:
@@ -80,6 +101,9 @@ def current_identity(authorization: Optional[str] = None) -> tuple[str, str]:
     ):
         account_id = sessions.get(token)
         if account_id:
+            if role == "dietitian" and _dietitian_is_suspended(str(account_id)):
+                sessions.pop(token, None)
+                raise HTTPException(status_code=401, detail="Dietitian account is suspended")
             return role, str(account_id)
     # Added BRS staff accounts do not inherit admin/clinical privileges.
     staff_id = staff_sessions_db.get(token)

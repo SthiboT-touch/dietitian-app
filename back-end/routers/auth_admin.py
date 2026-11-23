@@ -53,7 +53,10 @@ from schemas import (
     EmailVerificationCheck,
     AdminCreate,
     AdminSetup,
+    PasswordResetRequest,
+    PasswordResetComplete,
     AdminApproval,
+    DietitianStatusUpdate,
     BranchCreate,
     DietitianBranchCreate,
 )
@@ -71,6 +74,8 @@ from email_verification import (
     email_verification_enabled,
     send_email_code,
     verify_email_code,
+    send_password_reset_code,
+    verify_password_reset_code,
 )
 
 router = APIRouter()
@@ -148,6 +153,118 @@ def verify_email_verification_code(data: EmailVerificationCheck):
     }
     _set_email_verification(data.email, True, result.get("user_id"))
     return {"verified": True, "enabled": True, "message": "Email verified successfully."}
+
+
+def _find_password_reset_account(email: str) -> tuple[str, str] | None:
+    if config.DATABASE_ENABLED:
+        account_tables = (
+            ("dietitian", "dietitian", "dietitian_id"),
+            ("client", "client", "client_id"),
+            ("admin", "admin", "admin_id"),
+            ("staff", "staff_account", "staff_id"),
+        )
+        with database.cursor() as cursor:
+            for kind, table, key in account_tables:
+                if kind == "staff":
+                    cursor.execute("SELECT to_regclass('public.staff_account') AS relation")
+                    if not cursor.fetchone()["relation"]:
+                        continue
+                cursor.execute(
+                    f"SELECT {key} AS id FROM {table} WHERE LOWER(email) = LOWER(%s) LIMIT 1",
+                    (email,),
+                )
+                account = cursor.fetchone()
+                if account:
+                    return kind, str(account["id"])
+        return None
+
+    for kind, store in (
+        ("dietitian", users_db),
+        ("client", users_db),
+        ("admin", admins_db),
+        ("staff", staff_accounts_db),
+    ):
+        for account_id, account in store.items():
+            if (
+                (kind not in {"dietitian", "client"} or account.get("type") == kind)
+                and account.get("email", "").casefold() == email.casefold()
+            ):
+                return kind, str(account_id)
+    return None
+
+
+@router.post("/api/v1/auth/password-reset/request", tags=["1. Auth & Admin"])
+def request_password_reset(data: PasswordResetRequest):
+    if not email_verification_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Password reset email is not configured. Contact your administrator.",
+        )
+    account = _find_password_reset_account(data.email)
+    if account:
+        try:
+            result = send_password_reset_code(data.email, account)
+            method_id = result["method_id"]
+        except EmailVerificationError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+    else:
+        method_id = secrets.token_urlsafe(24)
+    return {
+        "method_id": method_id,
+        "message": "If an account exists for that email, a password reset code has been sent.",
+    }
+
+
+@router.post("/api/v1/auth/password-reset/complete", tags=["1. Auth & Admin"])
+def complete_password_reset(data: PasswordResetComplete):
+    try:
+        verification = verify_password_reset_code(data.method_id, data.code, data.email)
+    except EmailVerificationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    account = _find_password_reset_account(data.email)
+    if not account or tuple(verification.get("context") or ()) != account:
+        raise HTTPException(status_code=400, detail="That reset code is invalid or expired.")
+
+    account_type, account_id = account
+    password_hash = hash_password(data.password)
+    if config.DATABASE_ENABLED:
+        password_columns = {
+            "dietitian": ("dietitian", "dietitian_id", "password"),
+            "client": ("client", "client_id", "password"),
+            "admin": ("admin", "admin_id", "password"),
+            "staff": ("staff_account", "staff_id", "password_hash"),
+        }
+        table, key, column = password_columns[account_type]
+        with database.cursor() as cursor:
+            cursor.execute(
+                f"UPDATE {table} SET {column} = %s WHERE {key} = %s RETURNING {key}",
+                (password_hash, account_id),
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=400, detail="That reset code is invalid or expired.")
+    else:
+        stores = {
+            "dietitian": users_db,
+            "client": users_db,
+            "admin": admins_db,
+            "staff": staff_accounts_db,
+        }
+        target = stores[account_type].get(account_id)
+        if not target:
+            raise HTTPException(status_code=400, detail="That reset code is invalid or expired.")
+        target["password_hash"] = password_hash
+
+    sessions = {
+        "dietitian": dietitian_sessions_db,
+        "client": client_sessions_db,
+        "admin": admin_sessions_db,
+        "staff": staff_sessions_db,
+    }[account_type]
+    for token, owner in list(sessions.items()):
+        if str(owner) == account_id:
+            sessions.pop(token, None)
+    return {"message": "Password reset. Sign in with your new password."}
 
 
 # --- 1. AUTHENTICATION, ADMINISTRATION & PRACTICE SETUP ---
@@ -620,6 +737,8 @@ def login(data: LoginRequest):
     ):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user or not verify_password(data.password, user.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if user.get("type") == "dietitian" and user.get("status") == "SUSPENDED":
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if (
         email_verification_enabled()
@@ -1305,7 +1424,101 @@ def create_branch(data: BranchCreate, admin_id: str = Depends(require_admin)):
 
 
 @router.get("/api/v1/admin/dashboard", tags=["1. Auth & Admin"])
-def get_admin_dashboard(admin_id: str = Depends(require_admin)):
+def get_admin_dashboard(identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
+    if branch_id:
+        if config.DATABASE_ENABLED:
+            with database.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(DISTINCT business_id) AS businesses FROM branch "
+                    "WHERE branch_id = %s",
+                    (branch_id,),
+                )
+                businesses = cursor.fetchone()["businesses"]
+                cursor.execute(
+                    "SELECT COUNT(*) AS dietitians, "
+                    "COUNT(*) FILTER (WHERE status = 'PENDING') AS pending_approvals "
+                    "FROM dietitian WHERE branch_id = %s",
+                    (branch_id,),
+                )
+                dietitians = cursor.fetchone()
+                cursor.execute(
+                    "SELECT COUNT(*) AS clients FROM client c "
+                    "JOIN dietitian d ON d.dietitian_id = c.dietitian_id "
+                    "WHERE d.branch_id = %s",
+                    (branch_id,),
+                )
+                clients = cursor.fetchone()["clients"]
+                cursor.execute(
+                    "SELECT COUNT(*) AS appointments FROM appointment a "
+                    "JOIN dietitian d ON d.dietitian_id = a.dietitian_id "
+                    "WHERE d.branch_id = %s",
+                    (branch_id,),
+                )
+                appointments = cursor.fetchone()["appointments"]
+                cursor.execute(
+                    "SELECT COUNT(*) AS meal_plans FROM meal_plan mp "
+                    "JOIN dietitian d ON d.dietitian_id = mp.dietitian_id "
+                    "WHERE d.branch_id = %s",
+                    (branch_id,),
+                )
+                meal_plans = cursor.fetchone()["meal_plans"]
+                cursor.execute(
+                    "SELECT COUNT(*) AS audit_events FROM approval_log al "
+                    "JOIN dietitian d ON d.dietitian_id = al.entity_id "
+                    "WHERE al.entity_type = 'DIETITIAN' AND d.branch_id = %s",
+                    (branch_id,),
+                )
+                audit_events = cursor.fetchone()["audit_events"]
+            return {
+                "businesses": businesses,
+                "branches": 1,
+                "dietitians": dietitians["dietitians"],
+                "clients": clients,
+                "appointments": appointments,
+                "meal_plans": meal_plans,
+                "pending_approvals": dietitians["pending_approvals"],
+                "audit_events": audit_events,
+            }
+
+        branch = branches_db[branch_id]
+        branch_dietitians = {
+            str(user["id"])
+            for user in users_db.values()
+            if user.get("type") == "dietitian" and str(user.get("branch_id")) == branch_id
+        }
+        client_ids = {
+            str(user["id"])
+            for user in users_db.values()
+            if user.get("type") == "client"
+            and str(user.get("dietitian_id")) in branch_dietitians
+        }
+        return {
+            "businesses": int(bool(branch.get("business_id"))),
+            "branches": 1,
+            "dietitians": len(branch_dietitians),
+            "clients": len(client_ids),
+            "appointments": sum(
+                str(item.get("dietitian_id")) in branch_dietitians
+                for item in appointments_db.values()
+            ),
+            "meal_plans": sum(
+                str(item.get("dietitian_id")) in branch_dietitians
+                for item in meal_plans_db.values()
+            ),
+            "pending_approvals": sum(
+                user.get("status") == "PENDING"
+                for user in users_db.values()
+                if user.get("type") == "dietitian"
+                and str(user.get("branch_id")) == branch_id
+            ),
+            "audit_events": sum(
+                entry.get("entity_type") == "DIETITIAN"
+                and str(entry.get("entity_id")) in branch_dietitians
+                for entry in approval_log_db
+            ),
+        }
+
     if config.DATABASE_ENABLED:
         counts = {}
         with database.cursor() as cursor:
@@ -1450,6 +1663,88 @@ def inspect_admin_dietitian(
     return {**record, "documents": documents, "reviews": reviews}
 
 
+@router.patch("/api/v1/admin/dietitians/{dietitian_id}/status", tags=["1. Auth & Admin"])
+def update_admin_dietitian_status(
+    dietitian_id: str,
+    data: DietitianStatusUpdate,
+    identity=Depends(require_admin_or_branch_manager),
+):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
+    admin_id = identity[1] if identity[0] == "admin" else None
+    staff_id = identity[1] if identity[0] == "branch_manager" else None
+    notes = data.notes.strip() if data.notes else ""
+    if data.status == "SUSPENDED" and not notes:
+        raise HTTPException(status_code=422, detail="A reason is required to suspend a dietitian")
+
+    if config.DATABASE_ENABLED:
+        with database.cursor() as cursor:
+            cursor.execute(
+                "SELECT branch_id, status FROM dietitian "
+                "WHERE dietitian_id = %s FOR UPDATE",
+                (dietitian_id,),
+            )
+            dietitian = cursor.fetchone()
+            if not dietitian or (
+                branch_id and str(dietitian["branch_id"]) != branch_id
+            ):
+                raise HTTPException(status_code=404, detail="Dietitian not found")
+            current_status = dietitian["status"]
+            if (current_status, data.status) not in {
+                ("APPROVED", "SUSPENDED"),
+                ("SUSPENDED", "APPROVED"),
+            }:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Only approved dietitians can be suspended, and only suspended dietitians can be restored",
+                )
+            cursor.execute(
+                "UPDATE dietitian SET status = %s WHERE dietitian_id = %s",
+                (data.status, dietitian_id),
+            )
+            cursor.execute(
+                "INSERT INTO approval_log "
+                "(admin_id, staff_id, entity_type, entity_id, action, comments) "
+                "VALUES (%s, %s, 'DIETITIAN', %s, %s, %s)",
+                (admin_id, staff_id, dietitian_id, data.status, notes or None),
+            )
+    else:
+        dietitian = users_db.get(dietitian_id)
+        if (
+            not dietitian
+            or dietitian.get("type") != "dietitian"
+            or (branch_id and str(dietitian.get("branch_id")) != branch_id)
+        ):
+            raise HTTPException(status_code=404, detail="Dietitian not found")
+        current_status = dietitian.get("status", "APPROVED")
+        if (current_status, data.status) not in {
+            ("APPROVED", "SUSPENDED"),
+            ("SUSPENDED", "APPROVED"),
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail="Only approved dietitians can be suspended, and only suspended dietitians can be restored",
+            )
+        dietitian["status"] = data.status
+        approval_log_db.append(
+            {
+                "admin_id": admin_id,
+                "staff_id": staff_id,
+                "entity_type": "DIETITIAN",
+                "entity_id": dietitian_id,
+                "action": data.status,
+                "comments": notes or None,
+                "action_date": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+    if data.status == "SUSPENDED":
+        for token, account_id in list(dietitian_sessions_db.items()):
+            if str(account_id) == dietitian_id:
+                dietitian_sessions_db.pop(token, None)
+
+    return {"message": f"Dietitian status updated to {data.status}"}
+
+
 @router.get("/api/v1/admin/businesses", tags=["1. Auth & Admin"])
 def list_admin_businesses(admin_id: str = Depends(require_admin)):
     if config.DATABASE_ENABLED:
@@ -1484,15 +1779,24 @@ def list_admin_branches(admin_id: str = Depends(require_admin)):
 
 
 @router.get("/api/v1/admin/clients", tags=["1. Auth & Admin"])
-def list_admin_clients(admin_id: str = Depends(require_admin)):
+def list_admin_clients(identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute(
+            query = (
                 "SELECT c.client_id, c.name, c.email, c.status, c.date_of_birth, "
                 "TRIM(d.first_name || ' ' || d.last_name) AS dietitian_name "
-                "FROM client c LEFT JOIN dietitian d ON d.dietitian_id = c.dietitian_id "
-                "ORDER BY LOWER(c.name)"
+                "FROM client c "
+                + (
+                    "JOIN dietitian d ON d.dietitian_id = c.dietitian_id "
+                    if branch_id
+                    else "LEFT JOIN dietitian d ON d.dietitian_id = c.dietitian_id "
+                )
             )
+            if branch_id:
+                query += "WHERE d.branch_id = %s "
+            query += "ORDER BY LOWER(c.name)"
+            cursor.execute(query, (branch_id,) if branch_id else None)
             return [
                 {
                     **dict(row),
@@ -1502,7 +1806,7 @@ def list_admin_clients(admin_id: str = Depends(require_admin)):
                 }
                 for row in cursor.fetchall()
             ]
-    return [
+    clients = [
         {
             "client_id": user["id"],
             "name": user["full_name"],
@@ -1516,25 +1820,59 @@ def list_admin_clients(admin_id: str = Depends(require_admin)):
         for user in sorted(users_db.values(), key=lambda item: item.get("full_name", "").casefold())
         if user.get("type") == "client"
     ]
+    if branch_id:
+        branch_dietitian_ids = {
+            str(user["id"])
+            for user in users_db.values()
+            if user.get("type") == "dietitian"
+            and str(user.get("branch_id")) == branch_id
+        }
+        clients = [
+            client
+            for client in clients
+            if str(users_db.get(client["client_id"], {}).get("dietitian_id"))
+            in branch_dietitian_ids
+        ]
+    return clients
 
 
 @router.get("/api/v1/admin/audit-logs", tags=["1. Auth & Admin"])
-def list_admin_audit_logs(admin_id: str = Depends(require_admin)):
+def list_admin_audit_logs(identity=Depends(require_admin_or_branch_manager)):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute(
+            query = (
                 "SELECT al.approval_log_id AS log_id, al.admin_id, al.staff_id, "
                 "COALESCE(TRIM(a.first_name || ' ' || a.last_name), s.full_name) AS admin_name, al.entity_type, "
                 "al.entity_id, al.action, al.comments, al.action_date "
                 "FROM approval_log al LEFT JOIN admin a ON a.admin_id = al.admin_id "
                 "LEFT JOIN staff_account s ON s.staff_id = al.staff_id "
-                "ORDER BY al.action_date DESC LIMIT 500"
             )
+            if branch_id:
+                query += (
+                    "JOIN dietitian d ON d.dietitian_id = al.entity_id "
+                    "WHERE al.entity_type = 'DIETITIAN' AND d.branch_id = %s "
+                )
+            query += "ORDER BY al.action_date DESC LIMIT 500"
+            cursor.execute(query, (branch_id,) if branch_id else None)
             return [
                 {**dict(row), "action_date": row["action_date"].isoformat()}
                 for row in cursor.fetchall()
             ]
-    return [
+    logs = [
         {"log_id": f"audit-{index + 1}", **entry, "action_date": entry.get("action_date", "")}
         for index, entry in enumerate(reversed(approval_log_db))
     ]
+    if branch_id:
+        branch_dietitians = {
+            str(user["id"])
+            for user in users_db.values()
+            if user.get("type") == "dietitian" and str(user.get("branch_id")) == branch_id
+        }
+        logs = [
+            entry
+            for entry in logs
+            if entry.get("entity_type") == "DIETITIAN"
+            and str(entry.get("entity_id")) in branch_dietitians
+        ]
+    return logs

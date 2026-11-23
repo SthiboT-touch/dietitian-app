@@ -304,6 +304,52 @@ select:focus {
     justify-content: space-between;
     margin-top: 10px;
 }
+.password-input-wrap {
+    position: relative;
+    width: 100%;
+}
+.password-input-wrap input {
+    padding-right: 72px !important;
+}
+.password-visibility-toggle {
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    padding: 5px 2px;
+    transform: translateY(-50%);
+    border: 0;
+    background: transparent;
+    color: var(--green-deep);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+}
+.password-visibility-toggle:focus-visible,
+.auth-text-button:focus-visible {
+    border-radius: 3px;
+    outline: 2px solid var(--green);
+    outline-offset: 3px;
+}
+.auth-text-button {
+    justify-self: end;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+    color: var(--green-deep);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+}
+.auth-text-button:hover,
+.password-visibility-toggle:hover {
+    text-decoration: underline;
+}
+.auth-form .form-hint {
+    margin: 0 0 4px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.5;
+}
 .button {
     display: inline-flex;
     min-height: 45px;
@@ -956,6 +1002,33 @@ select:focus {
 }
 .goal-current strong {
     font-size: 12px;
+}
+.goal-status-wrap {
+    display: grid;
+    justify-items: end;
+    gap: 6px;
+}
+.goal-status,
+.goal-reached-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+.goal-status.reached {
+    background: var(--green-pale);
+    color: var(--green-deep);
+}
+.goal-reached-button {
+    border: 1px solid var(--green-deep);
+    background: transparent;
+    color: var(--green-deep);
 }
 .appointment-row > span {
     color: var(--muted);

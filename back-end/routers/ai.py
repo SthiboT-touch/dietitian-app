@@ -29,9 +29,18 @@ from security import require_dietitian, dietitian_sessions_db, client_sessions_d
 from state import clients_db, ai_recommendations_db, ai_conversations_db, foods_db
 from schemas import AIGenerateRequest, AIChatRequest, RecommendationReview, PatientAgentActivation, PatientAgentMessage
 from helpers import fetch_client_profile, decode_recommendation
+from ai_cache import response_cache
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _response_cache_key(workflow, payload):
+    return response_cache.key({
+        "version": 1, "workflow": workflow, "payload": payload,
+        "model": os.getenv("OLLAMA_MODEL", "llama3.2"),
+        "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    })
 
 
 def _langsmith_trace_config(workflow: str) -> dict[str, Any]:
@@ -217,6 +226,17 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
         )
     )
 
+    # Include the complete effective prompt and identity; never share answers across users.
+    scope = state.get("user_id")
+    cache_key = _response_cache_key("chat", {
+        "scope": scope, "role": state["role"],
+        "messages": [{"type": message.type, "content": message.content} for message in messages],
+        "catalog": foods_db if not config.DATABASE_ENABLED else None,
+    }) if scope else None
+    cached = response_cache.get(cache_key) if cache_key else None
+    if cached is not None:
+        return cached
+
     try:
         agent = _create_chat_agent(state["role"])
         if patient_context:
@@ -246,7 +266,13 @@ def _reply_with_chat_agent(state: ChatWorkflowState) -> dict:
                 return {
                     "reply": "I couldn't provide a clear nutrition response just now. Please ask again in plain language."
                 }
-            return {"reply": content.strip(), "retrieved_references": references}
+            reply = {"reply": content.strip(), "retrieved_references": references}
+            # Catalog lookups must execute again so changes to live catalog data are visible.
+            used_tools = any(getattr(turn, "tool_calls", None) or getattr(turn, "type", None) == "tool"
+                             for turn in result["messages"])
+            if cache_key and not used_tools:
+                response_cache.put(cache_key, reply)
+            return reply
     except (
         httpx.HTTPError,
         RequestError,
@@ -435,10 +461,21 @@ def _load_plan_context(state: PlanWorkflowState) -> dict:
 def _generate_plan_node(state: PlanWorkflowState) -> dict:
     profile = state.get("client_profile") or {}
     query = state["dietary_goal"] + " " + " ".join(map(str, profile.get("conditions", [])))
-    return {
-        "retrieved_references": retrieve_context(query),
+    references = retrieve_context(query)
+    cache_key = _response_cache_key("plan", {
+        "client_id": state["client_id"], "dietitian_id": state.get("dietitian_id"),
+        "appointment_id": state.get("appointment_id"), "goal": state["dietary_goal"],
+        "profile": profile, "references": references,
+    })
+    cached = response_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    result = {
+        "retrieved_references": references,
         "generated_plan": generate_llama_plan(state["dietary_goal"], profile),
     }
+    response_cache.put(cache_key, result)
+    return result
 
 
 def _persist_recommendation_node(state: PlanWorkflowState) -> dict:
@@ -691,7 +728,7 @@ def chat_patient_agent(client_id: str, data: PatientAgentMessage,
     context = _patient_agent_context(client_id, dietitian_id, authorization, session["guidance"])
     with tracing_context(enabled=False):
         result = _create_chat_workflow().invoke({
-            "user_id": "", "role": "patient_dietitian", "message": data.message.strip(),
+            "user_id": f"dietitian:{dietitian_id}:patient:{client_id}", "role": "patient_dietitian", "message": data.message.strip(),
             "conversation": [{**turn, "content": turn["content"][:2000]} for turn in session["messages"][-8:]],
             "patient_context": context, "persist": False,
         })

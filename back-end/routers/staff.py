@@ -12,7 +12,13 @@ from pydantic import BaseModel, Field
 
 import config
 import database
-from role_management import STAFF_ROLES, BRANCH_REQUIRED_ROLES, ROLE_LABELS, require_roles
+from role_management import (
+    STAFF_ROLES,
+    BRANCH_REQUIRED_ROLES,
+    ROLE_LABELS,
+    branch_id_for_manager,
+    require_roles,
+)
 from security import hash_password
 from state import branches_db, staff_accounts_db, staff_sessions_db, users_db, admins_db
 
@@ -158,26 +164,53 @@ def branch_manager_overview(identity=Depends(require_roles("branch_manager"))):
 
 
 @router.get("/api/v1/admin/staff")
-def list_staff(identity=Depends(require_roles("admin"))):
+def list_staff(identity=Depends(require_roles("admin", "branch_manager"))):
+    branch_id = branch_id_for_manager(identity[1]) if identity[0] == "branch_manager" else None
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute(
+            query = (
                 "SELECT staff_id, full_name, email, role, branch_id, is_active "
-                "FROM staff_account ORDER BY LOWER(full_name)"
+                "FROM staff_account "
             )
-            return [dict(row) for row in cursor.fetchall()]
-    return sorted(
-        (_present(r) for r in staff_accounts_db.values()), key=lambda r: r["full_name"].casefold()
-    )
+            if branch_id:
+                query += "WHERE branch_id = %s AND role IN ('reception', 'branch_manager') "
+            query += "ORDER BY LOWER(full_name)"
+            cursor.execute(query, (branch_id,) if branch_id else None)
+            rows = [dict(row) for row in cursor.fetchall()]
+    else:
+        rows = [
+            _present(record)
+            for record in staff_accounts_db.values()
+            if not branch_id
+            or (
+                str(record.get("branch_id")) == branch_id
+                and record.get("role") in {"reception", "branch_manager"}
+            )
+        ]
+        rows.sort(key=lambda row: row["full_name"].casefold())
+    if branch_id:
+        return [
+            {**row, "can_manage": row["role"] == "reception"}
+            for row in rows
+        ]
+    return rows
 
 
 @router.post("/api/v1/admin/staff", status_code=201)
-def create_staff(data: StaffCreate, identity=Depends(require_roles("admin"))):
+def create_staff(data: StaffCreate, identity=Depends(require_roles("admin", "branch_manager"))):
     email = data.email.strip().lower()
     name = data.full_name.strip()
     if not name or not email or "@" not in email:
         raise HTTPException(status_code=422, detail="Valid full name and email are required")
-    _check_branch(data.role, data.branch_id)
+    if identity[0] == "branch_manager":
+        if data.role != "reception":
+            raise HTTPException(status_code=403, detail="Branch managers can create reception accounts only")
+        branch_id = branch_id_for_manager(identity[1])
+        if data.branch_id and str(data.branch_id) != branch_id:
+            raise HTTPException(status_code=403, detail="Staff must be assigned to your branch")
+    else:
+        branch_id = data.branch_id
+    _check_branch(data.role, branch_id)
     _ensure_unique_email(email)
     record = {
         "staff_id": str(uuid.uuid4()),
@@ -185,7 +218,7 @@ def create_staff(data: StaffCreate, identity=Depends(require_roles("admin"))):
         "email": email,
         "password_hash": hash_password(data.password),
         "role": data.role,
-        "branch_id": data.branch_id,
+        "branch_id": branch_id,
         "is_active": True,
     }
     if config.DATABASE_ENABLED:
@@ -200,7 +233,7 @@ def create_staff(data: StaffCreate, identity=Depends(require_roles("admin"))):
                     email,
                     record["password_hash"],
                     data.role,
-                    data.branch_id,
+                    branch_id,
                 ),
             )
     else:
@@ -209,21 +242,53 @@ def create_staff(data: StaffCreate, identity=Depends(require_roles("admin"))):
 
 
 @router.put("/api/v1/admin/staff/{staff_id}")
-def update_staff(staff_id: str, data: StaffUpdate, identity=Depends(require_roles("admin"))):
-    _check_branch(data.role, data.branch_id)
+def update_staff(
+    staff_id: str,
+    data: StaffUpdate,
+    identity=Depends(require_roles("admin", "branch_manager")),
+):
+    if identity[0] == "branch_manager":
+        if staff_id == identity[1]:
+            raise HTTPException(status_code=403, detail="Branch managers cannot change their own account")
+        if data.role != "reception":
+            raise HTTPException(status_code=403, detail="Branch managers can manage reception accounts only")
+        branch_id = branch_id_for_manager(identity[1])
+        if data.branch_id and str(data.branch_id) != branch_id:
+            raise HTTPException(status_code=403, detail="Staff must remain assigned to your branch")
+    else:
+        branch_id = data.branch_id
+    _check_branch(data.role, branch_id)
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+            if identity[0] == "branch_manager":
+                cursor.execute(
+                    "SELECT role, branch_id FROM staff_account WHERE staff_id = %s FOR UPDATE",
+                    (staff_id,),
+                )
+                current = cursor.fetchone()
+                if (
+                    not current
+                    or current["role"] != "reception"
+                    or str(current["branch_id"]) != branch_id
+                ):
+                    raise HTTPException(status_code=404, detail="Staff account not found")
             cursor.execute(
                 "UPDATE staff_account SET role = %s, branch_id = %s, is_active = %s, "
                 "updated_at = NOW() WHERE staff_id = %s "
                 "RETURNING staff_id, full_name, email, role, branch_id, is_active",
-                (data.role, data.branch_id, data.is_active, staff_id),
+                (data.role, branch_id, data.is_active, staff_id),
             )
             record = cursor.fetchone()
     else:
         record = staff_accounts_db.get(staff_id)
+        if identity[0] == "branch_manager" and (
+            not record
+            or record.get("role") != "reception"
+            or str(record.get("branch_id")) != branch_id
+        ):
+            raise HTTPException(status_code=404, detail="Staff account not found")
         if record:
-            record.update(role=data.role, branch_id=data.branch_id, is_active=data.is_active)
+            record.update(role=data.role, branch_id=branch_id, is_active=data.is_active)
     if not record:
         raise HTTPException(status_code=404, detail="Staff account not found")
     # Changes take effect immediately: old sessions cannot retain an outdated role.

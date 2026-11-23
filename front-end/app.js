@@ -1,6 +1,8 @@
 ﻿const authScreen = document.querySelector("#authScreen");
 const workspace = document.querySelector("#workspace");
 const loginForm = document.querySelector("#loginForm");
+const passwordResetRequestForm = document.querySelector("#passwordResetRequestForm");
+const passwordResetCompleteForm = document.querySelector("#passwordResetCompleteForm");
 const signupForm = document.querySelector("#signupForm");
 const adminSetupForm = document.querySelector("#adminSetupForm");
 const authMessage = document.querySelector("#authMessage");
@@ -27,6 +29,7 @@ const staffRoleNames = {
 };
 
 let currentUser = null;
+let passwordResetMethodId = "";
 let profileAvatarObjectUrl = null;
 let qrCameraStream = null;
 let qrScanFrame = null;
@@ -339,7 +342,15 @@ function showWorkspace(user, initialView = "overview") {
     document.querySelectorAll("[data-manager-dietitian-only]").forEach((item) => {
         item.hidden = !isAdmin && user.type !== "branch_manager";
     });
-    // Keep the Dietitian sidebar limited to the six requested menu items.
+    document.querySelectorAll("[data-manager-approval-only]").forEach((item) => {
+        item.hidden = !isAdmin && user.type !== "branch_manager";
+    });
+    document.querySelectorAll(
+        "[data-manager-patients-only], [data-manager-reports-only], [data-manager-audit-only], [data-manager-staff-only]",
+    ).forEach((item) => {
+        item.hidden = !isAdmin && user.type !== "branch_manager";
+    });
+    // Keep the dietitian's clinical tools and AI workspace available in the sidebar.
 if (isDietitian) {
     const nav = document.querySelector(".side-nav");
 
@@ -348,6 +359,7 @@ if (isDietitian) {
         "appointment-requests",
         "reviews",
         "clients",
+        "ai-workspace",
         "support",
         "dietitian-settings",
     ];
@@ -364,7 +376,7 @@ if (isDietitian) {
         item.hidden = true;
     });
 
-    // Show and arrange the six requested items.
+    // Show and arrange the dietitian menu items.
     dietitianMenu.forEach((view) => {
         const item = menuItems.get(view);
 
@@ -756,9 +768,13 @@ function updateSignupRole() {
 function setAuthMode(mode) {
     const isSignup = mode === "signup";
     const isAdminSetup = mode === "admin-setup";
-    loginForm.hidden = isSignup || isAdminSetup;
+    const isPasswordReset = mode === "password-reset";
+    loginForm.hidden = isSignup || isAdminSetup || isPasswordReset;
+    passwordResetRequestForm.hidden = !isPasswordReset;
+    passwordResetCompleteForm.hidden = true;
     signupForm.hidden = !isSignup;
     adminSetupForm.hidden = !isAdminSetup;
+    document.querySelector("#authTabs").hidden = isPasswordReset;
     document.querySelector("#loginTab").classList.toggle("is-active", mode === "login");
     document.querySelector("#signupTab").classList.toggle("is-active", isSignup);
     document.querySelector("#adminSetupTab").classList.toggle("is-active", isAdminSetup);
@@ -767,16 +783,37 @@ function setAuthMode(mode) {
     document.querySelector("#adminSetupTab").setAttribute("aria-selected", String(isAdminSetup));
     document.querySelector("#authHeading").textContent = isAdminSetup
         ? "Set up your administrator."
-        : isSignup
-          ? "Create your account."
-          : "Welcome back.";
+        : isPasswordReset
+          ? "Reset your password."
+          : isSignup
+            ? "Create your account."
+            : "Welcome back.";
     document.querySelector("#authSubheading").textContent = isAdminSetup
         ? "Create the first administrator for this installation."
-        : isSignup
-          ? "Join your nutrition practice workspace."
-          : "Sign in to continue to your nutrition workspace.";
+        : isPasswordReset
+          ? "We’ll email you a code to securely reset your password."
+          : isSignup
+            ? "Join your nutrition practice workspace."
+            : "Sign in to continue to your nutrition workspace.";
     authMessage.hidden = true;
+    if (!isPasswordReset) {
+        passwordResetMethodId = "";
+        passwordResetRequestForm.reset();
+        passwordResetCompleteForm.reset();
+        resetPasswordVisibility(passwordResetCompleteForm);
+        passwordResetRequestForm.hidden = true;
+    }
     if (isSignup) updateSignupRole();
+}
+
+function resetPasswordVisibility(form) {
+    form.querySelectorAll("[data-password-toggle]").forEach((button) => {
+        const input = document.getElementById(button.dataset.passwordToggle);
+        input.type = "password";
+        button.textContent = "Show";
+        button.setAttribute("aria-label", "Show password");
+        button.setAttribute("aria-pressed", "false");
+    });
 }
 
 function passwordsMatch(passwordId, confirmationId) {
@@ -1048,13 +1085,14 @@ function renderAIWorkspaceTabs(activePanel) {
     if (currentUser.type !== "dietitian") return "";
     return `
     <div class="ai-workspace-tabs" role="tablist" aria-label="Nutrition workspace">
-      <button class="ai-workspace-tab${activePanel === "coach" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "coach"}" data-ai-panel="coach" type="button">Nutrition Coach</button>
+      <button class="ai-workspace-tab${activePanel === "coach" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "coach"}" data-ai-panel="coach" type="button">Ask AI</button>
+      <button class="ai-workspace-tab${activePanel === "patient" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "patient"}" data-ai-panel="patient" type="button">Patient Assistant</button>
       <button class="ai-workspace-tab${activePanel === "plan" ? " is-active" : ""}" role="tab" aria-selected="${activePanel === "plan"}" data-ai-panel="plan" type="button">Plan Studio</button>
     </div>`;
 }
 
 async function renderAIWorkspace(activePanel = "coach", clientId = "") {
-    const panel = activePanel === "plan" && currentUser.type === "dietitian" ? "plan" : "coach";
+    const panel = currentUser.type === "dietitian" && ["plan", "patient"].includes(activePanel) ? activePanel : "coach";
     workspaceContent.innerHTML = `
     ${pageHeading("NUTRITION WORKSPACE", "Food, plans, and care guidance.", "Support a wide range of nutrition needs, from everyday wellbeing to clinical and life-stage care.")}
     <section class="nutrition-workspace-banner" aria-label="Personalised nutrition care">
@@ -1068,7 +1106,7 @@ async function renderAIWorkspace(activePanel = "coach", clientId = "") {
     });
     if (panel === "plan") {
         await renderAIStudio(clientId);
-    } else if (currentUser.type === "dietitian") {
+    } else if (panel === "patient") {
         await renderPatientAgent(clientId);
     } else {
         await renderAIChat();
@@ -1173,6 +1211,7 @@ async function renderAIChat() {
       </div>
     </section>
     <section class="content-panel chat-panel" data-fixed-theme="light">
+      ${role === "dietitian" ? '<p class="document-hint">Ask a general nutrition question here. To use a patient’s records and your clinical guidance, open the Patient Assistant tab.</p>' : ""}
       <div class="chat-thread">
         ${messages
             .map(
@@ -2436,13 +2475,43 @@ async function renderClientGoals(clientId) {
     <div class="goal-list">${
         goals.length
             ? goals
-                  .map(
-                      (goal) => `
-      <article class="goal-row"><div><span class="subsection-label">${escapeHtml(goal.target_metric)}</span><h3>Target ${escapeHtml(goal.target_value)}</h3></div><div class="goal-current"><span>Current</span><strong>${goal.current_value == null ? "Not recorded" : escapeHtml(goal.current_value)}</strong></div></article>`,
-                  )
+                  .map((goal) => {
+                      const goalId = goal.goal_id || goal.id || goal.goalId;
+                      const buttonMarkup =
+                          goal.status === "REACHED"
+                              ? `<div class="goal-status-wrap"><span class="goal-status reached">Reached</span><button class="button quiet-button goal-reached-button" type="button" data-goal-status="${escapeHtml(goalId || "")}" data-goal-status-value="ACTIVE">Set as not reached</button></div>`
+                              : `<button class="button quiet-button goal-reached-button" type="button" data-goal-status="${escapeHtml(goalId || "")}" data-goal-status-value="REACHED">I reached this goal</button>`;
+                      return `
+      <article class="goal-row"><div><span class="subsection-label">${escapeHtml(goal.target_metric)}</span><h3>Target ${escapeHtml(goal.target_value)}</h3></div><div class="goal-current"><span>Current</span><strong>${goal.current_value == null ? "Not recorded" : escapeHtml(goal.current_value)}</strong>${goalId ? buttonMarkup : ""}</div></article>`;
+                  })
                   .join("")
             : '<p class="empty-state">Your dietitian has not assigned any goals yet. Discuss your goals at your next consultation.</p>'
     }</div>`;
+    workspaceContent.querySelectorAll("[data-goal-status]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const goalId = button.dataset.goalStatus;
+            if (!goalId) {
+                return;
+            }
+            const nextStatus = button.dataset.goalStatusValue;
+            const message = workspaceContent.querySelector("[data-message]");
+            button.disabled = true;
+            try {
+                await request(`/api/v1/goals/${encodeURIComponent(goalId)}/status`, {
+                    method: "POST",
+                    body: JSON.stringify({ status: nextStatus }),
+                });
+                await renderClientGoals(clientId);
+            } catch (error) {
+                if (message) {
+                    message.hidden = false;
+                    message.textContent = error.message;
+                    message.classList.add("error");
+                }
+                button.disabled = false;
+            }
+        });
+    });
 }
 
 async function renderClientMealPlan(clientId, selectedTab = "today") {
@@ -3902,23 +3971,36 @@ async function renderStaffDashboard() {
     const profile = await request("/api/v1/staff/me");
     const role = staffRoleNames[profile.role] || profile.role;
     if (profile.role === "branch_manager") {
-        const overview = await request("/api/v1/branch-manager/overview");
+        const [overview, summary] = await Promise.all([
+            request("/api/v1/branch-manager/overview"),
+            request("/api/v1/admin/dashboard"),
+        ]);
         workspaceContent.innerHTML = `
         ${pageHeading("BRANCH MANAGEMENT", `Welcome, ${escapeHtml(profile.full_name)}.`, `Managing ${escapeHtml(overview.branch_name)}.`)}
         <div class="admin-stat-grid">
           <section class="admin-stat"><span>Assigned branch</span><strong class="staff-role-card">${escapeHtml(overview.branch_name)}</strong></section>
           <section class="admin-stat"><span>Branch dietitians</span><strong>${Number(overview.dietitians)}</strong></section>
+          <section class="admin-stat"><span>Branch patients</span><strong>${Number(summary.clients)}</strong></section>
+          <section class="admin-stat"><span>Pending approvals</span><strong>${Number(summary.pending_approvals)}</strong></section>
           <section class="admin-stat"><span>Active branch staff</span><strong>${Number(overview.active_staff)}</strong></section>
           <section class="admin-stat"><span>Reception staff</span><strong>${Number(overview.reception_staff)}</strong></section>
           <section class="admin-stat"><span>Branch managers</span><strong>${Number(overview.branch_managers)}</strong></section>
         </div>
         <section class="content-panel"><h2 class="compact-heading">Branch operations</h2>
-          <p>Manage dietitian records and patient onboarding at your assigned branch. Dietitian registration approvals and system administration remain restricted.</p>
+          <p>Manage dietitian records and registration approvals for your assigned branch. Organization-wide administration and other branches remain restricted.</p>
           <div class="quick-grid">
             <button class="quick-link" data-go="admin-dietitians" type="button"><strong>Manage branch dietitians</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="admin-approvals" type="button"><strong>Review branch dietitian approvals</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="admin-clients" type="button"><strong>View branch patients</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="admin-reports" type="button"><strong>View branch reports</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="admin-audit-logs" type="button"><strong>View branch approval history</strong><span aria-hidden="true">&#8599;</span></button>
+            <button class="quick-link" data-go="admin-staff" type="button"><strong>Manage reception staff</strong><span aria-hidden="true">&#8599;</span></button>
             <button class="quick-link" data-go="reception-onboarding" type="button"><strong>Register patient</strong><span aria-hidden="true">&#8599;</span></button>
           </div>
         </section>`;
+        document.querySelector("#adminApprovalCount").textContent = String(
+            summary.pending_approvals,
+        );
         bindGoButtons();
         return;
     }
@@ -3969,11 +4051,26 @@ async function renderAccessEvents() {
 }
 
 async function renderAdminStaff() {
-    const [staff, branches] = await Promise.all([
-        request("/api/v1/admin/staff"),
-        request("/api/v1/admin/branches"),
-    ]);
-    const staffRoles = Object.entries(staffRoleNames);
+    const isBranchManager = currentUser.type === "branch_manager";
+    let staff;
+    let branches;
+    if (isBranchManager) {
+        const [profile, overview, branchStaff] = await Promise.all([
+            request("/api/v1/staff/me"),
+            request("/api/v1/branch-manager/overview"),
+            request("/api/v1/admin/staff"),
+        ]);
+        staff = branchStaff;
+        branches = [{ branch_id: profile.branch_id, name: overview.branch_name }];
+    } else {
+        [staff, branches] = await Promise.all([
+            request("/api/v1/admin/staff"),
+            request("/api/v1/admin/branches"),
+        ]);
+    }
+    const staffRoles = isBranchManager
+        ? [["reception", staffRoleNames.reception]]
+        : Object.entries(staffRoleNames);
     const roleChoices = (selected) =>
         staffRoles
             .map(
@@ -3982,7 +4079,7 @@ async function renderAdminStaff() {
             )
             .join("");
     const branchChoices = (selected) =>
-        `<option value="">Organization-wide / not assigned</option>` +
+        (isBranchManager ? "" : '<option value="">Organization-wide / not assigned</option>') +
         branches
             .map(
                 (branch) =>
@@ -3990,15 +4087,15 @@ async function renderAdminStaff() {
             )
             .join("");
     workspaceContent.innerHTML = `
-    ${pageHeading("ADMINISTRATION", "Staff & roles.", "Provision reception, branch management, compliance, executive, and content accounts.")}
+    ${pageHeading(isBranchManager ? "BRANCH MANAGEMENT" : "ADMINISTRATION", isBranchManager ? "Reception staff." : "Staff & roles.", isBranchManager ? "Create and manage reception accounts for your assigned branch. Branch manager accounts are visible but cannot be changed here." : "Provision reception, branch management, compliance, executive, and content accounts.")}
     <div data-message class="workspace-message" role="status" aria-live="polite" hidden></div>
     <section class="content-panel"><h2 class="compact-heading">Add a staff account</h2>
       <p class="notice">The account password must be shared securely. New roles do not automatically have access to medical records or administrator settings.</p>
       <form id="staffCreateForm" class="form-grid">
         <div class="form-field"><label for="staffFullName">Full name</label><input class="text-input" id="staffFullName" name="full_name" maxlength="200" required></div>
         <div class="form-field"><label for="staffEmail">Email</label><input class="text-input" id="staffEmail" name="email" type="email" maxlength="150" required></div>
-        <div class="form-field"><label for="staffRole">Role</label><select class="text-input" id="staffRole" name="role" required>${roleChoices("reception")}</select></div>
-        <div class="form-field"><label for="staffBranch">Assigned branch</label><select class="text-input" id="staffBranch" name="branch_id">${branchChoices(null)}</select></div>
+        <div class="form-field"><label for="staffRole">Role</label><select class="text-input" id="staffRole" name="role" required ${isBranchManager ? "disabled" : ""}>${roleChoices("reception")}</select>${isBranchManager ? '<input type="hidden" name="role" value="reception">' : ""}</div>
+        <div class="form-field"><label for="staffBranch">Assigned branch</label>${isBranchManager ? `<input class="text-input" id="staffBranch" value="${escapeHtml(branches[0].name)}" disabled><input type="hidden" name="branch_id" value="${escapeHtml(branches[0].branch_id)}">` : `<select class="text-input" id="staffBranch" name="branch_id">${branchChoices(null)}</select>`}</div>
         <div class="form-field full-width"><label for="staffPassword">Initial password (at least 12 characters)</label><input class="text-input" id="staffPassword" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></div>
         <div class="form-field full-width form-actions"><button class="button button-primary" type="submit">Create staff account</button></div>
       </form>
@@ -4012,11 +4109,11 @@ async function renderAdminStaff() {
         .map(
             (user) => `<tr data-staff-row="${escapeHtml(user.staff_id)}">
       <td>${escapeHtml(user.full_name)}</td><td>${escapeHtml(user.email)}</td>
-      <td><select class="text-input" data-staff-role aria-label="Role for ${escapeHtml(user.full_name)}">${roleChoices(user.role)}</select></td>
-      <td><select class="text-input" data-staff-branch aria-label="Branch for ${escapeHtml(user.full_name)}">${branchChoices(user.branch_id)}</select></td>
+      <td>${isBranchManager && !user.can_manage ? escapeHtml(staffRoleNames[user.role] || user.role) : `<select class="text-input" data-staff-role aria-label="Role for ${escapeHtml(user.full_name)}" ${isBranchManager ? "disabled" : ""}>${roleChoices(user.role)}</select>`}</td>
+      <td>${isBranchManager ? escapeHtml(branches[0].name) : `<select class="text-input" data-staff-branch aria-label="Branch for ${escapeHtml(user.full_name)}">${branchChoices(user.branch_id)}</select>`}</td>
       <td>${user.is_active ? "Active" : "Inactive"}</td>
-      <td><button class="button" type="button" data-staff-save>Save</button>
-      <button class="button" type="button" data-staff-toggle="${user.is_active ? "off" : "on"}">${user.is_active ? "Disable" : "Enable"}</button></td>
+      <td>${isBranchManager && !user.can_manage ? '<span class="document-hint">Read only</span>' : `<button class="button" type="button" data-staff-save>Save</button>
+      <button class="button" type="button" data-staff-toggle="${user.is_active ? "off" : "on"}">${user.is_active ? "Disable" : "Enable"}</button>`}</td>
     </tr>`,
         )
         .join("")}</tbody></table></div>`
@@ -4046,9 +4143,11 @@ async function renderAdminStaff() {
                     !window.confirm("Disable this staff account and revoke its current session?")
                 )
                     return;
+                const roleSelect = row.querySelector("[data-staff-role]");
+                const branchSelect = row.querySelector("[data-staff-branch]");
                 const payload = {
-                    role: row.querySelector("[data-staff-role]").value,
-                    branch_id: row.querySelector("[data-staff-branch]").value || null,
+                    role: roleSelect ? roleSelect.value : "reception",
+                    branch_id: branchSelect ? branchSelect.value || null : branches[0].branch_id,
                     is_active: button.hasAttribute("data-staff-toggle")
                         ? !turningOff
                         : !row.querySelector('[data-staff-toggle="on"]'),
@@ -4093,7 +4192,8 @@ function adminDietitianInspectionCards(dietitians) {
         <p>${escapeHtml(item.email)} · License ${escapeHtml(item.license_number)}</p>
         <p>${escapeHtml(item.business_name || item.practice_name || "Practice not provided")} · ${escapeHtml(item.branch_name || "Branch not provided")} · ${escapeHtml(item.branch_address || "Location not provided")}</p>
         <p>${escapeHtml(item.status)}${item.documents ? ` · ${item.documents.length} document(s) submitted` : ""}</p></div>
-        <button class="button button-primary button-small" data-inspect-dietitian="${escapeHtml(item.dietitian_id)}" type="button">Inspect dietitian</button>
+        <div class="review-actions"><button class="button button-primary button-small" data-inspect-dietitian="${escapeHtml(item.dietitian_id)}" type="button">Inspect dietitian</button>
+        ${["APPROVED", "SUSPENDED"].includes(item.status) ? `<button class="button button-small ${item.status === "APPROVED" ? "button-reject" : "button-approve"}" data-dietitian-status="${item.status === "APPROVED" ? "SUSPENDED" : "APPROVED"}" data-dietitian-id="${escapeHtml(item.dietitian_id)}" data-dietitian-name="${escapeHtml(item.full_name)}" type="button">${item.status === "APPROVED" ? "Suspend" : "Restore"}</button>` : ""}</div>
         </div></article>`).join("")}</div>`;
 }
 
@@ -4104,6 +4204,41 @@ function bindAdminDietitianInspection() {
             button.disabled = true;
             try {
                 await renderAdminDietitianInspection(button.dataset.inspectDietitian);
+            } catch (error) {
+                button.disabled = false;
+                showWorkspaceMessage(error.message, true);
+            }
+        });
+    });
+    workspaceContent.querySelectorAll("[data-dietitian-status]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const suspending = button.dataset.dietitianStatus === "SUSPENDED";
+            if (
+                !window.confirm(
+                    suspending
+                        ? `Suspend ${button.dataset.dietitianName}? They will lose access, but their records will be retained.`
+                        : `Restore ${button.dataset.dietitianName} to approved status?`,
+                )
+            ) return;
+            const notes = suspending
+                ? window.prompt("Enter a reason for suspending this dietitian:")?.trim()
+                : "";
+            if (suspending && !notes) return;
+            button.disabled = true;
+            try {
+                await request(
+                    `/api/v1/admin/dietitians/${encodeURIComponent(button.dataset.dietitianId)}/status`,
+                    {
+                        method: "PATCH",
+                        body: JSON.stringify({ status: button.dataset.dietitianStatus, notes }),
+                    },
+                );
+                await renderAdminDietitians();
+                showWorkspaceMessage(
+                    suspending
+                        ? "Dietitian suspended. Their records have been retained."
+                        : "Dietitian restored to approved status.",
+                );
             } catch (error) {
                 button.disabled = false;
                 showWorkspaceMessage(error.message, true);
@@ -4193,8 +4328,9 @@ async function renderAdminBranches() {
 
 async function renderAdminClients() {
     const clients = await request("/api/v1/admin/clients");
+    const isBranchManager = currentUser.type === "branch_manager";
     workspaceContent.innerHTML = `
-    ${pageHeading("ADMINISTRATION", "Patients.", "Review patient account records and care-team assignments.")}
+    ${pageHeading(isBranchManager ? "BRANCH MANAGEMENT" : "ADMINISTRATION", isBranchManager ? "Branch patients." : "Patients.", isBranchManager ? "Patient account directory for patients assigned to dietitians in your branch. This view does not include clinical records." : "Review patient account records and care-team assignments.")}
     ${renderAdminTable(
         ["Name", "Patient ID", "Email", "Dietitian", "Status"],
         clients.map((item) => [
@@ -4210,8 +4346,9 @@ async function renderAdminClients() {
 
 async function renderAdminReports() {
     const summary = await request("/api/v1/admin/dashboard");
+    const isBranchManager = currentUser.type === "branch_manager";
     workspaceContent.innerHTML = `
-    ${pageHeading("REPORTS", "System reports.", "Current organization and care activity totals.")}
+    ${pageHeading("REPORTS", isBranchManager ? "Branch reports." : "System reports.", isBranchManager ? "Care activity for your assigned branch only." : "Current organization and care activity totals.")}
     ${renderAdminTable(
         ["Measure", "Total"],
         [
@@ -4230,8 +4367,9 @@ async function renderAdminReports() {
 
 async function renderAdminAuditLogs() {
     const logs = await request("/api/v1/admin/audit-logs");
+    const isBranchManager = currentUser.type === "branch_manager";
     workspaceContent.innerHTML = `
-    ${pageHeading("AUDIT LOGS", "Administrative activity.", "Review approval decisions and their recorded notes.")}
+    ${pageHeading(isBranchManager ? "BRANCH HISTORY" : "AUDIT LOGS", isBranchManager ? "Branch approval history." : "Administrative activity.", isBranchManager ? "Dietitian approval and status decisions recorded for your assigned branch." : "Review approval decisions and their recorded notes.")}
     ${renderAdminTable(
         ["Date", "Administrator", "Entity", "Entity ID", "Action", "Notes"],
         logs.map((item) => [
@@ -4342,8 +4480,9 @@ async function renderAdminSettings() {
 async function renderAdminApprovals(dietitianId = null) {
     const queue = await request("/api/v1/admin/approvals/pending");
     const pending = dietitianId ? queue.filter((item) => item.dietitian_id === dietitianId) : queue;
+    const isBranchManager = currentUser.type === "branch_manager";
     workspaceContent.innerHTML = `
-    ${pageHeading("ADMINISTRATION", "Dietitian approvals.", "Review submitted documents before adding dietitians to the directory.")}
+    ${pageHeading(isBranchManager ? "BRANCH MANAGEMENT" : "ADMINISTRATION", isBranchManager ? "Branch dietitian approvals." : "Dietitian approvals.", isBranchManager ? "Review submitted documents for dietitians assigned to your branch." : "Review submitted documents before adding dietitians to the directory.")}
     <div data-message class="workspace-message" hidden></div>
     <div class="admin-approval-list">${
         pending.length
@@ -4503,6 +4642,88 @@ document.querySelector("#signupTab").addEventListener("click", () => setAuthMode
 document
     .querySelector("#adminSetupTab")
     .addEventListener("click", () => setAuthMode("admin-setup"));
+document.querySelector("#forgotPasswordLink").addEventListener("click", () => {
+    passwordResetRequestForm.elements.email.value = loginForm.elements.email.value;
+    setAuthMode("password-reset");
+    passwordResetRequestForm.elements.email.focus();
+});
+document.querySelector("#passwordResetCancelRequest").addEventListener("click", () => {
+    setAuthMode("login");
+});
+document.querySelector("#passwordResetUseDifferentEmail").addEventListener("click", () => {
+    const email = passwordResetCompleteForm.elements.email.value;
+    passwordResetMethodId = "";
+    passwordResetCompleteForm.reset();
+    resetPasswordVisibility(passwordResetCompleteForm);
+    passwordResetRequestForm.reset();
+    passwordResetRequestForm.elements.email.value = email;
+    passwordResetCompleteForm.hidden = true;
+    passwordResetRequestForm.hidden = false;
+    authMessage.hidden = true;
+    passwordResetRequestForm.elements.email.focus();
+});
+passwordResetRequestForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = passwordResetRequestForm.querySelector("button[type=submit]");
+    const email = passwordResetRequestForm.elements.email.value;
+    button.disabled = true;
+    try {
+        const result = await request("/api/v1/auth/password-reset/request", {
+            method: "POST",
+            body: JSON.stringify({ email }),
+        });
+        passwordResetMethodId = result.method_id;
+        passwordResetCompleteForm.elements.email.value = email;
+        passwordResetCompleteForm.elements.method_id.value = passwordResetMethodId;
+        document.querySelector("#passwordResetEmailSummary").textContent =
+            `If an account exists for ${email}, a reset code was sent.`;
+        passwordResetRequestForm.hidden = true;
+        passwordResetCompleteForm.hidden = false;
+        showAuthMessage(result.message, "success");
+        passwordResetCompleteForm.elements.code.focus();
+    } catch (error) {
+        showAuthMessage(error.message);
+    } finally {
+        button.disabled = false;
+    }
+});
+passwordResetCompleteForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!passwordsMatch("passwordResetPassword", "passwordResetConfirmPassword")) {
+        showAuthMessage("Passwords do not match.");
+        passwordResetCompleteForm.elements.confirm_password.focus();
+        return;
+    }
+    const button = passwordResetCompleteForm.querySelector("button[type=submit]");
+    const values = Object.fromEntries(new FormData(passwordResetCompleteForm));
+    delete values.confirm_password;
+    button.disabled = true;
+    try {
+        const result = await request("/api/v1/auth/password-reset/complete", {
+            method: "POST",
+            body: JSON.stringify(values),
+        });
+        const resetEmail = passwordResetCompleteForm.elements.email.value;
+        loginForm.reset();
+        loginForm.elements.email.value = resetEmail;
+        setAuthMode("login");
+        showAuthMessage(result.message, "success");
+    } catch (error) {
+        showAuthMessage(error.message);
+    } finally {
+        button.disabled = false;
+    }
+});
+document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+        const input = document.getElementById(button.dataset.passwordToggle);
+        const showPassword = input.type === "password";
+        input.type = showPassword ? "text" : "password";
+        button.textContent = showPassword ? "Hide" : "Show";
+        button.setAttribute("aria-label", `${showPassword ? "Hide" : "Show"} password`);
+        button.setAttribute("aria-pressed", String(showPassword));
+    });
+});
 signupForm.elements.role.forEach((input) => input.addEventListener("change", updateSignupRole));
 document.querySelectorAll("#signOutButton, #mobileSignOutButton").forEach((button) => {
     button.addEventListener("click", signOut);
@@ -5043,6 +5264,7 @@ function stopQRScanner() {
 
 bindPasswordConfirmation("signupPassword", "signupConfirmPassword");
 bindPasswordConfirmation("adminSetupPassword", "adminSetupConfirmPassword");
+bindPasswordConfirmation("passwordResetPassword", "passwordResetConfirmPassword");
 document.querySelector("#signupPassword").addEventListener("input", (event) => {
     event.currentTarget.setCustomValidity(
         event.currentTarget.validity.tooShort ? "Use at least 8 characters." : "",

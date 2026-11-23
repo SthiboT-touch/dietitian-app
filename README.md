@@ -45,6 +45,20 @@ need `python back-end/migrations/apply_016_guest_support.py` after migration 015
 
 ## Run the nutrition AI
 
+AI responses use a bounded, process-local cache (five minutes, up to 128 entries
+by default). Exact repeats can reuse successful chat answers and generated plan
+drafts. Keys include the authenticated user/patient scope, effective conversation,
+patient records and clinician guidance, retrieved references, and model settings.
+Changing these inputs generates a fresh answer; follow-up questions with changed
+history are not treated as repeats. Access and assignment checks still run before
+cache lookup. Live food-catalog tool results and failed responses are not cached.
+Plan drafts still create separate recommendations requiring review.
+
+Set `AI_CACHE_TTL_SECONDS` and `AI_CACHE_MAX_ENTRIES` in `.env` to adjust caching;
+set either to `0` to disable it. Compose forwards both settings to the API.
+Cached responses stay in API process memory, are not written to disk, and are
+cleared on restart. Separate API workers keep separate caches.
+
 In a dietitian's **Nutrition Coach** workspace, choose an assigned patient, add
 clinical guidance or restrictions, and select **Activate patient assistant**.
 Questions then use that patient's recorded allergies, conditions, measurements,
@@ -153,13 +167,20 @@ For running the API outside Compose, set `OLLAMA_BASE_URL` (default `http://loca
 
 ## Admin approvals
 
-Branch managers can inspect, approve, and reject dietitians in their assigned branch.
-Other branches and system administration remain restricted. Decisions record the
-reviewing manager in the approval history. Before using this with an existing
+Branch managers can inspect, approve, reject, suspend, and restore dietitians in
+their assigned branch. Suspension blocks new and existing dietitian sessions
+without deleting patient, appointment, or care records; restoration returns the
+dietitian to approved status. A reason is required to suspend, and status changes
+are recorded in the approval history. Branch managers can also view the account
+directory for patients assigned to dietitians at their branch, with branch-only
+reports and approval history. They can create and manage reception accounts
+within their branch; other branch-manager accounts are visible but read-only.
+Patient clinical records, other branches, and organization-wide settings remain
+restricted. Before using this with an existing
 PostgreSQL database, run `python back-end/migrations/apply_024_branch_manager_approvals.py`.
 The deployment workflow applies this migration automatically.
 
-Dietitian registrations use the `PENDING` / `APPROVED` / `REJECTED` workflow. Dietitians add a branch and submit PDF, JPEG, or PNG verification documents up to 10 MB from the **Verification documents** screen. Administrators can preview submitted documents before approving or rejecting a registration; rejection requires a reason, and decisions are recorded in `approval_log`. Branch managers can inspect dietitians and documents belonging to their assigned branch but cannot approve registrations. Documents remain private and are served through authenticated endpoints.
+Dietitian registrations use the `PENDING` / `APPROVED` / `REJECTED` workflow. Dietitians add a branch and submit PDF, JPEG, or PNG verification documents up to 10 MB from the **Verification documents** screen. Administrators can review all registrations; branch managers can review and inspect only dietitians assigned to their own branch, including submitted documents, and approve or reject them. Rejection requires a reason, and decisions are recorded in `approval_log`. Other branches and organization-wide administration remain admin-only. Documents remain private and are served through authenticated endpoints.
 
 When the database has no administrator, the **Admin setup** tab appears on the local sign-in page. Create the first admin from this computer; the setup endpoint is loopback-only and becomes unavailable after that account is created. Admin and dietitian document sessions are held in process memory, so sign in again after an API restart.
 
