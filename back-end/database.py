@@ -82,6 +82,22 @@ def table_exists(cursor, table_name):
     return bool(cursor.fetchone()["relation"])
 
 
+def column_exists(cursor, table_name, column_name):
+    """Check whether a table has a column on either supported backend."""
+    if is_sqlite():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
+            raise ValueError("Invalid table name")
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        return any(row["name"] == column_name for row in cursor.fetchall())
+    cursor.execute(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = %s "
+        "AND column_name = %s) AS column_exists",
+        (table_name, column_name),
+    )
+    return bool(cursor.fetchone()["column_exists"])
+
+
 def _sqlite_path(database_url):
     configured_path = os.environ.get("SQLITE_PATH")
     if configured_path:
@@ -234,10 +250,19 @@ def initialize_sqlite_schema(connection):
             "actor_role": "VARCHAR(32) NOT NULL DEFAULT 'reception'",
             "appointment_id": "VARCHAR(36) REFERENCES appointment(appointment_id)",
         },
-        "approval_log": {
+              "approval_log": {
             "staff_id": (
                 "VARCHAR(36) REFERENCES staff_account(staff_id) ON DELETE RESTRICT"
             ),
+            "practising_card_document_id": "VARCHAR(36)",
+            "hpcsa_verified_until": "DATE",
+            "hpcsa_register_checked": "BOOLEAN NOT NULL DEFAULT 0",
+        },
+        "dietitian": {
+            "hpcsa_verified_until": "DATE",
+        },
+        "dietitian_document": {
+            "practising_card_expires_at": "DATE",
         },
     }
     for table_name, columns in sqlite_columns.items():
@@ -269,6 +294,8 @@ def open_connection():
         connection.row_factory = sqlite3.Row
         connection.create_function("gen_random_uuid", 0, lambda: str(uuid.uuid4()))
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA busy_timeout = 8000")
         if not connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='business'"
         ).fetchone():

@@ -26,7 +26,7 @@ jobs:
           command_timeout: 30m
           envs: RESEND_API_KEY,RESEND_FROM_EMAIL
           script: |
-            set -e
+            set -eu
             cd ~/dietitian-app_2
             if [ -z "${RESEND_API_KEY:-}" ] || [ -z "${RESEND_FROM_EMAIL:-}" ]; then
               echo "Configure RESEND_API_KEY and RESEND_FROM_EMAIL as GitHub Actions repository secrets before deploying." >&2
@@ -34,20 +34,7 @@ jobs:
             fi
             git fetch origin main
             git reset --hard FETCH_HEAD
-            docker compose down
-            docker compose up -d --build db
-            for attempt in $(seq 1 30); do
-              if docker compose exec -T db pg_isready -U black -d dietitian_db; then
-                break
-              fi
-              if [ "$attempt" -eq 30 ]; then
-                echo "Database did not become ready" >&2
-                exit 1
-              fi
-              sleep 2
-            done
-            mkdir -p backups
-            docker compose exec -T db pg_dump -U black -d dietitian_db -Fc > "backups/pre-deploy-$(date +%Y%m%d-%H%M%S).dump"
+            mkdir -p data backups
             docker compose build api
             ollama_model=$(docker compose run --rm --no-deps api python -c 'import os; print(os.environ["OLLAMA_MODEL"])')
             docker compose up -d ollama
@@ -62,26 +49,61 @@ jobs:
               sleep 2
             done
             docker compose exec -T ollama ollama pull "$ollama_model"
-            docker compose run --rm --no-deps api python migrations/apply_002_client_health_schema.py
-            docker compose run --rm --no-deps api python migrations/apply_003_dietitian_document_branch.py
-            docker compose run --rm --no-deps api python migrations/apply_004_lactation_tracking.py
-            docker compose run --rm --no-deps api python migrations/apply_005_client_identity_gender.py
-            docker compose run --rm --no-deps api python migrations/apply_006_client_documents_and_meals.py
-            docker compose run --rm --no-deps api python migrations/apply_007_onboarding_consent.py
-            docker compose run --rm --no-deps api python migrations/apply_008_staff_roles.py
-            docker compose run --rm --no-deps api python migrations/apply_009_centralized_client_management.py
-            docker compose run --rm --no-deps api python migrations/apply_010_popia_consent_details.py
-            docker compose run --rm --no-deps api python migrations/apply_011_stytch_email_verification.py
-            for migration in 007_meal_plan_review 008_staff_roles_and_access_audit 009_client_registration_phone 010_client_registration_consent 011_registration_welcome_outbox 012_registration_uploads 013_client_qr_checkin 014_assisted_registration 022_appointment_visit_type 023_checkin_actor_roles; do
-              docker compose exec -T db psql -U black -d dietitian_db -v ON_ERROR_STOP=1 < "back-end/migrations/${migration}.sql"
-            done
-            docker compose run --rm --no-deps api python migrations/apply_015_support_tickets.py
-            docker compose run --rm --no-deps api python migrations/apply_016_guest_support.py
-            docker compose run --rm --no-deps api python migrations/apply_017_client_maternal_care_access.py
-            docker compose run --rm --no-deps api python migrations/apply_017_virtual_appointments.py
-            docker compose run --rm --no-deps api python migrations/apply_020_care_workflow.py
-            docker compose run --rm --no-deps api python migrations/apply_021_account_profile_photos.py
-            docker compose run --rm --no-deps api python migrations/apply_024_branch_manager_approvals.py
+            sqlite_backup="nutricare-pre-deploy-$(date +%Y%m%d-%H%M%S).sqlite"
+            if [ -f data/nutricare.sqlite ]; then
+              docker compose run --rm --no-deps api python -c \
+                'import sqlite3,sys; source=sqlite3.connect("file:/data/nutricare.sqlite?mode=ro",uri=True); backup=sqlite3.connect(sys.argv[1]); source.backup(backup); backup.close(); source.close()' \
+                "/data/$sqlite_backup"
+            fi
+            if [ ! -f data/.sqlite-cutover-complete ]; then
+              api_stopped=0
+              welcome_worker_stopped=0
+              restore_services() {
+                exit_code=$?
+                if [ "$exit_code" -ne 0 ] && [ "$api_stopped" -eq 1 ] && [ ! -f data/.sqlite-cutover-complete ]; then
+                  echo "SQLite cutover failed before the copy completed; restarting the previous API and worker." >&2
+                  if ! docker compose start api; then
+                    echo "Could not restart the previous API container." >&2
+                  fi
+                  if [ "$welcome_worker_stopped" -eq 1 ] && ! docker compose --profile notifications start welcome-worker; then
+                    echo "Could not restart the previous welcome worker." >&2
+                  fi
+                fi
+                return "$exit_code"
+              }
+              trap restore_services EXIT
+              docker compose --profile postgres-source up -d db
+              for attempt in $(seq 1 30); do
+                if docker compose exec -T db pg_isready -U black -d dietitian_db; then
+                  break
+                fi
+                if [ "$attempt" -eq 30 ]; then
+                  echo "PostgreSQL source did not become ready" >&2
+                  exit 1
+                fi
+                sleep 2
+              done
+              pg_clients=$(docker compose exec -T db psql -U black -d dietitian_db -tAc "select count(*) from client")
+              if [ "${pg_clients:-0}" -lt 1 ]; then
+                echo "PostgreSQL source has no clients; refusing to cut over" >&2
+                exit 1
+              fi
+              docker compose stop api
+              api_stopped=1
+              if [ -n "$(docker compose --profile notifications ps -q welcome-worker)" ]; then
+                docker compose --profile notifications stop welcome-worker
+                welcome_worker_stopped=1
+              fi
+              docker compose exec -T db pg_dump -U black -d dietitian_db -Fc > "backups/pre-sqlite-cutover-$(date +%Y%m%d-%H%M%S).dump"
+              docker compose run --rm --no-deps \
+                -e DATABASE_URL=postgresql://black@db:5432/dietitian_db \
+                api python migrations/migrate_postgres_to_sqlite.py --sqlite-path /data/nutricare.sqlite
+              docker compose run --rm --no-deps api touch /data/.sqlite-cutover-complete
+              docker compose stop db
+            elif [ ! -s data/nutricare.sqlite ]; then
+              echo "SQLite cutover marker exists but data/nutricare.sqlite is missing or empty" >&2
+              exit 1
+            fi
             docker compose up -d --build
             for attempt in $(seq 1 30); do
               if docker compose exec -T api python -c 'import urllib.request,json; h=json.load(urllib.request.urlopen("http://localhost:8000/health")); assert h["database"] == "online"'; then

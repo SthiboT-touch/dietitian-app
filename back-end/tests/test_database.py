@@ -40,6 +40,111 @@ def test_sqlite_cursor_returns_mapping_rows_and_commits(tmp_path, monkeypatch):
         assert cursor.fetchmany()[0].get("label") == "saved"
 
 
+def test_sqlite_connections_use_wal_and_busy_timeout(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./app.db")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "app.db"))
+
+    connection = database.open_connection()
+    try:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 8000
+    finally:
+        connection.close()
+
+
+def test_sqlite_schema_inspection_supports_tables_and_columns(tmp_path, monkeypatch):
+    import config
+    from routers.auth_admin import _find_password_reset_account
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./app.db")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "app.db"))
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+
+    with database.cursor() as cursor:
+        assert database.table_exists(cursor, "nutrition_goal")
+        assert database.column_exists(cursor, "nutrition_goal", "status")
+        assert not database.column_exists(cursor, "nutrition_goal", "missing_column")
+        assert not database.table_exists(cursor, "missing_table")
+
+    assert _find_password_reset_account("missing@example.test") is None
+
+
+def test_sqlite_appointment_queries_support_cutover(tmp_path, monkeypatch):
+    import config
+    from consultations import completed_consultation
+    from routers.appointments import _has_overlapping_appointment, get_appointment_calendar
+    from routers.onboarding import require_checkin_appointment
+    from state import dietitian_sessions_db
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./app.db")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "app.db"))
+    monkeypatch.setattr(config, "DATABASE_ENABLED", True)
+
+    future_visit = (datetime.now() + timedelta(days=2)).replace(
+        hour=10, minute=0, second=0, microsecond=0
+    )
+    past_visit = future_visit - timedelta(days=3)
+    with database.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO business (business_id, name, registration_number) "
+            "VALUES (%s, %s, %s)",
+            ("business-1", "Practice", "REG-1"),
+        )
+        cursor.execute(
+            "INSERT INTO branch (branch_id, business_id, name) VALUES (%s, %s, %s)",
+            ("branch-1", "business-1", "Main"),
+        )
+        cursor.execute(
+            "INSERT INTO dietitian "
+            "(dietitian_id, branch_id, first_name, last_name, email, password, registration_number) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            ("dietitian-1", "branch-1", "Dee", "Tician", "diet@example.test", "hash", "LIC-1"),
+        )
+        cursor.execute(
+            "INSERT INTO client "
+            "(client_id, name, email, password, id_number, date_of_birth, gender) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            ("client-1", "Patient", "patient@example.test", "hash", "ID-1", "1990-01-01", "other"),
+        )
+        cursor.execute(
+            "INSERT INTO appointment "
+            "(appointment_id, client_id, dietitian_id, date_time, duration, status) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            ("appointment-future", "client-1", "dietitian-1", future_visit, 50, "CONFIRMED"),
+        )
+        cursor.execute(
+            "INSERT INTO appointment "
+            "(appointment_id, client_id, dietitian_id, date_time, duration, status) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            ("appointment-past", "client-1", "dietitian-1", past_visit, 50, "COMPLETED"),
+        )
+
+        assert _has_overlapping_appointment(
+            cursor, "dietitian-1", future_visit
+        )
+        assert not _has_overlapping_appointment(
+            cursor, "dietitian-1", future_visit + timedelta(hours=2)
+        )
+        assert require_checkin_appointment(
+            "client-1", cursor, appointment_id="appointment-future"
+        ) == "appointment-future"
+
+    assert completed_consultation("client-1", "dietitian-1") == "appointment-past"
+
+    token = "sqlite-calendar-token"
+    dietitian_sessions_db[token] = "dietitian-1"
+    try:
+        calendar = get_appointment_calendar(f"Bearer {token}")
+    finally:
+        dietitian_sessions_db.pop(token, None)
+
+    assert {row["appointment_id"] for row in calendar} == {
+        "appointment-future",
+        "appointment-past",
+    }
+    assert all(row["checked_in_at"] is None for row in calendar)
+
+
 def test_sqlite_initializes_current_feature_tables(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite:///./app.db")
     monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "app.db"))
@@ -335,7 +440,7 @@ def test_sqlite_cursor_translates_postgresql_query_fragments(tmp_path, monkeypat
 
 def test_postgres_values_convert_to_sqlite_values():
     assert migration.sqlite_value(date(2026, 10, 28)) == "2026-10-28"
-    assert migration.sqlite_value(datetime(2026, 10, 28, tzinfo=timezone.utc)) == "2026-10-28T00:00:00+00:00"
+    assert migration.sqlite_value(datetime(2026, 10, 28, tzinfo=timezone.utc)) == "2026-10-28 00:00:00+00:00"
     assert migration.sqlite_value(Decimal("12.50")) == "12.50"
     assert migration.sqlite_value(uuid.UUID("d9f40ac5-3676-4dca-b5f1-d4c58cd09e8a")) == "d9f40ac5-3676-4dca-b5f1-d4c58cd09e8a"
 

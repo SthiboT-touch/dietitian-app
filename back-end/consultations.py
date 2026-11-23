@@ -9,9 +9,15 @@ from state import appointments_db
 def completed_consultation(client_id, dietitian_id, appointment_id=None):
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+            appointment_date_check = (
+                "datetime(date_time) <= datetime('now', '+2 hours')"
+                if database.is_sqlite()
+                else "date_time <= (NOW() AT TIME ZONE 'Africa/Johannesburg')"
+            )
             cursor.execute(
                 "SELECT appointment_id FROM appointment WHERE client_id=%s AND dietitian_id=%s "
-                "AND status='COMPLETED' AND date_time <= (NOW() AT TIME ZONE 'Africa/Johannesburg') "
+                "AND status='COMPLETED' AND "
+                f"{appointment_date_check} "
                 "AND (%s IS NULL OR appointment_id=%s) ORDER BY date_time DESC LIMIT 1",
                 (client_id, dietitian_id, appointment_id, appointment_id),
             )

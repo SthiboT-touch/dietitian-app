@@ -39,10 +39,7 @@ def _ensure_goal_status_column() -> None:
     if not config.DATABASE_ENABLED:
         return
     with database.cursor() as cursor:
-        cursor.execute(
-            "SELECT 1 FROM information_schema.columns WHERE table_name = 'nutrition_goal' AND column_name = 'status'"
-        )
-        if cursor.fetchone() is None:
+        if not database.column_exists(cursor, "nutrition_goal", "status"):
             cursor.execute(
                 "ALTER TABLE nutrition_goal ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'REACHED'))"
             )
@@ -106,6 +103,45 @@ def _appointment_overlaps(start: datetime, existing: dict) -> bool:
         minutes=existing_duration + APPOINTMENT_BUFFER_MINUTES
     )
     return existing_start < requested_end and existing_reserved_end > start
+
+
+def _has_overlapping_appointment(cursor, dietitian_id, appointment_date):
+    if database.is_sqlite():
+        status_placeholders = ", ".join("%s" for _ in ACTIVE_APPOINTMENT_STATUSES)
+        query = (
+            "SELECT 1 FROM appointment "
+            f"WHERE dietitian_id = %s AND status IN ({status_placeholders}) "
+            "AND datetime(date_time) < datetime(%s, '+' || %s || ' minutes') "
+            "AND datetime(date_time, '+' || "
+            "(COALESCE(duration, 30) + %s) || ' minutes') > datetime(%s) "
+            "LIMIT 1"
+        )
+        parameters = (
+            dietitian_id,
+            *ACTIVE_APPOINTMENT_STATUSES,
+            appointment_date,
+            APPOINTMENT_SLOT_INTERVAL_MINUTES,
+            APPOINTMENT_BUFFER_MINUTES,
+            appointment_date,
+        )
+    else:
+        query = (
+            "SELECT 1 FROM appointment "
+            "WHERE dietitian_id = %s AND status = ANY(%s) "
+            "AND date_time < %s + (%s * INTERVAL '1 minute') "
+            "AND date_time + ((COALESCE(duration, 30) + %s) * INTERVAL '1 minute') > %s "
+            "LIMIT 1"
+        )
+        parameters = (
+            dietitian_id,
+            list(ACTIVE_APPOINTMENT_STATUSES),
+            appointment_date,
+            APPOINTMENT_SLOT_INTERVAL_MINUTES,
+            APPOINTMENT_BUFFER_MINUTES,
+            appointment_date,
+        )
+    cursor.execute(query, parameters)
+    return cursor.fetchone() is not None
 
 
 def _include_appointment_qr(appointment: dict, role: str) -> dict:
@@ -194,22 +230,9 @@ def create_appointment(
                 "SELECT pg_advisory_xact_lock(hashtext(%s))",
                 (f"appointment:{data.dietitian_id}",),
             )
-            cursor.execute(
-                "SELECT 1 FROM appointment "
-                "WHERE dietitian_id = %s AND status = ANY(%s) "
-                "AND date_time < %s + (%s * INTERVAL '1 minute') "
-                "AND date_time + ((COALESCE(duration, 30) + %s) * INTERVAL '1 minute') > %s "
-                "LIMIT 1",
-                (
-                    data.dietitian_id,
-                    list(ACTIVE_APPOINTMENT_STATUSES),
-                    appointment_date,
-                    APPOINTMENT_SLOT_INTERVAL_MINUTES,
-                    APPOINTMENT_BUFFER_MINUTES,
-                    appointment_date,
-                ),
-            )
-            if cursor.fetchone():
+            if _has_overlapping_appointment(
+                cursor, data.dietitian_id, appointment_date
+            ):
                 raise HTTPException(
                     status_code=409,
                     detail="This appointment time is no longer available. Choose another slot.",
@@ -342,8 +365,14 @@ def get_appointment_calendar(
 
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
+            checkin_date_match = (
+                "date(e.checked_in_at, '+2 hours') = date(a.date_time)"
+                if database.is_sqlite()
+                else "(e.checked_in_at AT TIME ZONE 'Africa/Johannesburg')::date "
+                "= a.date_time::date"
+            )
             cursor.execute(
-                """
+                f"""
                 SELECT
                     a.appointment_id,
                     a.client_id,
@@ -355,23 +384,21 @@ def get_appointment_calendar(
                     a.appointment_type,
                     a.meeting_link,
                     c.name AS client_name,
-                    checkin.checked_in_at
+                    (
+                        SELECT e.checked_in_at
+                        FROM client_checkin_event e
+                        WHERE e.client_id = a.client_id
+                          AND e.appointment_id = a.appointment_id
+                          AND e.branch_id = COALESCE(a.branch_id, d.branch_id)
+                          AND {checkin_date_match}
+                        ORDER BY e.checked_in_at DESC
+                        LIMIT 1
+                    ) AS checked_in_at
                 FROM appointment a
                 JOIN client c
                     ON c.client_id = a.client_id
                 JOIN dietitian d
                     ON d.dietitian_id = a.dietitian_id
-                LEFT JOIN LATERAL (
-                    SELECT e.checked_in_at
-                    FROM client_checkin_event e
-                    WHERE e.client_id = a.client_id
-                      AND e.appointment_id = a.appointment_id
-                      AND e.branch_id = COALESCE(a.branch_id, d.branch_id)
-                      AND (e.checked_in_at AT TIME ZONE 'Africa/Johannesburg')::date
-                          = a.date_time::date
-                    ORDER BY e.checked_in_at DESC
-                    LIMIT 1
-                ) checkin ON TRUE
                 WHERE a.dietitian_id = %s
                 ORDER BY a.date_time
                 """,
@@ -384,8 +411,8 @@ def get_appointment_calendar(
                     "appointment_date": row["appointment_date"].isoformat(),
                     "checked_in_at": (
                         row["checked_in_at"].isoformat()
-                        if row["checked_in_at"]
-                        else None
+                        if isinstance(row["checked_in_at"], datetime)
+                        else row["checked_in_at"]
                     ),
                 }
                 for row in cursor.fetchall()
@@ -748,7 +775,17 @@ def complete_appointment(appointment_id: str, authorization: Optional[str] = Hea
         raise HTTPException(403, "Only the appointment's dietitian can complete the consultation")
     if config.DATABASE_ENABLED:
         with database.cursor() as cursor:
-            cursor.execute("SELECT client_id, dietitian_id, status, date_time <= (NOW() AT TIME ZONE 'Africa/Johannesburg') AS has_started FROM appointment WHERE appointment_id=%s FOR UPDATE", (appointment_id,))
+            start_check = (
+                "datetime(date_time) <= datetime('now', '+2 hours')"
+                if database.is_sqlite()
+                else "date_time <= (NOW() AT TIME ZONE 'Africa/Johannesburg')"
+            )
+            cursor.execute(
+                "SELECT client_id, dietitian_id, status, "
+                f"{start_check} AS has_started FROM appointment "
+                "WHERE appointment_id=%s FOR UPDATE",
+                (appointment_id,),
+            )
             appointment = cursor.fetchone()
             if not appointment:
                 raise HTTPException(404, "Appointment not found")
