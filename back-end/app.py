@@ -89,10 +89,6 @@ def health_check():
 def prometheus_metrics():
     return metrics_response()
 
-@app.get("/metrics", include_in_schema=False)
-def prometheus_metrics():
-    return metrics_response()
-
 # Keep the existing router order to preserve current endpoint behavior.
 for _router in (
     auth_admin.router,
