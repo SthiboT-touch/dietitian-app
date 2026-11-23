@@ -33,6 +33,7 @@ from routers import (
 )
 from audit import audit_sensitive_requests
 from diagnostics import request_diagnostics
+from metrics import collect_metrics, metrics_response
 
 # Documentation is opt-in and disabled by default. Enable only in a private
 # local development environment; never expose the setting on a public server.
@@ -51,6 +52,7 @@ app = FastAPI(
 # route errors while preserving existing response JSON for expected failures.
 app.middleware("http")(audit_sensitive_requests)
 app.middleware("http")(request_diagnostics)
+app.middleware("http")(collect_metrics)
 
 
 app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")
@@ -83,6 +85,13 @@ def health_check():
         "database": database_status,
     }
 
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics():
+    return metrics_response()
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics():
+    return metrics_response()
 
 # Keep the existing router order to preserve current endpoint behavior.
 for _router in (
