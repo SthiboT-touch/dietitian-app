@@ -128,11 +128,16 @@ def require_checkin_appointment(
 ):
     """Check-in is available after confirmation, for today's or upcoming visits."""
     if cursor is not None:
+        appointment_date_check = (
+            "date(a.date_time) >= date('now', '+2 hours')"
+            if database.is_sqlite()
+            else "a.date_time >= (NOW() AT TIME ZONE 'Africa/Johannesburg')::date"
+        )
         cursor.execute(
             "SELECT a.appointment_id FROM appointment a "
             "LEFT JOIN dietitian d ON d.dietitian_id=a.dietitian_id "
             "WHERE a.client_id=%s AND a.status IN ('CONFIRMED','SCHEDULED') "
-            "AND a.date_time >= (NOW() AT TIME ZONE 'Africa/Johannesburg')::date "
+            f"AND {appointment_date_check} "
             "AND (%s IS NULL OR COALESCE(a.branch_id,d.branch_id)=%s) "
             "AND (%s IS NULL OR a.appointment_id=%s) "
             "AND (%s IS NULL OR a.dietitian_id=%s) "

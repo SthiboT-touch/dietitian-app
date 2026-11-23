@@ -165,10 +165,8 @@ def _find_password_reset_account(email: str) -> tuple[str, str] | None:
         )
         with database.cursor() as cursor:
             for kind, table, key in account_tables:
-                if kind == "staff":
-                    cursor.execute("SELECT to_regclass('public.staff_account') AS relation")
-                    if not cursor.fetchone()["relation"]:
-                        continue
+                if kind == "staff" and not database.table_exists(cursor, table):
+                    continue
                 cursor.execute(
                     f"SELECT {key} AS id FROM {table} WHERE LOWER(email) = LOWER(%s) LIMIT 1",
                     (email,),
@@ -1533,20 +1531,15 @@ def get_admin_dashboard(identity=Depends(require_admin_or_branch_manager)):
                 # Existing deployments can have a live database that predates
                 # one of the dashboard's tables. Check first so a missing table
                 # does not abort the whole dashboard request.
-                cursor.execute("SELECT to_regclass(%s) AS table_name", (table,))
-                if cursor.fetchone()["table_name"] is None:
+                if not database.table_exists(cursor, table):
                     counts[label] = 0
                     continue
                 cursor.execute(f"SELECT COUNT(*) AS total FROM {table}")
                 counts[label] = cursor.fetchone()["total"]
 
-            cursor.execute(
-                "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
-                "WHERE table_schema = current_schema() AND table_name = %s "
-                "AND column_name = %s) AS has_status",
-                ("dietitian", "status"),
+            has_dietitian_status = database.column_exists(
+                cursor, "dietitian", "status"
             )
-            has_dietitian_status = cursor.fetchone()["has_status"]
             if counts["dietitians"] and has_dietitian_status:
                 cursor.execute(
                     "SELECT COUNT(*) AS total FROM dietitian WHERE status = 'PENDING'"
@@ -1558,8 +1551,7 @@ def get_admin_dashboard(identity=Depends(require_admin_or_branch_manager)):
             # ``audit_events`` is a convenience counter; older schemas can
             # lack the approval log even though the core dashboard is valid.
             counts["audit_events"] = 0
-            cursor.execute("SELECT to_regclass(%s) AS table_name", ("approval_log",))
-            if cursor.fetchone()["table_name"] is not None:
+            if database.table_exists(cursor, "approval_log"):
                 cursor.execute("SELECT COUNT(*) AS total FROM approval_log")
                 counts["audit_events"] = cursor.fetchone()["total"]
         return counts

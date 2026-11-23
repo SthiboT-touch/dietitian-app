@@ -26,7 +26,9 @@ def quote_identifier(value):
 
 
 def sqlite_value(value):
-    if isinstance(value, (datetime, date)):
+    if isinstance(value, datetime):
+        return value.isoformat(sep=" ")
+    if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, (uuid.UUID, Decimal)):
         return str(value)
@@ -35,7 +37,6 @@ def sqlite_value(value):
     if isinstance(value, (dict, list)):
         return json.dumps(value, separators=(",", ":"))
     return value
-
 
 def copy_table(source_cursor, destination, table_name):
     quoted_table = quote_identifier(table_name)
