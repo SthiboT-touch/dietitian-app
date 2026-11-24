@@ -17,11 +17,47 @@ services:
       - --storage.tsdb.retention.size=2GB
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
     networks:
       - monitoring
       - app
     mem_limit: 512m
+    logging: *default-logging
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:v1.11.1
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    networks:
+      - monitoring
+    mem_limit: 128m
+    logging: *default-logging
+
+  cadvisor:
+    image: ${CADVISOR_IMAGE:-ghcr.io/google/cadvisor:v0.55.1}
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=30s
+      - --store_container_labels=false
+      - --disable_metrics=memory_numa,advtcp,cpuset,referenced_memory,cpu_topology,tcp,udp,percpu,process,hugetlb,sched
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - monitoring
+    mem_limit: 256m
     logging: *default-logging
 
   loki:
