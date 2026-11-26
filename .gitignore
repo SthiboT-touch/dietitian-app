@@ -30,3 +30,7 @@ data/
 qa/.deps/
 
 qa/artifacts/
+
+# monitoring secrets (live only on the server)
+monitoring/alertmanager.yml
+monitoring/secrets/
