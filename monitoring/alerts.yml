@@ -1,0 +1,93 @@
+groups:
+  - name: nutricare-host
+    rules:
+      - alert: DiskSpaceLow
+        expr: node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} < 0.20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Less than 20% disk space left on the server"
+
+      - alert: DiskSpaceCritical
+        expr: node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} < 0.10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Less than 10% disk space left on the server"
+
+      - alert: MemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Less than 10% of server memory is available"
+
+      - alert: CpuHigh
+        expr: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) > 0.90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Server CPU has been above 90% for 15 minutes"
+
+      - alert: NodeExporterDown
+        expr: up{job="node"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host metrics are not being collected"
+
+      - alert: CadvisorDown
+        expr: up{job="cadvisor"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container metrics are not being collected"
+
+  - name: nutricare-containers
+    rules:
+      - alert: ApiContainerMissing
+        expr: absent(container_last_seen{name="dietitian-api"})
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The API container is not running"
+
+      - alert: FrontendContainerMissing
+        expr: absent(container_last_seen{name="dietitian-frontend"})
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The web front-end container is not running"
+
+      - alert: OllamaContainerMissing
+        expr: absent(container_last_seen{name="dietitian-ollama"})
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The AI (Ollama) container is not running"
+
+  - name: nutricare-app
+    rules:
+      - alert: ApiDown
+        expr: up{job="nutricare-api"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus cannot reach the API"
+
+      - alert: ApiServerErrors
+        expr: sum(increase(nutricare_http_requests_total{status=~"5.."}[10m])) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 5 server errors in the last 10 minutes"
